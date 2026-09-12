@@ -190,6 +190,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .row-3 input { text-align:center; padding:7px 6px; border:1px solid var(--line); border-radius:6px; font-size:14px; background:#fff; color:var(--ink); }
   .date-slot span { display:block; font-size:10px; color:var(--ink-faint); text-align:center; margin-top:2px; }
   .btn-small { width:auto; margin:0; padding:8px 16px; font-size:13.5px; }
+  /* Used on the viewer's Edit/Delete/Close row — a plain <button> already
+     picks up a passable boxed look for free from the browser's own default
+     button chrome, but the "Edit" link added alongside them needs its own
+     real rule to match rather than rendering as bare text. */
+  .btn-ghost { font: inherit; font-size:13.5px; padding:7px 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink-soft); cursor:pointer; }
+  .btn-ghost:hover { border-color:var(--ink-faint); }
 
   h1, h2, h3, .display, .card-title, .viewer-title-view, .segmented button, .zoom-pill, .btn-primary, .rail-heading h2 {
     font-family: "Fraunces", Georgia, serif;
@@ -446,6 +452,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         </div>
       </div>
       <div class="viewer-actions">
+        <a href="#" id="viewerEditLink" class="btn-ghost" style="text-decoration:none;display:inline-block;" hidden>Edit</a>
         <form method="post" id="viewerDeleteForm" onsubmit="return confirm('Delete this entry?');" style="margin:0;" hidden>
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="delete_entry">
@@ -1309,6 +1316,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerThoughtView = document.getElementById("viewerThoughtView");
     var viewerDeleteForm = document.getElementById("viewerDeleteForm");
     var viewerDeleteEntryId = document.getElementById("viewerDeleteEntryId");
+    var viewerEditLink = document.getElementById("viewerEditLink");
 
     function viewerMediaViewHtml(mediaList) {
       var list = mediaList || [];
@@ -1339,8 +1347,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       if (IS_OWNER) {
         viewerDeleteForm.hidden = false;
         viewerDeleteEntryId.value = e.id;
+        viewerEditLink.hidden = false;
+        viewerEditLink.href = "/edit_entry.php?entry_id=" + encodeURIComponent(e.id);
       } else {
         viewerDeleteForm.hidden = true;
+        viewerEditLink.hidden = true;
       }
       viewerScrim.classList.add("open");
     }
