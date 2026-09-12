@@ -180,6 +180,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'They are already recorded as partners.';
             }
         }
+    } elseif ($action === 'add_relationship') {
+        // Connects this person to someone ELSE already in the tree with a
+        // direct parent/child edge — for a case like Paris being recorded
+        // as only one parent's child when the other parent (already in
+        // the tree, e.g. that parent's own spouse) was never added as a
+        // second parent at the time. Deliberately just the direct
+        // parent/child edge, not the full grandparent/sibling/cousin/etc.
+        // vocabulary — that richer picker already exists via "Attach as a
+        // relative of someone else" below, which resolves through
+        // add_relative.php; this is the quick, common case handled right
+        // here without leaving the page.
+        $otherId = filter_var($_POST['other_person_id'] ?? '', FILTER_VALIDATE_INT);
+        $direction = (string) ($_POST['direction'] ?? '');
+        $kind = (string) ($_POST['relation_kind'] ?? 'genetic');
+        if (!in_array($kind, ['genetic', 'step', 'adoptive'], true)) {
+            $kind = 'genetic';
+        }
+        if ($otherId === false || (int) $otherId === $personId || !person_in_group($pdo, (int) $otherId, $myGroup)) {
+            $errors[] = 'Choose someone else in your family tree to connect them to.';
+        } elseif (!in_array($direction, ['parent', 'child'], true)) {
+            $errors[] = 'Choose whether they are a parent or a child.';
+        } else {
+            $parentId = $direction === 'parent' ? (int) $otherId : $personId;
+            $childId  = $direction === 'parent' ? $personId : (int) $otherId;
+            // relationships has a unique constraint on (parent_id, child_id)
+            // — checked directly first so a duplicate reads as a clear
+            // message rather than a database error.
+            $dupStmt = $pdo->prepare('SELECT 1 FROM relationships WHERE parent_id = :p AND child_id = :c');
+            $dupStmt->execute(['p' => $parentId, 'c' => $childId]);
+            if ($dupStmt->fetchColumn()) {
+                $errors[] = 'That relationship is already recorded.';
+            } else {
+                $pdo->prepare(
+                    "INSERT INTO relationships (parent_id, child_id, relation_kind, status, created_by_user_id)
+                     VALUES (:p, :c, :kind, 'confirmed', :uid)"
+                )->execute(['p' => $parentId, 'c' => $childId, 'kind' => $kind, 'uid' => $myUserId]);
+                $_SESSION['flash_edit_notice'] = 'Relationship added.';
+                header('Location: /edit_person.php?person_id=' . $personId);
+                exit;
+            }
+        }
     } elseif ($action === 'delete_person') {
         // A stricter gate than $canEdit: $canEdit is also true for your own
         // claimed record, but deleting yourself would orphan your own user
@@ -291,6 +332,22 @@ if ($person !== null) {
         $pid = (int) $p['id'];
         if ($pid !== $personId && !in_array($pid, $existingPartnerIds, true)) {
             $partnerCandidates[] = $p;
+        }
+    }
+}
+
+// Candidates for the "add a relationship" picker: anyone else in the family
+// group who isn't already this person's parent or child.
+$existingRelatedIds = [];
+foreach ($rels as $r) {
+    $existingRelatedIds[] = (int) $r['parent_id'] === $personId ? (int) $r['child_id'] : (int) $r['parent_id'];
+}
+$relationshipCandidates = [];
+if ($person !== null) {
+    foreach ($graph['persons'] as $p) {
+        $pid = (int) $p['id'];
+        if ($pid !== $personId && !in_array($pid, $existingRelatedIds, true)) {
+            $relationshipCandidates[] = $p;
         }
     }
 }
@@ -539,6 +596,39 @@ if ($postedProfile) {
           </div>
         <?php endif; ?>
       <?php endforeach; ?>
+
+      <?php if ($canEdit && $relationshipCandidates): ?>
+        <form method="post" class="add-partner-row">
+          <?= csrf_field() ?>
+          <input type="hidden" name="person_id" value="<?= $personId ?>">
+          <input type="hidden" name="action" value="add_relationship">
+          <div>
+            <label for="rel_other_person_id">Add a relationship</label>
+            <select id="rel_other_person_id" name="other_person_id">
+              <?php foreach ($relationshipCandidates as $c): ?>
+                <option value="<?= (int) $c['id'] ?>"><?= htmlspecialchars(person_display_name($c), ENT_QUOTES) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div>
+            <label for="direction">Who they are</label>
+            <select id="direction" name="direction">
+              <option value="parent">Parent of <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></option>
+              <option value="child">Child of <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></option>
+            </select>
+          </div>
+          <div>
+            <label for="rel_kind">As</label>
+            <select id="rel_kind" name="relation_kind">
+              <option value="genetic">Genetic</option>
+              <option value="step">Step</option>
+              <option value="adoptive">Adoptive</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-small">Add</button>
+        </form>
+        <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Use this to connect an existing person as a direct parent or child — for example, adding your spouse as a second parent of someone currently only linked to you. For anything further out (grandparent, sibling, cousin, etc.), use "Attach as a relative of someone else" below instead.</p>
+      <?php endif; ?>
 
       <h3 style="margin:24px 0 4px;">Partners</h3>
       <?php if (!$parts): ?>
