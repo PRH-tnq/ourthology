@@ -24,6 +24,18 @@ $occurredMonth = '';
 $occurredYear = '';
 $visibility = 'private';
 
+// Coming from the timeline diagram (clicking a date on the arc) pre-fills
+// the date slots, so "click the timeline to add a memory" still works even
+// though the actual composer is this separate page rather than an inline one.
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['date'])) {
+    $prefill = DateTime::createFromFormat('Y-m-d', (string) $_GET['date']);
+    if ($prefill !== false) {
+        $occurredDay = $prefill->format('d');
+        $occurredMonth = $prefill->format('m');
+        $occurredYear = $prefill->format('Y');
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
 
