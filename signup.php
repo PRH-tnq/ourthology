@@ -6,7 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 
 // Already logged in? No need to sign up again.
 if (current_user_id() !== null) {
-    header('Location: /dashboard.php');
+    header('Location: /timeline.php');
     exit;
 }
 
@@ -81,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             login_user($userId);
-            header('Location: /dashboard.php');
+            header('Location: /timeline.php');
             exit;
         } catch (PDOException $e) {
             $pdo->rollBack();

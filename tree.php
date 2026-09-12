@@ -66,9 +66,14 @@ $treeNodeH = TREE_NODE_H;
   }
   body { align-items: flex-start; }
   .wide { max-width: 900px; }
-  .nav { display:flex; gap:10px; flex-wrap:wrap; margin: 18px 0 4px; }
+  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
+  .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
   .nav a.badge { background: var(--error-bg); border-color: var(--error-bg); color: var(--accent); font-weight:600; }
+  .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); }
+  .whoami strong { color:var(--ink-soft); font-weight:600; }
+  .whoami form { display:inline; }
+  .whoami .linklet { font-size:12.5px; }
   ul.plain { list-style:none; padding:0; margin:8px 0; }
   ul.plain li { padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
   .linklet { font-size:12px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; }
@@ -81,7 +86,7 @@ $treeNodeH = TREE_NODE_H;
   .tree-wrap { background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; }
   .tree-wrap svg { display:block; margin:0 auto; }
   .tree-link { fill:none; stroke:var(--ink-soft); stroke-width:1.4; }
-  .tree-bond { fill:none; stroke:var(--accent); stroke-width:2.4; }
+  .tree-bond line, .tree-bond path { fill:none; stroke:var(--accent); stroke-width:1.8; }
   .tree-row-label { fill:var(--ink-faint); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
   .tree-node { cursor:pointer; }
   .tree-node .tn-hit { fill:transparent; stroke:none; }
@@ -101,10 +106,17 @@ $treeNodeH = TREE_NODE_H;
     <p class="subtitle">an anthology of us.</p>
 
     <div class="nav">
-      <a href="/dashboard.php">Dashboard</a>
-      <a href="/add_relative.php">+ Add a relative</a>
-      <a href="/link_existing.php">Link to existing account</a>
-      <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
+      <div class="nav-links">
+        <a href="/timeline.php">My timeline</a>
+        <a href="/dashboard.php">Dashboard</a>
+        <a href="/add_relative.php">+ Add a relative</a>
+        <a href="/link_existing.php">Link to existing account</a>
+        <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
+      </div>
+      <div class="whoami">
+        Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
+        <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+      </div>
     </div>
 
     <?php if ($flashLink): ?>
@@ -139,15 +151,32 @@ $treeNodeH = TREE_NODE_H;
                   $childTopYs[] = $layout['positions'][$cid]['y'] - $treeNodeH / 2;
               }
               if (!$parentXs || !$childXs) continue;
-              $unionX = array_sum($parentXs) / count($parentXs);
-              $busY = (max($parentBottomYs) + min($childTopYs)) / 2;
-              $allXs = array_merge($parentXs, $childXs, [$unionX]);
+              // Every parent gets an equal-length stem straight down from
+              // their own node — so two parents always read as a mirrored,
+              // symmetric pair even with no partnership/bond line recorded
+              // between them — meeting at a short horizontal joiner (skipped
+              // for a single parent, who has nothing to join to). From
+              // there, ONE trunk continues down from the joiner's exact
+              // midpoint (or straight from the lone parent) to the
+              // children's bar, so that half of the connector is always
+              // centered too, regardless of how the children end up spread
+              // out below.
+              $trunkX = array_sum($parentXs) / count($parentXs);
+              $parentBottomY = max($parentBottomYs);
+              $busY = ($parentBottomY + min($childTopYs)) / 2;
+              $joinY = $parentBottomY + 20;
+              $barXs = array_merge($childXs, [$trunkX]);
             ?>
-            <?php foreach ($unit['parents'] as $i => $pid): ?>
-              <?php if (!isset($layout['positions'][$pid])) continue; ?>
-              <line class="tree-link" x1="<?= $layout['positions'][$pid]['x'] ?>" y1="<?= $parentBottomYs[$i] ?>" x2="<?= $layout['positions'][$pid]['x'] ?>" y2="<?= $busY ?>"></line>
+            <?php foreach ($parentXs as $px): ?>
+              <line class="tree-link" x1="<?= $px ?>" y1="<?= $parentBottomY ?>" x2="<?= $px ?>" y2="<?= $joinY ?>"></line>
             <?php endforeach; ?>
-            <line class="tree-link" x1="<?= min($allXs) ?>" y1="<?= $busY ?>" x2="<?= max($allXs) ?>" y2="<?= $busY ?>"></line>
+            <?php if (min($parentXs) !== max($parentXs)): ?>
+              <line class="tree-link" x1="<?= min($parentXs) ?>" y1="<?= $joinY ?>" x2="<?= max($parentXs) ?>" y2="<?= $joinY ?>"></line>
+            <?php endif; ?>
+            <line class="tree-link" x1="<?= $trunkX ?>" y1="<?= $joinY ?>" x2="<?= $trunkX ?>" y2="<?= $busY ?>"></line>
+            <?php if (min($barXs) !== max($barXs)): ?>
+              <line class="tree-link" x1="<?= min($barXs) ?>" y1="<?= $busY ?>" x2="<?= max($barXs) ?>" y2="<?= $busY ?>"></line>
+            <?php endif; ?>
             <?php foreach ($unit['children'] as $i => $cid): ?>
               <?php if (!isset($layout['positions'][$cid])) continue; ?>
               <line class="tree-link" x1="<?= $layout['positions'][$cid]['x'] ?>" y1="<?= $busY ?>" x2="<?= $layout['positions'][$cid]['x'] ?>" y2="<?= $childTopYs[$i] ?>"></line>
@@ -162,14 +191,51 @@ $treeNodeH = TREE_NODE_H;
               if ($layout['positions'][$aId]['tier'] !== $layout['positions'][$bId]['tier']) continue;
               $left = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$aId] : $layout['positions'][$bId];
               $right = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$bId] : $layout['positions'][$aId];
+              $tier = $left['tier'];
+              // Almost always the two partners are seated right next to each
+              // other (the layout keeps a couple adjacent on purpose), but a
+              // person recorded with more than one partner — remarried,
+              // widowed and repartnered, etc. — can have a second bond whose
+              // other end sits elsewhere in the row. A straight line between
+              // them would then cut across whichever nodes sit in between,
+              // running straight through their names — so when that happens
+              // the bond instead lifts above the row and travels over the
+              // top, clear of every node's text.
+              $hasIntervening = false;
+              foreach ($layout['order'][$tier] ?? [] as $otherId) {
+                  if ($otherId === $aId || $otherId === $bId) continue;
+                  $ox = $layout['positions'][$otherId]['x'];
+                  if ($ox > $left['x'] && $ox < $right['x']) {
+                      $hasIntervening = true;
+                      break;
+                  }
+              }
             ?>
             <?php
               // A small fixed inset (rather than half the node's hit-width)
               // so the bond reads as a clear connecting stroke regardless of
               // how short or long each name is.
               $bondInset = 18;
+              $bx1 = $left['x'] + $bondInset;
+              $by1 = $left['y'];
+              $bx2 = $right['x'] - $bondInset;
+              $by2 = $right['y'];
+              // Two parallel strokes offset a couple of pixels either side of
+              // the bond's own line — the standard genealogy-chart "married"
+              // symbol — matching the prototype's treeSpouseBond() exactly,
+              // rather than a single thick line.
+              $bondDy = 3.2;
+              $liftY = $left['y'] - $treeNodeH / 2 - 14;
             ?>
-            <line class="tree-bond" x1="<?= $left['x'] + $bondInset ?>" y1="<?= $left['y'] ?>" x2="<?= $right['x'] - $bondInset ?>" y2="<?= $right['y'] ?>"></line>
+            <g class="tree-bond">
+              <?php if ($hasIntervening): ?>
+                <path d="M<?= $bx1 ?>,<?= $by1 - $bondDy ?> V<?= $liftY - $bondDy ?> H<?= $bx2 ?> V<?= $by2 - $bondDy ?>"></path>
+                <path d="M<?= $bx1 ?>,<?= $by1 + $bondDy ?> V<?= $liftY + $bondDy ?> H<?= $bx2 ?> V<?= $by2 + $bondDy ?>"></path>
+              <?php else: ?>
+                <line x1="<?= $bx1 ?>" y1="<?= $by1 - $bondDy ?>" x2="<?= $bx2 ?>" y2="<?= $by2 - $bondDy ?>"></line>
+                <line x1="<?= $bx1 ?>" y1="<?= $by1 + $bondDy ?>" x2="<?= $bx2 ?>" y2="<?= $by2 + $bondDy ?>"></line>
+              <?php endif; ?>
+            </g>
           <?php endforeach; ?>
 
           <?php foreach ($layout['positions'] as $pid => $pos): ?>
@@ -186,7 +252,7 @@ $treeNodeH = TREE_NODE_H;
                 <?php if ($isYou): ?>
                   <text class="tn-name" y="6">You</text>
                 <?php else: ?>
-                  <text class="tn-name" y="-3"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 18, '…'), ENT_QUOTES) ?></text>
+                  <text class="tn-name" y="-3"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 15, '…'), ENT_QUOTES) ?></text>
                   <text class="tn-tag" y="13"><?= $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed' ?></text>
                 <?php endif; ?>
               </g>

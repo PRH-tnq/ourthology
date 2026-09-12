@@ -83,7 +83,7 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             login_user($newUserId);
-            header('Location: /dashboard.php');
+            header('Location: /timeline.php');
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();

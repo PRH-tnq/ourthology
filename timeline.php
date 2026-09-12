@@ -177,8 +177,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   }
   body { align-items: flex-start; }
   .wide { max-width: 1220px; }
-  .nav { display:flex; gap:10px; flex-wrap:wrap; margin: 18px 0 4px; }
+  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
+  .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
+  .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); }
+  .whoami strong { color:var(--ink-soft); font-weight:600; }
+  .whoami form { display:inline; }
+  .whoami .linklet { font-size:12.5px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; font-family:inherit; }
   .born-prompt { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:var(--paper-2); border:1px solid var(--line); border-radius:14px; padding:10px 14px; margin:14px 0 4px; font-size:13.5px; color:var(--ink-soft); }
   .born-prompt form { display:flex; align-items:flex-end; gap:8px; }
   .row-3 { display:grid; grid-template-columns: 4em 4em 5.5em; gap:8px; }
@@ -325,9 +330,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <p class="subtitle">an anthology of us.</p>
 
     <div class="nav">
-      <a href="/dashboard.php">Dashboard</a>
-      <a href="/tree.php">My tree</a>
-      <?php if ($isOwner): ?><a href="/add_entry.php">+ Add a memory</a><?php endif; ?>
+      <div class="nav-links">
+        <a href="/dashboard.php">Dashboard</a>
+        <a href="/tree.php">My tree</a>
+        <?php if ($isOwner): ?><a href="/add_entry.php">+ Add a memory</a><?php endif; ?>
+      </div>
+      <div class="whoami">
+        Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
+        <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+      </div>
     </div>
 
     <h3 style="margin-bottom:2px;">

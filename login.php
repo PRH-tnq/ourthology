@@ -5,7 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 
 if (current_user_id() !== null) {
-    header('Location: /dashboard.php');
+    header('Location: /timeline.php');
     exit;
 }
 
@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             login_user((int) $user['id']);
             ourthology_pdo()->prepare('UPDATE users SET last_login_at = NOW() WHERE id = :id')
                 ->execute(['id' => $user['id']]);
-            header('Location: /dashboard.php');
+            header('Location: /timeline.php');
             exit;
         }
 

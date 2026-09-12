@@ -17,12 +17,157 @@ $myGroup = (int) person_row($pdo, (int) $me['person_id'])['family_group_id'];
 
 $graph = fetch_family_graph($pdo, $myGroup);
 $anchors = $graph['persons'];
+$maps = graph_build_maps($graph);
+$personsById = [];
+foreach ($graph['persons'] as $p) {
+    $personsById[(int) $p['id']] = $p;
+}
+
+/**
+ * The full relationship vocabulary from the original prototype
+ * (prototypes/timeline.html's RELATIONSHIPS list), grouped the same way.
+ * Unlike the prototype — which just filed each one under a fixed
+ * generation tier with a label, with no real graph behind it — every one
+ * of these has to resolve to actual parent/child/partner edges in this
+ * app's shared multi-user graph. Most of them (grandparent, aunt/uncle,
+ * sibling, cousin, niece/nephew, grandchild, the in-laws) only make sense
+ * "through" some other person already in the tree, so those show a
+ * "Connected through" picker (see $VIA_SOURCE below); "parent", "child",
+ * "spouse" and "other" don't need one.
+ */
+$RELATIONSHIP_OPTIONS = [
+    'grandparent'    => ['label' => 'Grandparent',           'group' => 'Older generation'],
+    'parent'         => ['label' => 'Parent',                'group' => 'Older generation'],
+    'parent-in-law'  => ['label' => 'Parent-in-law',         'group' => 'Older generation'],
+    'step-parent'    => ['label' => 'Step-parent',           'group' => 'Older generation'],
+    'aunt-uncle'     => ['label' => 'Aunt / Uncle',          'group' => 'Older generation'],
+    'sibling'        => ['label' => 'Sibling',               'group' => 'Same generation'],
+    'spouse'         => ['label' => 'Spouse / Partner',      'group' => 'Same generation'],
+    'sibling-in-law' => ['label' => 'Sibling-in-law',        'group' => 'Same generation'],
+    'step-sibling'   => ['label' => 'Step-sibling',          'group' => 'Same generation'],
+    'cousin'         => ['label' => 'Cousin',                'group' => 'Same generation'],
+    'child'          => ['label' => 'Child',                 'group' => 'Younger generation'],
+    'child-in-law'   => ['label' => 'Child-in-law',          'group' => 'Younger generation'],
+    'step-child'     => ['label' => 'Step-child',            'group' => 'Younger generation'],
+    'niece-nephew'   => ['label' => 'Niece / Nephew',        'group' => 'Younger generation'],
+    'grandchild'     => ['label' => 'Grandchild',            'group' => 'Younger generation'],
+    'other'          => ['label' => 'Other / not connected', 'group' => 'Other'],
+];
+
+/**
+ * Which existing-person set the "connected through" picker offers for each
+ * relationship that needs one, and what to say when that set is empty.
+ * 'source' names a lookup this file and the page's own JS both know how to
+ * compute from the same parent/child/partner maps ($maps here, mirrored as
+ * plain JSON for the client) — so the dropdown the user sees and the
+ * server-side check that runs on submit are always in agreement.
+ */
+$VIA_NEEDED = [
+    'grandparent'    => ['source' => 'parentsOf',     'prompt' => 'Whose parent are they?',                 'empty' => 'Add one of their parents first, then add a grandparent through them.'],
+    'parent-in-law'  => ['source' => 'partnersOf',    'prompt' => 'They are the parent of…',                 'empty' => 'Add their spouse/partner first, then add a parent-in-law through them.'],
+    'aunt-uncle'     => ['source' => 'parentsOf',     'prompt' => 'Sibling of which of their parents?',      'empty' => 'Add one of their parents first, then add an aunt or uncle through them.'],
+    'sibling-in-law' => ['source' => 'siblingsOf',    'prompt' => 'Spouse of which sibling?',                'empty' => 'Add a sibling first, then add their spouse as a sibling-in-law.'],
+    'step-sibling'   => ['source' => 'parentsOf',     'prompt' => 'Step-child of which of their parents?',   'empty' => 'Add one of their parents first, then add a step-sibling through them.'],
+    'cousin'         => ['source' => 'auntsUnclesOf', 'prompt' => 'Child of which aunt or uncle?',           'empty' => 'Add an aunt or uncle first, then add their child as a cousin.'],
+    'child-in-law'   => ['source' => 'childrenOf',    'prompt' => 'Spouse of which child?',                  'empty' => 'Add a child first, then add their spouse as a child-in-law.'],
+    'niece-nephew'   => ['source' => 'siblingsOf',    'prompt' => 'Child of which sibling?',                 'empty' => 'Add a sibling first, then add their child as a niece or nephew.'],
+    'grandchild'     => ['source' => 'childrenOf',    'prompt' => 'Child of which child?',                   'empty' => 'Add a child first, then add their child as a grandchild.'],
+];
+
+function candidates_for_source(string $source, int $anchorId, array $maps): array
+{
+    switch ($source) {
+        case 'parentsOf':     return $maps['parentsOf'][$anchorId] ?? [];
+        case 'childrenOf':    return $maps['childrenOf'][$anchorId] ?? [];
+        case 'partnersOf':    return $maps['partnersOf'][$anchorId] ?? [];
+        case 'siblingsOf':    return graph_siblings_of($maps, $anchorId);
+        case 'auntsUnclesOf': return graph_aunts_uncles_of($maps, $anchorId);
+        default:              return [];
+    }
+}
+
+/**
+ * Independently re-derives what edges a submission means, never trusting
+ * the client's dynamically-populated "connected through" list — it's
+ * rebuilt here from the current database state. Returns
+ * ['ok' => true, 'edges' => [...], 'partnerships' => [...]] (each edge/
+ * partnership using the string 'NEW' as a stand-in for the not-yet-inserted
+ * person) or ['ok' => false, 'error' => '...'].
+ */
+function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $directKind, array $maps, array $personsById, array $viaNeeded): array
+{
+    if (isset($viaNeeded[$rel])) {
+        $cfg = $viaNeeded[$rel];
+        $candidates = candidates_for_source($cfg['source'], $anchorId, $maps);
+        if (!$candidates) {
+            return ['ok' => false, 'error' => $cfg['empty']];
+        }
+        if ($viaId === null || !in_array($viaId, $candidates, true)) {
+            return ['ok' => false, 'error' => 'Choose who to connect them through.'];
+        }
+    }
+
+    switch ($rel) {
+        case 'parent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => $directKind]]];
+        case 'step-parent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => 'step']]];
+        case 'child':
+            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => $directKind]]];
+        case 'step-child':
+            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => 'step']]];
+        case 'spouse':
+            return ['ok' => true, 'partnerships' => [['a' => $anchorId, 'b' => 'NEW']]];
+        case 'grandparent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
+        case 'parent-in-law':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
+        case 'aunt-uncle':
+            $grandparents = $maps['parentsOf'][$viaId] ?? [];
+            if (!$grandparents) {
+                $name = isset($personsById[$viaId]) ? person_display_name($personsById[$viaId]) : 'That person';
+                return ['ok' => false, 'error' => $name . ' has no parent on record yet — add one first, then add an aunt or uncle through them.'];
+            }
+            $edges = [];
+            foreach ($grandparents as $g) {
+                $edges[] = ['parent' => $g, 'child' => 'NEW', 'kind' => 'genetic'];
+            }
+            return ['ok' => true, 'edges' => $edges];
+        case 'sibling':
+            $parents = $maps['parentsOf'][$anchorId] ?? [];
+            if (!$parents) {
+                return ['ok' => false, 'error' => 'Add one of their parents first, then add a sibling through them.'];
+            }
+            $edges = [];
+            foreach ($parents as $p) {
+                $edges[] = ['parent' => $p, 'child' => 'NEW', 'kind' => 'genetic'];
+            }
+            return ['ok' => true, 'edges' => $edges];
+        case 'sibling-in-law':
+            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
+        case 'step-sibling':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'step']]];
+        case 'cousin':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'child-in-law':
+            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
+        case 'niece-nephew':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'grandchild':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'other':
+            return ['ok' => true, 'edges' => [], 'partnerships' => []];
+        default:
+            return ['ok' => false, 'error' => 'Choose a valid relationship.'];
+    }
+}
 
 $errors = [];
 $successLink = null;
 $first = $middle = $surname = '';
 $anchorId = (string) $me['person_id'];
-$direction = 'parent'; // new person is the anchor's: parent / child / partner
+$relationship = 'parent';
+$viaId = '';
 $relationKind = 'genetic';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -32,14 +177,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $middle       = trim((string) ($_POST['middle_name'] ?? ''));
     $surname      = trim((string) ($_POST['surname'] ?? ''));
     $anchorId     = (string) ($_POST['anchor_id'] ?? '');
-    $direction    = (string) ($_POST['direction'] ?? '');
+    $relationship = (string) ($_POST['relationship'] ?? '');
+    $viaId        = (string) ($_POST['via_id'] ?? '');
     $relationKind = (string) ($_POST['relation_kind'] ?? 'genetic');
 
     if ($first === '') {
         $errors[] = 'First name is required.';
     }
-    if (!in_array($direction, ['parent', 'child', 'partner'], true)) {
-        $errors[] = 'Choose a relationship.';
+    if (!isset($RELATIONSHIP_OPTIONS[$relationship])) {
+        $errors[] = 'Choose a valid relationship.';
     }
     if (!in_array($relationKind, ['genetic', 'step', 'adoptive'], true)) {
         $relationKind = 'genetic';
@@ -48,8 +194,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($anchorIdInt === false || !person_in_group($pdo, (int) $anchorIdInt, $myGroup)) {
         $errors[] = 'That anchor person is not in your family tree.';
     }
+    $viaIdInt = filter_var($viaId, FILTER_VALIDATE_INT);
+    $viaIdInt = $viaIdInt === false ? null : (int) $viaIdInt;
+    if ($viaIdInt !== null && !person_in_group($pdo, $viaIdInt, $myGroup)) {
+        $errors[] = 'That "connected through" person is not in your family tree.';
+    }
 
+    $plan = null;
     if (!$errors) {
+        $plan = resolve_relationship($relationship, (int) $anchorIdInt, $viaIdInt, $relationKind, $maps, $personsById, $VIA_NEEDED);
+        if (!$plan['ok']) {
+            $errors[] = $plan['error'];
+        }
+    }
+
+    if (!$errors && $plan !== null) {
         try {
             $pdo->beginTransaction();
 
@@ -66,22 +225,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $newPersonId = (int) $pdo->lastInsertId();
 
-            if ($direction === 'partner') {
-                $a = min($newPersonId, (int) $anchorIdInt);
-                $b = max($newPersonId, (int) $anchorIdInt);
-                $pdo->prepare(
-                    "INSERT INTO partnerships (person_a_id, person_b_id, kind, status, created_by_user_id)
-                     VALUES (:a, :b, 'married', 'confirmed', :uid)"
-                )->execute(['a' => $a, 'b' => $b, 'uid' => $me['user_id']]);
-            } else {
-                // "parent": new person is the anchor's parent -> parent_id = new, child_id = anchor
-                // "child":  new person is the anchor's child  -> parent_id = anchor, child_id = new
-                $parentId = $direction === 'parent' ? $newPersonId : (int) $anchorIdInt;
-                $childId  = $direction === 'parent' ? (int) $anchorIdInt : $newPersonId;
+            $resolveNew = function ($v) use ($newPersonId) {
+                return $v === 'NEW' ? $newPersonId : (int) $v;
+            };
+
+            foreach ($plan['edges'] ?? [] as $edge) {
                 $pdo->prepare(
                     "INSERT INTO relationships (parent_id, child_id, relation_kind, status, created_by_user_id)
                      VALUES (:p, :c, :kind, 'confirmed', :uid)"
-                )->execute(['p' => $parentId, 'c' => $childId, 'kind' => $relationKind, 'uid' => $me['user_id']]);
+                )->execute([
+                    'p'    => $resolveNew($edge['parent']),
+                    'c'    => $resolveNew($edge['child']),
+                    'kind' => $edge['kind'],
+                    'uid'  => $me['user_id'],
+                ]);
+            }
+            foreach ($plan['partnerships'] ?? [] as $part) {
+                $a = $resolveNew($part['a']);
+                $b = $resolveNew($part['b']);
+                $lo = min($a, $b);
+                $hi = max($a, $b);
+                $pdo->prepare(
+                    "INSERT INTO partnerships (person_a_id, person_b_id, kind, status, created_by_user_id)
+                     VALUES (:a, :b, 'married', 'confirmed', :uid)"
+                )->execute(['a' => $lo, 'b' => $hi, 'uid' => $me['user_id']]);
             }
 
             $token = create_claim_token($pdo, $newPersonId, (int) $me['user_id']);
@@ -96,6 +263,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+// Plain adjacency maps for the page's own JS, so the "connected through"
+// dropdown can be rebuilt live as the anchor/relationship selections
+// change — using the exact same siblingsOf/auntsUnclesOf definitions as
+// resolve_relationship() above, just computed client-side for instant
+// feedback (the server still re-checks everything on submit).
+$namesJson = [];
+foreach ($personsById as $pid => $p) {
+    $namesJson[$pid] = person_display_name($p) . ($pid === (int) $me['person_id'] ? ' (you)' : '');
+}
+$jsMaps = [
+    'names'      => $namesJson,
+    'parentsOf'  => $maps['parentsOf'],
+    'childrenOf' => $maps['childrenOf'],
+    'partnersOf' => $maps['partnersOf'],
+];
+$viaNeededJson = [];
+foreach ($VIA_NEEDED as $rel => $cfg) {
+    $viaNeededJson[$rel] = ['source' => $cfg['source'], 'prompt' => $cfg['prompt']];
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -104,6 +291,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Add a relative — ourthology.com</title>
 <link rel="stylesheet" href="/styles.css">
+<style>
+  select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
+  .field-group { margin-top:0; }
+  .hint { margin:4px 0 0; font-size:12px; color:var(--ink-faint); }
+</style>
 </head>
 <body>
   <div class="card" style="max-width:460px;">
@@ -127,7 +319,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
     <?php endif; ?>
 
-    <form method="post" novalidate>
+    <form method="post" novalidate id="addRelativeForm">
       <?= csrf_field() ?>
 
       <label for="anchor_id">Connected to</label>
@@ -139,19 +331,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endforeach; ?>
       </select>
 
-      <label for="direction">New person is that person's</label>
-      <select id="direction" name="direction">
-        <option value="parent" <?= $direction === 'parent' ? 'selected' : '' ?>>Parent</option>
-        <option value="child" <?= $direction === 'child' ? 'selected' : '' ?>>Child</option>
-        <option value="partner" <?= $direction === 'partner' ? 'selected' : '' ?>>Partner / spouse</option>
+      <label for="relationship">New person is that person's</label>
+      <select id="relationship" name="relationship">
+        <?php
+          $groups = [];
+          foreach ($RELATIONSHIP_OPTIONS as $val => $opt) {
+              $groups[$opt['group']][] = $val;
+          }
+        ?>
+        <?php foreach ($groups as $groupLabel => $vals): ?>
+          <optgroup label="<?= htmlspecialchars($groupLabel, ENT_QUOTES) ?>">
+            <?php foreach ($vals as $val): ?>
+              <option value="<?= htmlspecialchars($val, ENT_QUOTES) ?>" <?= $relationship === $val ? 'selected' : '' ?>><?= htmlspecialchars($RELATIONSHIP_OPTIONS[$val]['label'], ENT_QUOTES) ?></option>
+            <?php endforeach; ?>
+          </optgroup>
+        <?php endforeach; ?>
       </select>
 
-      <label for="relation_kind">Relationship type (ignored for partner)</label>
-      <select id="relation_kind" name="relation_kind">
-        <option value="genetic" <?= $relationKind === 'genetic' ? 'selected' : '' ?>>Genetic</option>
-        <option value="step" <?= $relationKind === 'step' ? 'selected' : '' ?>>Step</option>
-        <option value="adoptive" <?= $relationKind === 'adoptive' ? 'selected' : '' ?>>Adoptive</option>
-      </select>
+      <div class="field-group" id="viaGroup" hidden>
+        <label for="via_id" id="viaLabel">Connected through</label>
+        <select id="via_id" name="via_id"></select>
+        <p class="hint">Only people already in your tree can be picked here — if no one shows up, add that relative first.</p>
+      </div>
+
+      <div class="field-group" id="kindGroup">
+        <label for="relation_kind">Relationship type</label>
+        <select id="relation_kind" name="relation_kind">
+          <option value="genetic" <?= $relationKind === 'genetic' ? 'selected' : '' ?>>Genetic</option>
+          <option value="step" <?= $relationKind === 'step' ? 'selected' : '' ?>>Step</option>
+          <option value="adoptive" <?= $relationKind === 'adoptive' ? 'selected' : '' ?>>Adoptive</option>
+        </select>
+      </div>
 
       <div class="row-2">
         <div>
@@ -171,5 +381,91 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
     <?php endif; ?>
   </div>
+
+<script id="graphMapsData" type="application/json"><?= str_replace('</', '<\/', (string) json_encode($jsMaps, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?></script>
+<script id="viaNeededData" type="application/json"><?= str_replace('</', '<\/', (string) json_encode($viaNeededJson, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?></script>
+<script>
+(function () {
+  "use strict";
+  var MAPS = JSON.parse(document.getElementById('graphMapsData').textContent);
+  var VIA_NEEDED = JSON.parse(document.getElementById('viaNeededData').textContent);
+
+  function siblingsOf(id) {
+    var out = {};
+    (MAPS.parentsOf[id] || []).forEach(function (p) {
+      (MAPS.childrenOf[p] || []).forEach(function (c) {
+        if (String(c) !== String(id)) out[c] = true;
+      });
+    });
+    return Object.keys(out);
+  }
+  function auntsUnclesOf(id) {
+    var out = {};
+    (MAPS.parentsOf[id] || []).forEach(function (p) {
+      siblingsOf(p).forEach(function (s) { out[s] = true; });
+    });
+    return Object.keys(out);
+  }
+  function candidatesFor(source, anchorId) {
+    if (source === 'siblingsOf') return siblingsOf(anchorId);
+    if (source === 'auntsUnclesOf') return auntsUnclesOf(anchorId);
+    return (MAPS[source] && MAPS[source][anchorId]) || [];
+  }
+
+  var relationshipSel = document.getElementById('relationship');
+  var anchorSel = document.getElementById('anchor_id');
+  var viaGroup = document.getElementById('viaGroup');
+  var viaLabel = document.getElementById('viaLabel');
+  var viaSel = document.getElementById('via_id');
+  var kindGroup = document.getElementById('kindGroup');
+  var saveBtn = document.querySelector('#addRelativeForm button[type="submit"]');
+  // Re-selected after a validation error redisplays the form, so a mistake
+  // elsewhere (e.g. the name field) doesn't also lose this choice.
+  var previousViaId = <?= json_encode($viaId !== '' ? $viaId : null) ?>;
+
+  function refresh() {
+    var rel = relationshipSel.value;
+    var anchorId = anchorSel.value;
+    var cfg = VIA_NEEDED[rel];
+    var kindApplies = (rel === 'parent' || rel === 'child');
+    kindGroup.hidden = !kindApplies;
+
+    if (!cfg) {
+      viaGroup.hidden = true;
+      viaSel.innerHTML = '';
+      saveBtn.disabled = false;
+      return;
+    }
+
+    viaGroup.hidden = false;
+    viaLabel.textContent = cfg.prompt;
+    var ids = candidatesFor(cfg.source, anchorId);
+    viaSel.innerHTML = '';
+    if (!ids.length) {
+      var opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'None recorded yet — add that relative first';
+      viaSel.appendChild(opt);
+      saveBtn.disabled = true;
+      return;
+    }
+    ids.forEach(function (id) {
+      var opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = MAPS.names[id] || ('#' + id);
+      viaSel.appendChild(opt);
+    });
+    if (previousViaId !== null && ids.indexOf(String(previousViaId)) !== -1) {
+      viaSel.value = previousViaId;
+    }
+    saveBtn.disabled = false;
+  }
+
+  relationshipSel.addEventListener('change', refresh);
+  anchorSel.addEventListener('change', refresh);
+  refresh();
+  previousViaId = null; // only restore once, right after page load
+})();
+</script>
 </body>
 </html>

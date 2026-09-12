@@ -26,11 +26,15 @@ const TREE_NODE_W = 118;
 const TREE_NODE_H = 62;
 const TREE_ME_W = 96;
 const TREE_ME_H = 50;
-const TREE_NODE_GAP = 150;   // horizontal distance between ordinary adjacent people
-const TREE_SPOUSE_GAP = 120; // tighter — keeps a partner visually paired
+// Widened from the first pass (150/120) after screenshots showed a pair of
+// long (truncated-at-18-char) names sitting close enough to visually touch,
+// especially for the tighter spouse gap — these give real names room to
+// breathe on both sides without losing the "spouses read as a pair" effect.
+const TREE_NODE_GAP = 172;   // horizontal distance between ordinary adjacent people
+const TREE_SPOUSE_GAP = 142; // tighter — keeps a partner visually paired
 const TREE_TIER_GAP = 148;   // vertical distance between generations
 const TREE_TOP_PAD = 60;
-const TREE_ROW_LABEL_W = 90; // left margin reserved for "PARENTS" / "GRANDPARENTS" etc.
+const TREE_ROW_LABEL_W = 150; // left margin reserved for "PARENTS" / "3× GREAT-GRANDPARENTS" etc.
 // Half the widest node's width plus a little breathing room, so the
 // outermost node in the widest row doesn't get clipped flush against the
 // canvas edge.

@@ -166,6 +166,58 @@ function human_time_ago(string $datetime): string
     return 'just now';
 }
 
+/**
+ * Plain parent/child/partner adjacency maps built from a fetch_family_graph()
+ * result — the shared starting point for anything that needs to reason about
+ * "who is whose sibling/aunt/etc." (currently just add_relative.php's
+ * expanded relationship picker, mirrored client-side in its own JS so the
+ * dynamic "connected through" dropdown and the server-side validation agree
+ * on exactly the same definitions).
+ */
+function graph_build_maps(array $graph): array
+{
+    $childrenOf = [];
+    $parentsOf = [];
+    foreach ($graph['relationships'] as $r) {
+        $childrenOf[(int) $r['parent_id']][] = (int) $r['child_id'];
+        $parentsOf[(int) $r['child_id']][] = (int) $r['parent_id'];
+    }
+    $partnersOf = [];
+    foreach ($graph['partnerships'] as $p) {
+        $a = (int) $p['person_a_id'];
+        $b = (int) $p['person_b_id'];
+        $partnersOf[$a][] = $b;
+        $partnersOf[$b][] = $a;
+    }
+    return ['childrenOf' => $childrenOf, 'parentsOf' => $parentsOf, 'partnersOf' => $partnersOf];
+}
+
+/** Other children of any of $personId's own parents — full or half siblings alike. */
+function graph_siblings_of(array $maps, int $personId): array
+{
+    $out = [];
+    foreach ($maps['parentsOf'][$personId] ?? [] as $p) {
+        foreach ($maps['childrenOf'][$p] ?? [] as $c) {
+            if ($c !== $personId) {
+                $out[$c] = true;
+            }
+        }
+    }
+    return array_keys($out);
+}
+
+/** Siblings of any of $personId's own parents — i.e. $personId's aunts/uncles. */
+function graph_aunts_uncles_of(array $maps, int $personId): array
+{
+    $out = [];
+    foreach ($maps['parentsOf'][$personId] ?? [] as $p) {
+        foreach (graph_siblings_of($maps, $p) as $s) {
+            $out[$s] = true;
+        }
+    }
+    return array_keys($out);
+}
+
 function create_claim_token(PDO $pdo, int $personId, int $createdByUserId): string
 {
     $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
