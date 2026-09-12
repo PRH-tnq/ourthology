@@ -94,12 +94,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Link to an existing person — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css?v=20">
 </head>
 <body>
   <div class="card" style="max-width:440px;">
-    <div class="brand"><svg class="brand-mark" width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#9A2A2A"/><path d="M16 22V14M16 14L11 9M16 14L21 9" stroke="#FBF8F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="16" cy="23" r="1.7" fill="#FBF8F1"/><circle cx="11" cy="8" r="1.7" fill="#FBF8F1"/><circle cx="21" cy="8" r="1.7" fill="#FBF8F1"/></svg><p class="wordmark">ourthology<span class="tld">.com</span></p></div>
-    <p class="subtitle">an anthology of us.</p>
+    <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
+      <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
+        <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
+        <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
+        <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
+        <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1" stroke-linecap="round"/>
+        <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+        <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <div class="brand-text" style="display:flex;flex-direction:column;">
+        <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
+        <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+      </div>
+    </div>
 
     <?php if ($success): ?>
       <p style="margin-top:16px;">Request sent to <strong><?= htmlspecialchars($success, ENT_QUOTES) ?></strong> — they'll see it as a pending request next time they log in, and it'll only join your trees together once they approve it.</p>

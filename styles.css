@@ -44,11 +44,13 @@ body {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 4px;
+  gap: 14px;
+  margin: 0 0 22px;
 }
 
-.brand-mark { width: 26px; height: 26px; flex: none; }
+.brand-mark { width: 44px; height: 44px; flex: none; display: block; }
+
+.brand-text { display: flex; flex-direction: column; }
 
 .wordmark {
   font-size: 22px;
@@ -63,7 +65,7 @@ body {
   font-style: italic;
   color: var(--ink-soft);
   font-size: 14px;
-  margin: 0 0 24px;
+  margin: 3px 0 0;
 }
 
 label {
