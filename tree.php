@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/tree_layout.php';
 
 require_login();
 $me = current_user_with_person();
@@ -42,6 +43,12 @@ $personsById = [];
 foreach ($graph['persons'] as $p) {
     $personsById[(int) $p['id']] = $p;
 }
+
+$layout = compute_tree_layout($graph, $myPersonId);
+$unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']);
+
+$treeNodeW = TREE_NODE_W;
+$treeNodeH = TREE_NODE_H;
 ?>
 <!doctype html>
 <html lang="en">
@@ -52,7 +59,7 @@ foreach ($graph['persons'] as $p) {
 <link rel="stylesheet" href="/styles.css">
 <style>
   body { align-items: flex-start; }
-  .wide { max-width: 640px; }
+  .wide { max-width: 900px; }
   .nav { display:flex; gap:10px; flex-wrap:wrap; margin: 18px 0 4px; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
   .nav a.badge { background: var(--error-bg); border-color: var(--error-bg); color: var(--accent); font-weight:600; }
@@ -63,6 +70,21 @@ foreach ($graph['persons'] as $p) {
   .tag.unclaimed { background:var(--paper-2); color:var(--ink-faint); }
   .linklet { font-size:12px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; }
   .flash { word-break:break-all; font-size:13px; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0 16px; }
+  .tree-scroll { overflow-x:auto; overflow-y:hidden; border:1px solid var(--line); border-radius:10px; background:#fff; margin-top:10px; }
+  .tree-scroll svg { display:block; }
+  .tree-link, .tree-bond { stroke:var(--line); stroke-width:1.6; fill:none; }
+  .tree-node rect { fill:#fff; stroke:var(--line); stroke-width:1.4; rx:9; }
+  .tree-node.you rect { stroke:var(--accent); stroke-width:2; }
+  .tree-node.unclaimed rect { stroke-dasharray:4 3; fill:var(--paper-2); }
+  .tree-node text { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; fill:var(--ink); }
+  .tree-node .tn-name { font-size:13px; font-weight:600; }
+  .tree-node .tn-tag { font-size:10px; fill:var(--ink-faint); text-transform:uppercase; letter-spacing:.03em; }
+  .tree-node a { cursor:pointer; }
+  .tree-legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--ink-faint); margin-top:8px; }
+  .tree-legend span { display:inline-flex; align-items:center; gap:5px; }
+  .tree-legend i { width:10px; height:10px; border-radius:3px; display:inline-block; border:1.4px solid var(--line); }
+  .tree-legend i.unclaimed { background:var(--paper-2); border-style:dashed; }
+  .tree-legend i.you { border-color:var(--accent); border-width:2px; }
 </style>
 </head>
 <body>
@@ -82,47 +104,95 @@ foreach ($graph['persons'] as $p) {
       <p class="flash"><?= htmlspecialchars($flashLink, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
-    <h3 style="margin-bottom:4px;">People in your tree (<?= count($graph['persons']) ?>)</h3>
-    <ul class="plain">
-      <?php foreach ($graph['persons'] as $p): ?>
-        <li>
-          <a href="/timeline.php?person_id=<?= (int) $p['id'] ?>" style="color:var(--ink);text-decoration:none;font-weight:600;"><?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?></a>
-          <?php if ((int) $p['id'] === $myPersonId): ?><em>(you)</em><?php endif; ?>
-          <span class="tag <?= $p['claimed_by_user_id'] ? 'claimed' : 'unclaimed' ?>"><?= $p['claimed_by_user_id'] ? 'claimed' : 'unclaimed' ?></span>
-          <?php if (!$p['claimed_by_user_id']): ?>
+    <h3 style="margin-bottom:4px;">Your tree (<?= count($graph['persons']) ?> <?= count($graph['persons']) === 1 ? 'person' : 'people' ?>)</h3>
+
+    <?php if (count($graph['persons']) <= 1): ?>
+      <p style="color:var(--ink-faint);margin-top:8px;">No relationships yet — add a relative to get started.</p>
+    <?php else: ?>
+      <div class="tree-scroll">
+        <svg viewBox="0 0 <?= (int) $layout['width'] ?> <?= (int) $layout['height'] ?>" width="<?= (int) $layout['width'] ?>" height="<?= (int) $layout['height'] ?>">
+          <?php foreach ($layout['familyUnits'] as $unit): ?>
+            <?php
+              $parentXs = [];
+              $parentBottomYs = [];
+              foreach ($unit['parents'] as $pid) {
+                  if (!isset($layout['positions'][$pid])) continue;
+                  $parentXs[] = $layout['positions'][$pid]['x'];
+                  $parentBottomYs[] = $layout['positions'][$pid]['y'] + $treeNodeH / 2;
+              }
+              $childXs = [];
+              $childTopYs = [];
+              foreach ($unit['children'] as $cid) {
+                  if (!isset($layout['positions'][$cid])) continue;
+                  $childXs[] = $layout['positions'][$cid]['x'];
+                  $childTopYs[] = $layout['positions'][$cid]['y'] - $treeNodeH / 2;
+              }
+              if (!$parentXs || !$childXs) continue;
+              $unionX = array_sum($parentXs) / count($parentXs);
+              $busY = (max($parentBottomYs) + min($childTopYs)) / 2;
+              $allXs = array_merge($parentXs, $childXs, [$unionX]);
+            ?>
+            <?php foreach ($unit['parents'] as $i => $pid): ?>
+              <?php if (!isset($layout['positions'][$pid])) continue; ?>
+              <line class="tree-link" x1="<?= $layout['positions'][$pid]['x'] ?>" y1="<?= $parentBottomYs[$i] ?>" x2="<?= $layout['positions'][$pid]['x'] ?>" y2="<?= $busY ?>"></line>
+            <?php endforeach; ?>
+            <line class="tree-link" x1="<?= min($allXs) ?>" y1="<?= $busY ?>" x2="<?= max($allXs) ?>" y2="<?= $busY ?>"></line>
+            <?php foreach ($unit['children'] as $i => $cid): ?>
+              <?php if (!isset($layout['positions'][$cid])) continue; ?>
+              <line class="tree-link" x1="<?= $layout['positions'][$cid]['x'] ?>" y1="<?= $busY ?>" x2="<?= $layout['positions'][$cid]['x'] ?>" y2="<?= $childTopYs[$i] ?>"></line>
+            <?php endforeach; ?>
+          <?php endforeach; ?>
+
+          <?php foreach ($graph['partnerships'] as $p): ?>
+            <?php
+              $aId = (int) $p['person_a_id'];
+              $bId = (int) $p['person_b_id'];
+              if (!isset($layout['positions'][$aId], $layout['positions'][$bId])) continue;
+              if ($layout['positions'][$aId]['tier'] !== $layout['positions'][$bId]['tier']) continue;
+              $left = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$aId] : $layout['positions'][$bId];
+              $right = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$bId] : $layout['positions'][$aId];
+            ?>
+            <line class="tree-bond" x1="<?= $left['x'] + $treeNodeW / 2 ?>" y1="<?= $left['y'] ?>" x2="<?= $right['x'] - $treeNodeW / 2 ?>" y2="<?= $right['y'] ?>"></line>
+          <?php endforeach; ?>
+
+          <?php foreach ($layout['positions'] as $pid => $pos): ?>
+            <?php $person = $personsById[$pid] ?? null; if (!$person) continue; ?>
+            <a href="/timeline.php?person_id=<?= $pid ?>">
+              <g class="tree-node<?= $pid === $myPersonId ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] - $treeNodeW / 2 ?>, <?= $pos['y'] - $treeNodeH / 2 ?>)">
+                <rect width="<?= $treeNodeW ?>" height="<?= $treeNodeH ?>"></rect>
+                <text class="tn-name" x="<?= $treeNodeW / 2 ?>" y="24" text-anchor="middle"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 20, '…'), ENT_QUOTES) ?></text>
+                <text class="tn-tag" x="<?= $treeNodeW / 2 ?>" y="40" text-anchor="middle">
+                  <?= $pid === $myPersonId ? 'You' : ($person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed') ?>
+                </text>
+              </g>
+            </a>
+          <?php endforeach; ?>
+        </svg>
+      </div>
+      <div class="tree-legend">
+        <span><i class="you"></i> you</span>
+        <span><i></i> claimed account</span>
+        <span><i class="unclaimed"></i> not yet claimed</span>
+      </div>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Click anyone to see their timeline. Scroll sideways if the tree is wider than the screen.</p>
+    <?php endif; ?>
+
+    <?php if ($unclaimed): ?>
+      <h3 style="margin:24px 0 4px;">Not yet claimed (<?= count($unclaimed) ?>)</h3>
+      <ul class="plain">
+        <?php foreach ($unclaimed as $p): ?>
+          <li>
+            <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
             <form method="post" style="display:inline;">
               <?= csrf_field() ?>
               <input type="hidden" name="action" value="get_link">
               <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
               <button type="submit" class="linklet">get invite link</button>
             </form>
-          <?php endif; ?>
-        </li>
-      <?php endforeach; ?>
-    </ul>
-
-    <h3 style="margin-bottom:4px;">Relationships</h3>
-    <ul class="plain">
-      <?php foreach ($graph['relationships'] as $r): ?>
-        <li>
-          <?= htmlspecialchars(person_display_name($personsById[(int) $r['parent_id']] ?? []), ENT_QUOTES) ?>
-          is the <?= htmlspecialchars($r['relation_kind'], ENT_QUOTES) ?> parent of
-          <?= htmlspecialchars(person_display_name($personsById[(int) $r['child_id']] ?? []), ENT_QUOTES) ?>
-        </li>
-      <?php endforeach; ?>
-      <?php foreach ($graph['partnerships'] as $p): ?>
-        <li>
-          <?= htmlspecialchars(person_display_name($personsById[(int) $p['person_a_id']] ?? []), ENT_QUOTES) ?>
-          &amp; <?= htmlspecialchars(person_display_name($personsById[(int) $p['person_b_id']] ?? []), ENT_QUOTES) ?>
-          — <?= htmlspecialchars($p['kind'], ENT_QUOTES) ?>
-        </li>
-      <?php endforeach; ?>
-      <?php if (!$graph['relationships'] && !$graph['partnerships']): ?>
-        <li style="border:none;color:var(--ink-faint);">No relationships yet — add a relative to get started.</li>
-      <?php endif; ?>
-    </ul>
-
-    <p style="font-size:12px;color:var(--ink-faint);margin-top:20px;">This plain-list view is the Phase 2 data layer — the real visual tree (river/rings/spiral) moves here next.</p>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    <?php endif; ?>
   </div>
 </body>
 </html>
