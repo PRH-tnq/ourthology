@@ -293,8 +293,18 @@ function candidates_for_source(string $source, int $anchorId, array $maps): arra
  * existing one being attached in edit_person.php; either way the caller
  * resolves that placeholder to a real id before inserting) or
  * ['ok' => false, 'error' => '...'].
+ *
+ * $secondParentId/$secondParentKind only apply to the 'child' case: adding
+ * a child records the anchor as one parent, but a child almost always has
+ * two — this lets the anchor's own current partner be recorded as the
+ * second parent in the same submission (genetic, step, or adoptive,
+ * independently of the anchor's own kind), rather than requiring a
+ * separate trip through edit_person.php's "attach as a relative of
+ * someone else" afterward just to add the second, equally normal, parent
+ * edge. The caller (add_relative.php) is responsible for having already
+ * verified $secondParentId is actually one of the anchor's own partners.
  */
-function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $directKind, array $maps, array $personsById, array $viaNeeded): array
+function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $directKind, array $maps, array $personsById, array $viaNeeded, ?int $secondParentId = null, string $secondParentKind = 'genetic'): array
 {
     if (isset($viaNeeded[$rel])) {
         $cfg = $viaNeeded[$rel];
@@ -313,7 +323,11 @@ function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $d
         case 'step-parent':
             return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => 'step']]];
         case 'child':
-            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => $directKind]]];
+            $edges = [['parent' => $anchorId, 'child' => 'NEW', 'kind' => $directKind]];
+            if ($secondParentId !== null) {
+                $edges[] = ['parent' => $secondParentId, 'child' => 'NEW', 'kind' => $secondParentKind];
+            }
+            return ['ok' => true, 'edges' => $edges];
         case 'step-child':
             return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => 'step']]];
         case 'spouse':

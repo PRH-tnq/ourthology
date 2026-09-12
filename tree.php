@@ -49,6 +49,70 @@ $unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']
 
 $treeNodeW = TREE_NODE_W;
 $treeNodeH = TREE_NODE_H;
+
+/** One letter per name part actually on record (first, middle, surname), in
+ *  order, uppercased — "Philip Richard Hart" -> "PRH", "Philip Hart" -> "PH".
+ *  Mirrors the prototype's initialsOf(). */
+function ourthology_initials(array $p): string
+{
+    $out = '';
+    foreach ([$p['first_name'] ?? '', $p['middle_name'] ?? '', $p['surname'] ?? ''] as $part) {
+        $part = trim((string) $part);
+        if ($part !== '') {
+            $out .= mb_strtoupper(mb_substr($part, 0, 1));
+        }
+    }
+    return $out;
+}
+
+/** "b. 1965" / "d. 2020" / "1965 – 2020" / "" — year-only, same compact
+ *  convention the prototype's formatLifespan() uses (full dates would
+ *  crowd a node this small). */
+function ourthology_lifespan(?string $born, ?string $died): string
+{
+    $b = $born ? substr($born, 0, 4) : '';
+    $d = $died ? substr($died, 0, 4) : '';
+    if ($b && $d) {
+        return $b . ' – ' . $d;
+    }
+    if ($b) {
+        return 'b. ' . $b;
+    }
+    if ($d) {
+        return 'd. ' . $d;
+    }
+    return '';
+}
+
+// Ported from the prototype's stepTag(): a child with a step-parent gets a
+// short "S-" + that parent's own initials next to their dates on the tree
+// — the step/genetic distinction isn't drawn on the connector lines
+// themselves (every parent-child line looks the same regardless of
+// relation_kind), it's spelled out here instead. A child with two step
+// parents shows both tags.
+$stepTagsByChild = [];
+foreach ($graph['relationships'] as $r) {
+    if ($r['relation_kind'] !== 'step') {
+        continue;
+    }
+    $parentId = (int) $r['parent_id'];
+    $childId = (int) $r['child_id'];
+    if (!isset($personsById[$parentId])) {
+        continue;
+    }
+    $initials = ourthology_initials($personsById[$parentId]);
+    if ($initials === '') {
+        continue; // no name on record for that parent slot yet — no tag rather than a blank one
+    }
+    $tag = 'S-' . $initials;
+    if (!isset($stepTagsByChild[$childId])) {
+        $stepTagsByChild[$childId] = [];
+    }
+    if (!in_array($tag, $stepTagsByChild[$childId], true)) {
+        $stepTagsByChild[$childId][] = $tag;
+    }
+}
+$hasAnyStepTag = !empty($stepTagsByChild);
 ?>
 <!doctype html>
 <html lang="en">
@@ -92,6 +156,8 @@ $treeNodeH = TREE_NODE_H;
   .tree-node .tn-hit { fill:transparent; stroke:none; }
   .tree-node .tn-name { font-family:"Fraunces",Georgia,serif; font-weight:700; font-size:14px; text-anchor:middle; fill:var(--ink); transition:fill .15s ease; }
   .tree-node .tn-tag { font-family:"Newsreader",Georgia,serif; font-size:10px; text-transform:uppercase; letter-spacing:.05em; text-anchor:middle; fill:var(--ink-soft); }
+  .tree-node .tn-dates { font-family:"Newsreader",Georgia,serif; font-size:10px; text-anchor:middle; fill:var(--ink-faint); }
+  .tree-node .tn-dates-tagged { font-weight:600; fill:var(--ink-soft); }
   .tree-node.unclaimed .tn-name { fill:var(--ink-soft); }
   .tree-node:hover .tn-name { fill:var(--accent); }
   .tree-node.you .tn-name { fill:var(--accent); font-size:17px; text-decoration:underline; text-decoration-color:var(--accent-glow); text-underline-offset:4px; }
@@ -261,16 +327,30 @@ $treeNodeH = TREE_NODE_H;
               $isYou = $pid === $myPersonId;
               $hitW = $isYou ? TREE_ME_W : TREE_NODE_W;
               $hitH = $isYou ? TREE_ME_H : $treeNodeH;
+
+              $stepPrefix = !empty($stepTagsByChild[$pid]) ? implode(' ', $stepTagsByChild[$pid]) : '';
+              $lifespan = ourthology_lifespan($person['born'] ?? null, $person['died'] ?? null);
+              $datesText = trim($stepPrefix . ' ' . $lifespan);
+
+              $lines = [];
+              if ($isYou) {
+                  $lines[] = ['cls' => 'tn-name', 'text' => 'You'];
+              } else {
+                  $lines[] = ['cls' => 'tn-name', 'text' => mb_strimwidth(person_display_name($person), 0, 15, '…')];
+                  $lines[] = ['cls' => 'tn-tag', 'text' => $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed'];
+              }
+              if ($datesText !== '') {
+                  $lines[] = ['cls' => $stepPrefix !== '' ? 'tn-dates tn-dates-tagged' : 'tn-dates', 'text' => $datesText];
+              }
+              $lineGap = 13;
+              $lineStartY = -($lineGap * (count($lines) - 1)) / 2;
             ?>
             <a href="/timeline.php?person_id=<?= $pid ?>">
               <g class="tree-node<?= $isYou ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] ?>, <?= $pos['y'] ?>)">
                 <rect class="tn-hit" x="<?= -$hitW / 2 ?>" y="<?= -$hitH / 2 ?>" width="<?= $hitW ?>" height="<?= $hitH ?>"></rect>
-                <?php if ($isYou): ?>
-                  <text class="tn-name" y="6">You</text>
-                <?php else: ?>
-                  <text class="tn-name" y="-3"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 15, '…'), ENT_QUOTES) ?></text>
-                  <text class="tn-tag" y="13"><?= $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed' ?></text>
-                <?php endif; ?>
+                <?php foreach ($lines as $li => $line): ?>
+                  <text class="<?= $line['cls'] ?>" y="<?= $lineStartY + $li * $lineGap ?>"><?= htmlspecialchars($line['text'], ENT_QUOTES) ?></text>
+                <?php endforeach; ?>
               </g>
             </a>
           <?php endforeach; ?>
@@ -279,6 +359,7 @@ $treeNodeH = TREE_NODE_H;
       <p class="tree-key">
         <strong>You</strong> are underlined in red · plain name = claimed account · <em>Unclaimed</em> label = not yet claimed<br>
         Click anyone to see their timeline. Scroll if the tree is wider than the screen.
+        <?php if ($hasAnyStepTag): ?><br><strong>S-</strong> followed by initials = a step relationship, tagged with that step-parent's own initials<?php endif; ?>
       </p>
     <?php endif; ?>
 

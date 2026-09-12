@@ -56,6 +56,8 @@ $anchorId = (string) $me['person_id'];
 $relationship = $existingPerson !== null ? 'sibling' : 'parent';
 $viaId = '';
 $relationKind = 'genetic';
+$secondParentId = '';
+$secondParentKind = 'genetic';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -67,6 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $relationship = (string) ($_POST['relationship'] ?? '');
     $viaId        = (string) ($_POST['via_id'] ?? '');
     $relationKind = (string) ($_POST['relation_kind'] ?? 'genetic');
+    $secondParentId   = (string) ($_POST['second_parent_id'] ?? '');
+    $secondParentKind = (string) ($_POST['second_parent_kind'] ?? 'genetic');
 
     if ($existingPersonId === null && $first === '') {
         $errors[] = 'First name is required.';
@@ -76,6 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!in_array($relationKind, ['genetic', 'step', 'adoptive'], true)) {
         $relationKind = 'genetic';
+    }
+    if (!in_array($secondParentKind, ['genetic', 'step', 'adoptive'], true)) {
+        $secondParentKind = 'genetic';
     }
     $anchorIdInt = filter_var($anchorId, FILTER_VALIDATE_INT);
     if ($anchorIdInt === false || !person_in_group($pdo, (int) $anchorIdInt, $myGroup)) {
@@ -89,9 +96,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'That "connected through" person is not in your family tree.';
     }
 
+    // A child almost always has two parents — when adding one, the anchor's
+    // own current partner (if they have one on record) can be recorded as
+    // the second parent in the same step, tagged genetic/step/adoptive
+    // independently of the anchor's own tag. Only meaningful for the
+    // 'child' relationship, and never trusting the client's dynamically
+    // populated dropdown — re-checked here against the anchor's actual
+    // recorded partners.
+    $secondParentIdInt = null;
+    if ($relationship === 'child' && $secondParentId !== '') {
+        $candidateId = filter_var($secondParentId, FILTER_VALIDATE_INT);
+        if ($candidateId === false || !in_array((int) $candidateId, $maps['partnersOf'][(int) $anchorIdInt] ?? [], true)) {
+            $errors[] = "That person isn't recorded as this anchor's partner, so they can't be added as the second parent.";
+        } elseif ($existingPersonId !== null && (int) $candidateId === $existingPersonId) {
+            $errors[] = 'Choose someone else as the second parent.';
+        } else {
+            $secondParentIdInt = (int) $candidateId;
+        }
+    }
+
     $plan = null;
     if (!$errors) {
-        $plan = resolve_relationship($relationship, (int) $anchorIdInt, $viaIdInt, $relationKind, $maps, $personsById, $VIA_NEEDED);
+        $plan = resolve_relationship($relationship, (int) $anchorIdInt, $viaIdInt, $relationKind, $maps, $personsById, $VIA_NEEDED, $secondParentIdInt, $secondParentKind);
         if (!$plan['ok']) {
             $errors[] = $plan['error'];
         }
@@ -123,12 +149,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             };
 
             foreach ($plan['edges'] ?? [] as $edge) {
+                $pId = $resolveNew($edge['parent']);
+                $cId = $resolveNew($edge['child']);
+                // relationships has uniq_parent_child, but a plain insert
+                // failure there would surface as an opaque "something went
+                // wrong" — only reachable when attaching an EXISTING person
+                // (a brand-new person can't already have this edge), but
+                // now more likely to come up given a child can gain a
+                // second parent edge in the same submission, so worth its
+                // own clear message rather than falling through generic.
+                if ($existingPersonId !== null) {
+                    $dupStmt = $pdo->prepare('SELECT 1 FROM relationships WHERE parent_id = :p AND child_id = :c');
+                    $dupStmt->execute(['p' => $pId, 'c' => $cId]);
+                    if ($dupStmt->fetchColumn()) {
+                        throw new RuntimeException('duplicate_relationship');
+                    }
+                }
                 $pdo->prepare(
                     "INSERT INTO relationships (parent_id, child_id, relation_kind, status, created_by_user_id)
                      VALUES (:p, :c, :kind, 'confirmed', :uid)"
                 )->execute([
-                    'p'    => $resolveNew($edge['parent']),
-                    'c'    => $resolveNew($edge['child']),
+                    'p'    => $pId,
+                    'c'    => $cId,
                     'kind' => $edge['kind'],
                     'uid'  => $me['user_id'],
                 ]);
@@ -155,7 +197,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } catch (RuntimeException $e) {
             $pdo->rollBack();
-            $errors[] = 'They are already recorded as partners.';
+            $errors[] = $e->getMessage() === 'duplicate_relationship'
+                ? 'That relationship is already recorded.'
+                : 'They are already recorded as partners.';
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log('ourthology add_relative error: ' . $e->getMessage());
@@ -277,6 +321,22 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         </select>
       </div>
 
+      <div class="field-group" id="parent2Group" hidden>
+        <label for="second_parent_id">Second parent <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+        <select id="second_parent_id" name="second_parent_id">
+          <option value="" <?= $secondParentId === '' ? 'selected' : '' ?>>No second parent</option>
+        </select>
+        <p class="hint">Only whoever's already recorded as that person's partner can be picked here — a child almost always has two parents, so this records the second one in the same step.</p>
+        <div id="parent2KindGroup" hidden style="margin-top:10px;">
+          <label for="second_parent_kind">Their relationship to this child</label>
+          <select id="second_parent_kind" name="second_parent_kind">
+            <option value="genetic" <?= $secondParentKind === 'genetic' ? 'selected' : '' ?>>Genetic</option>
+            <option value="step" <?= $secondParentKind === 'step' ? 'selected' : '' ?>>Step</option>
+            <option value="adoptive" <?= $secondParentKind === 'adoptive' ? 'selected' : '' ?>>Adoptive</option>
+          </select>
+        </div>
+      </div>
+
       <?php if ($existingPerson === null): ?>
         <div class="row-2">
           <div>
@@ -334,10 +394,56 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
   var viaLabel = document.getElementById('viaLabel');
   var viaSel = document.getElementById('via_id');
   var kindGroup = document.getElementById('kindGroup');
+  var parent2Group = document.getElementById('parent2Group');
+  var parent2Sel = document.getElementById('second_parent_id');
+  var parent2KindGroup = document.getElementById('parent2KindGroup');
   var saveBtn = document.querySelector('#addRelativeForm button[type="submit"]');
   // Re-selected after a validation error redisplays the form, so a mistake
   // elsewhere (e.g. the name field) doesn't also lose this choice.
   var previousViaId = <?= json_encode($viaId !== '' ? $viaId : null) ?>;
+  var previousParent2Id = <?= json_encode($secondParentId !== '' ? $secondParentId : null) ?>;
+  // Excluded from the second-parent picker so an existing person being
+  // attached (edit_person.php's "attach as a relative" mode) can never be
+  // offered as their own second parent, even if they happen to already be
+  // recorded as the anchor's partner.
+  var EXISTING_PERSON_ID = <?= json_encode($existingPersonId) ?>;
+
+  // A child almost always has two parents — only the 'child' relationship
+  // offers a second-parent picker, and only from whoever's already
+  // recorded as the anchor's own partner (that's who a second parent
+  // realistically is here); tagged genetic/step/adoptive independently of
+  // the anchor's own tag above.
+  function refreshParent2() {
+    var rel = relationshipSel.value;
+    var anchorId = anchorSel.value;
+    var isChildRel = (rel === 'child');
+    parent2Group.hidden = !isChildRel;
+    parent2Sel.innerHTML = '';
+    if (!isChildRel) {
+      parent2KindGroup.hidden = true;
+      return;
+    }
+    var partners = (MAPS.partnersOf[anchorId] || []).filter(function (id) {
+      return EXISTING_PERSON_ID === null || String(id) !== String(EXISTING_PERSON_ID);
+    });
+    var noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = partners.length ? 'No second parent' : 'No partner on record for them yet';
+    parent2Sel.appendChild(noneOpt);
+    partners.forEach(function (id) {
+      var opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = MAPS.names[id] || ('#' + id);
+      parent2Sel.appendChild(opt);
+    });
+    if (previousParent2Id !== null && partners.indexOf(String(previousParent2Id)) !== -1) {
+      parent2Sel.value = previousParent2Id;
+    }
+    parent2KindGroup.hidden = !parent2Sel.value;
+  }
+  parent2Sel && parent2Sel.addEventListener('change', function () {
+    parent2KindGroup.hidden = !parent2Sel.value;
+  });
 
   function refresh() {
     var rel = relationshipSel.value;
@@ -345,6 +451,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
     var cfg = VIA_NEEDED[rel];
     var kindApplies = (rel === 'parent' || rel === 'child');
     kindGroup.hidden = !kindApplies;
+    refreshParent2();
 
     if (!cfg) {
       viaGroup.hidden = true;
@@ -381,6 +488,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
   anchorSel.addEventListener('change', refresh);
   refresh();
   previousViaId = null; // only restore once, right after page load
+  previousParent2Id = null;
 })();
 </script>
 </body>
