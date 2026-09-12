@@ -116,6 +116,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "You don't have an approved tag on that memory.";
             }
         }
+    } elseif ($action === 'dismiss_tour') {
+        // Fired by the onboarding tour's own JS (Skip, or the last step's
+        // "Get started") — always about the CURRENTLY logged-in account,
+        // never anyone else's, so there's nothing else to check. Silent by
+        // design (no $notice) since the overlay is already gone client-side
+        // by the time this returns; the whole point is just to make sure it
+        // never shows again on a future visit or a different device.
+        $pdo->prepare('UPDATE users SET tour_completed_at = NOW() WHERE id = :uid')->execute(['uid' => (int) $me['user_id']]);
+        $me['tour_completed_at'] = date('Y-m-d H:i:s');
     } elseif ($action === 'set_born') {
         // Only the owner can set their own birth date — the life-view zoom
         // and life-stage bands are personal, and this form only ever shows
@@ -141,6 +150,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+// The onboarding tour only ever makes sense on your OWN landing page (its
+// steps point at "your" timeline, "your" tree, "+ Add a memory" for
+// yourself) — never while looking at someone else's, claimed or not.
+// Computed after the POST handling above (not before) so that dismissing
+// it via the dismiss_tour action takes effect immediately, on this same
+// request, rather than needing one more page load.
+$showTour = $isOwner && empty($me['tour_completed_at']);
 
 $entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage);
 $targetName = person_display_name($target);
@@ -229,6 +246,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= htmlspecialchars($targetName, ENT_QUOTES) ?> — timeline — ourthology.com</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -291,7 +310,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .zoom-pill .zoom-pill-x { font-size:16px; line-height:1; opacity:.75; margin-left:2px; }
 
   /* ---------- timeline canvas ---------- */
-  .arc-wrap { position:relative; background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
+  .arc-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
   .arc-wrap svg { display:block; cursor:crosshair; user-select:none; -webkit-user-select:none; touch-action:none; }
   .selection-rect { fill:var(--accent-glow); fill-opacity:.16; stroke:var(--accent); stroke-width:1.5; stroke-dasharray:4 3; pointer-events:none; display:none; }
   .selection-rect.active { display:block; }
@@ -363,6 +382,20 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .pill.diary { background:var(--fam2-bg); color:var(--fam2); }
   .empty-state { text-align:center; padding:34px 20px; color:var(--ink-faint); font-size:14px; border:2px dashed var(--line); border-radius:16px; }
 
+  /* ---------- first-login onboarding tour ---------- */
+  .tour-scrim { position:fixed; inset:0; background:rgba(20,16,12,.55); z-index:200; opacity:0; pointer-events:none; transition:opacity .15s ease; }
+  .tour-scrim.open { opacity:1; pointer-events:auto; }
+  .tour-highlight { position:fixed; border:3px solid var(--accent); border-radius:14px; box-shadow:0 0 0 4px rgba(154,42,42,.25); pointer-events:none; transition:top .2s ease, left .2s ease, width .2s ease, height .2s ease; z-index:201; }
+  .tour-tooltip { position:fixed; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px 20px; width:280px; box-shadow:0 20px 46px -18px rgba(26,23,20,.5); z-index:202; transition:top .2s ease, left .2s ease; }
+  .tour-tooltip.tour-centered { position:fixed; top:50% !important; left:50% !important; transform:translate(-50%,-50%); width:300px; }
+  .tour-tooltip h4 { margin:0 0 8px; font-family:"Fraunces",Georgia,serif; font-size:17px; color:var(--ink); }
+  .tour-tooltip p { margin:0 0 16px; font-size:13.5px; color:var(--ink-soft); line-height:1.5; }
+  .tour-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .tour-step-label { font-size:11.5px; color:var(--ink-faint); }
+  .tour-skip { font-size:12.5px; background:transparent; border:none; color:var(--ink-faint); cursor:pointer; padding:0; text-decoration:underline; }
+  .tour-next { padding:8px 16px; border:none; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:13.5px; font-weight:600; cursor:pointer; }
+  .tour-next:hover { background:var(--accent-glow); }
+
   /* ---------- memory viewer (read-only) ---------- */
   .modal-scrim { position:fixed; inset:0; background:rgba(20,16,12,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; opacity:0; pointer-events:none; transition:opacity .15s ease; }
   .modal-scrim.open { opacity:1; pointer-events:auto; }
@@ -423,13 +456,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 </head>
 <body>
   <div class="card wide">
-    <p class="wordmark">ourthology<span class="tld">.com</span></p>
+    <div class="brand"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#9A2A2A"/><path d="M16 22V14M16 14L11 9M16 14L21 9" stroke="#FBF8F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="16" cy="23" r="1.7" fill="#FBF8F1"/><circle cx="11" cy="8" r="1.7" fill="#FBF8F1"/><circle cx="21" cy="8" r="1.7" fill="#FBF8F1"/></svg><p class="wordmark">ourthology<span class="tld">.com</span></p></div>
     <p class="subtitle">an anthology of us.</p>
 
     <div class="nav">
       <div class="nav-links">
-        <a href="/tree.php">My tree</a>
-        <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>">+ Add a memory</a><?php endif; ?>
+        <a href="/tree.php" id="tourMyTree">My tree</a>
+        <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
@@ -1507,5 +1540,99 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     render();
   })();
   </script>
+
+  <?php if ($showTour): ?>
+  <div class="tour-scrim open" id="tourScrim">
+    <div class="tour-highlight" id="tourHighlight" hidden></div>
+    <div class="tour-tooltip" id="tourTooltip">
+      <h4 id="tourTitle"></h4>
+      <p id="tourBody"></p>
+      <div class="tour-footer">
+        <button type="button" class="tour-skip" id="tourSkipBtn">Skip tour</button>
+        <span class="tour-step-label" id="tourStepLabel"></span>
+        <button type="button" class="tour-next" id="tourNextBtn"></button>
+      </div>
+    </div>
+  </div>
+  <input type="hidden" id="tourCsrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+  <script>
+  (function () {
+    "use strict";
+    // A short, four-step first-login walkthrough — shown once (server-side
+    // flag, see users.tour_completed_at / the dismiss_tour action above),
+    // never again after Skip or the last step's "Get started". Each step
+    // either points at a real element already on this page (via a CSS
+    // spotlight box that tracks its actual position — so it stays correct
+    // even if the page is resized mid-tour) or, for the welcome step, is
+    // simply centered with nothing highlighted.
+    var STEPS = [
+      { title: "Welcome to ourthology", body: "A quick tour of what you can do here — four short steps.", target: null },
+      { title: "Your life timeline", body: "Every memory you add appears here, plotted across your life. Switch between River, Rings, or Spiral, and zoom into a decade or a single year.", target: "#arcWrap" },
+      { title: "Add a memory", body: "A photo, a video, a document, or just a few words — with a date, so it takes its place on your timeline.", target: "#tourAddMemory" },
+      { title: "Your family tree", body: "See everyone you're connected to, add relatives, and click anyone to see their own timeline too.", target: "#tourMyTree" }
+    ];
+    var step = 0;
+    var scrim = document.getElementById("tourScrim");
+    var highlight = document.getElementById("tourHighlight");
+    var tooltip = document.getElementById("tourTooltip");
+    var titleEl = document.getElementById("tourTitle");
+    var bodyEl = document.getElementById("tourBody");
+    var stepLabel = document.getElementById("tourStepLabel");
+    var nextBtn = document.getElementById("tourNextBtn");
+    var skipBtn = document.getElementById("tourSkipBtn");
+
+    function place() {
+      var s = STEPS[step];
+      titleEl.textContent = s.title;
+      bodyEl.textContent = s.body;
+      stepLabel.textContent = (step + 1) + " of " + STEPS.length;
+      nextBtn.textContent = (step === STEPS.length - 1) ? "Get started" : "Next";
+
+      var target = s.target ? document.querySelector(s.target) : null;
+      if (!target) {
+        highlight.hidden = true;
+        tooltip.classList.add("tour-centered");
+        return;
+      }
+      tooltip.classList.remove("tour-centered");
+      var r = target.getBoundingClientRect();
+      var pad = 8;
+      highlight.hidden = false;
+      highlight.style.left = (r.left - pad) + "px";
+      highlight.style.top = (r.top - pad) + "px";
+      highlight.style.width = (r.width + pad * 2) + "px";
+      highlight.style.height = (r.height + pad * 2) + "px";
+
+      var tooltipW = 280, tooltipH = tooltip.offsetHeight || 160;
+      var spaceBelow = window.innerHeight - r.bottom;
+      var top = (spaceBelow > tooltipH + 24) ? (r.bottom + pad + 14) : Math.max(14, r.top - pad - 14 - tooltipH);
+      var left = Math.min(Math.max(14, r.left), window.innerWidth - tooltipW - 14);
+      tooltip.style.top = top + "px";
+      tooltip.style.left = left + "px";
+    }
+
+    function finish() {
+      scrim.classList.remove("open");
+      scrim.remove();
+      var fd = new FormData();
+      fd.append("action", "dismiss_tour");
+      fd.append("csrf_token", document.getElementById("tourCsrf").value);
+      // Best-effort: the overlay is already gone either way, so a network
+      // hiccup here just means the tour might show once more on a future
+      // visit rather than breaking anything on this one.
+      fetch(window.location.pathname + window.location.search, { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
+    }
+
+    nextBtn.addEventListener("click", function () {
+      if (step === STEPS.length - 1) { finish(); return; }
+      step++;
+      place();
+    });
+    skipBtn.addEventListener("click", finish);
+    window.addEventListener("resize", place);
+    place();
+  })();
+  </script>
+  <?php endif; ?>
 </body>
 </html>

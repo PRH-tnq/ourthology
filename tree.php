@@ -142,6 +142,8 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My tree — ourthology.com</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -158,8 +160,8 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
   .nav a.badge { background: var(--error-bg); border-color: var(--error-bg); color: var(--accent); font-weight:600; }
-  .nav .linklet-btn { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); background:#fff; cursor:pointer; font-family:inherit; }
-  .nav .linklet-btn:hover { color:var(--accent); border-color:var(--accent-glow); }
+  .nav .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
+  .nav .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -173,7 +175,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      view: a soft paper-toned well, no boxes around people (just stacked
      text, name over status), warm serif type, blood lines plain and thin,
      partner bonds picked out in accent. */
-  .tree-wrap { background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; cursor:grab; touch-action:none; }
+  .tree-wrap { background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; cursor:grab; touch-action:none; }
   .tree-wrap.panning { cursor:grabbing; user-select:none; }
   .tree-wrap svg { display:block; margin:0 auto; }
   .tree-link { fill:none; stroke:var(--ink-soft); stroke-width:1.4; }
@@ -209,7 +211,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 </head>
 <body>
   <div class="card wide">
-    <p class="wordmark">ourthology<span class="tld">.com</span></p>
+    <div class="brand"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#9A2A2A"/><path d="M16 22V14M16 14L11 9M16 14L21 9" stroke="#FBF8F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="16" cy="23" r="1.7" fill="#FBF8F1"/><circle cx="11" cy="8" r="1.7" fill="#FBF8F1"/><circle cx="21" cy="8" r="1.7" fill="#FBF8F1"/></svg><p class="wordmark">ourthology<span class="tld">.com</span></p></div>
     <p class="subtitle">an anthology of us.</p>
 
     <div class="nav">

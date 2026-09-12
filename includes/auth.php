@@ -62,7 +62,7 @@ function current_user_with_person(): ?array
         return null;
     }
     $stmt = ourthology_pdo()->prepare(
-        'SELECT u.id AS user_id, u.email, p.id AS person_id, p.first_name, p.middle_name, p.surname
+        'SELECT u.id AS user_id, u.email, u.tour_completed_at, p.id AS person_id, p.first_name, p.middle_name, p.surname
          FROM users u JOIN persons p ON p.id = u.person_id
          WHERE u.id = :id'
     );

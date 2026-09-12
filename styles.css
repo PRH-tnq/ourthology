@@ -41,10 +41,19 @@ body {
   box-shadow: 0 1px 3px rgba(26, 23, 20, 0.06);
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.brand-mark { width: 26px; height: 26px; flex: none; }
+
 .wordmark {
   font-size: 22px;
   font-weight: 700;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .wordmark .tld { font-weight: 500; color: var(--ink-faint); }

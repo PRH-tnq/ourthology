@@ -45,6 +45,10 @@ CREATE TABLE users (
   death_release_choice    ENUM('release_to_family','destroy') NULL,
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_login_at   DATETIME NULL,
+  -- Set once someone dismisses or finishes the first-login onboarding
+  -- tour (Phase 19) — NULL means "hasn't seen it yet," checked on
+  -- timeline.php to decide whether to show it.
+  tour_completed_at DATETIME NULL,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
