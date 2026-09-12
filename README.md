@@ -23,8 +23,25 @@ advance whether they're released to the family or destroyed.
 
 ## Status
 
-Early concept + interaction prototyping. First prototype: the life-timeline
-visualization (`prototypes/timeline.html`).
+Moving from a single-user, localStorage-only prototype
+(`prototypes/timeline.html`) to a real multi-user PHP + MySQL backend on
+Krystal. Full design in the project doc `architecture.md`. Build phases:
+
+1. **Schema + auth skeleton (live)** — `db/schema.sql`, signup/login/logout,
+   sessions. `index.php`, `login.php`, `signup.php`, `logout.php`,
+   `dashboard.php` (placeholder), `includes/` (db/auth/csrf helpers).
+2. Family graph — relationships/partnerships, claim-token invites, tree UI
+   rebuilt against the DB.
+3. Timeline entries + media upload, visibility wired to shared family
+   groups.
+4. Relationship approval flow for linking to already-claimed accounts.
+5. Polish — hover-to-timeline feature, one-time import of any existing
+   localStorage data.
+
+**Secrets:** DB credentials live in `<home>/ourthology-secrets/config.php` on
+the server, one directory above the `ourthology.com` document root — never
+in this repo. See `config.example.php` for the format; `includes/db.php`
+loads it by path.
 
 ## GDPR & privacy — running notes
 
