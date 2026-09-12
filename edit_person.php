@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/media.php';
 
 require_login();
 $me = current_user_with_person();
@@ -179,6 +180,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'They are already recorded as partners.';
             }
         }
+    } elseif ($action === 'delete_person') {
+        // A stricter gate than $canEdit: $canEdit is also true for your own
+        // claimed record, but deleting yourself would orphan your own user
+        // account (users.person_id would point at nothing), so this only
+        // ever proceeds for a still-unclaimed person, checked here again
+        // rather than trusting that the delete control was hidden for
+        // anyone else.
+        if (!empty($person['claimed_by_user_id'])) {
+            $errors[] = "This person has claimed their own record and can't be deleted.";
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                // An unclaimed placeholder can't normally have timeline
+                // entries of their own (only a logged-in account can add
+                // one, for itself, via add_entry.php) but this is handled
+                // defensively in case that's ever no longer true — same
+                // file-then-row deletion order timeline.php's own delete
+                // action uses, so no media file is ever left orphaned on
+                // disk.
+                $mediaStmt = $pdo->prepare(
+                    'SELECT m.file_path FROM media m
+                     JOIN timeline_entries t ON t.id = m.timeline_entry_id
+                     WHERE t.person_id = :pid'
+                );
+                $mediaStmt->execute(['pid' => $personId]);
+                foreach ($mediaStmt->fetchAll() as $m) {
+                    delete_media_file($m['file_path']);
+                }
+                // timeline_entries -> media has ON DELETE CASCADE, so
+                // deleting the entries is enough to also clear their media
+                // rows (the files themselves are already gone, just above).
+                $pdo->prepare('DELETE FROM timeline_entries WHERE person_id = :pid')->execute(['pid' => $personId]);
+                $pdo->prepare('DELETE FROM claim_tokens WHERE person_id = :pid')->execute(['pid' => $personId]);
+                $pdo->prepare('DELETE FROM relationships WHERE parent_id = :pid OR child_id = :pid2')
+                    ->execute(['pid' => $personId, 'pid2' => $personId]);
+                $pdo->prepare('DELETE FROM partnerships WHERE person_a_id = :pid OR person_b_id = :pid2')
+                    ->execute(['pid' => $personId, 'pid2' => $personId]);
+                $pdo->prepare('DELETE FROM persons WHERE id = :id')->execute(['id' => $personId]);
+
+                $pdo->commit();
+                $_SESSION['flash_edit_notice'] = person_display_name($person) . ' has been deleted, along with their relationships and partnerships.';
+                header('Location: /edit_person.php');
+                exit;
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                error_log('ourthology delete_person error: ' . $e->getMessage());
+                $errors[] = 'Something went wrong deleting that person. Please try again.';
+            }
+        }
     }
 }
 
@@ -248,6 +299,7 @@ $confirmRel = filter_var($_GET['confirm_rel'] ?? '', FILTER_VALIDATE_INT);
 $confirmRel = $confirmRel === false ? null : (int) $confirmRel;
 $confirmPart = filter_var($_GET['confirm_part'] ?? '', FILTER_VALIDATE_INT);
 $confirmPart = $confirmPart === false ? null : (int) $confirmPart;
+$confirmDelete = ($_GET['confirm_delete'] ?? '') === '1';
 
 $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive'];
 
@@ -554,6 +606,30 @@ if ($postedProfile) {
         <a href="/add_relative.php?existing_person_id=<?= $personId ?>">Attach <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> as a relative of someone else</a>
       </p>
       <p style="font-size:12px;color:var(--ink-faint);margin-top:-12px;">Use this after removing a wrong relationship above, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
+      <?php endif; ?>
+
+      <?php if (empty($person['claimed_by_user_id'])): ?>
+        <h3 style="margin:28px 0 4px;color:var(--error);">Delete this person</h3>
+        <p style="font-size:13px;color:var(--ink-faint);">Only possible while they're still unclaimed. Removes <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> completely, along with every relationship and partnership recorded for them.</p>
+        <?php if (!$confirmDelete): ?>
+          <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_delete=1" class="btn-danger">Delete this person</a>
+        <?php else: ?>
+          <div class="confirm-box">
+            Delete <strong><?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></strong> completely —
+            <?= count($rels) ?> relationship<?= count($rels) === 1 ? '' : 's' ?> and
+            <?= count($parts) ?> partnership<?= count($parts) === 1 ? '' : 's' ?> recorded for them will be removed too?
+            This can't be undone.
+            <div class="actions">
+              <form method="post">
+                <?= csrf_field() ?>
+                <input type="hidden" name="person_id" value="<?= $personId ?>">
+                <input type="hidden" name="action" value="delete_person">
+                <button type="submit" class="btn-danger">Yes, delete them</button>
+              </form>
+              <a href="/edit_person.php?person_id=<?= $personId ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
+            </div>
+          </div>
+        <?php endif; ?>
       <?php endif; ?>
 
     <?php endif; ?>
