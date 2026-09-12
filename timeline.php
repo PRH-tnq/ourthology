@@ -118,7 +118,12 @@ $targetName = person_display_name($target);
     <?php foreach ($entries as $entry): ?>
       <div class="entry">
         <div class="entry-meta">
-          <?= $entry['occurred_on'] ? htmlspecialchars($entry['occurred_on'], ENT_QUOTES) : htmlspecialchars(substr($entry['created_at'], 0, 10), ENT_QUOTES) ?>
+          <?php
+            $displayDate = $entry['occurred_on']
+              ? date('d/m/Y', strtotime($entry['occurred_on']))
+              : date('d/m/Y', strtotime($entry['created_at']));
+          ?>
+          <?= htmlspecialchars($displayDate, ENT_QUOTES) ?>
           · <?= htmlspecialchars(ucfirst($entry['entry_type']), ENT_QUOTES) ?>
           <?php if ($isOwner): ?>
             <span class="tag <?= $entry['visibility'] ?>"><?= htmlspecialchars($entry['visibility'], ENT_QUOTES) ?></span>

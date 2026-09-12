@@ -4,14 +4,24 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 /**
- * Uploaded media lives ABOVE the web root — never inside ourthology.com —
- * so the only way to ever read a file's bytes is through media.php, which
- * re-checks visibility/ownership on every single request. A predictable or
- * leaked filename is harmless on its own: it isn't web-reachable at all.
+ * Uploaded media lives inside private-media/, a folder within the app's
+ * own document root that carries a .htaccess denying ALL direct HTTP
+ * access (see private-media/.htaccess) — so the only way to ever read a
+ * file's bytes is through media.php, which re-checks visibility/ownership
+ * on every single request. A predictable or leaked filename is harmless
+ * on its own: the .htaccess rule blocks the request before it ever
+ * reaches a static file handler.
+ *
+ * This lives inside the document root (rather than above it) deliberately:
+ * shared hosts commonly restrict each addon domain's PHP processes to an
+ * open_basedir scoped to that domain's own docroot, which would silently
+ * break reads/writes to a sibling folder outside it. Keeping the storage
+ * folder in-tree avoids that whole class of hosting-specific failure while
+ * keeping the same access guarantees (deny-all + per-request auth check).
  */
 function ourthology_media_dir(): string
 {
-    return dirname(__DIR__, 2) . '/ourthology-media';
+    return dirname(__DIR__) . '/private-media';
 }
 
 const MEDIA_MAX_BYTES = 25 * 1024 * 1024; // 25MB
