@@ -106,6 +106,66 @@ function fetch_pending_for_user(PDO $pdo, int $userId): array
     return ['relationships' => $rel->fetchAll(), 'partnerships' => $part->fetchAll()];
 }
 
+/** The flip side of fetch_pending_for_user(): requests I SENT that are still
+ *  waiting on someone else's approval (so a person isn't left wondering
+ *  whether their link request went anywhere). */
+function fetch_outgoing_pending_for_user(PDO $pdo, int $userId): array
+{
+    $rel = $pdo->prepare(
+        "SELECT r.id, r.relation_kind, r.created_at,
+                pp.first_name AS parent_first, pp.surname AS parent_surname,
+                pc.first_name AS child_first, pc.surname AS child_surname,
+                au.email AS approving_email
+         FROM relationships r
+         JOIN persons pp ON pp.id = r.parent_id
+         JOIN persons pc ON pc.id = r.child_id
+         JOIN users au ON au.id = r.approving_user_id
+         WHERE r.status = 'pending_approval' AND r.created_by_user_id = :uid
+         ORDER BY r.created_at"
+    );
+    $rel->execute(['uid' => $userId]);
+
+    $part = $pdo->prepare(
+        "SELECT p.id, p.kind, p.created_at,
+                pa.first_name AS a_first, pa.surname AS a_surname,
+                pb.first_name AS b_first, pb.surname AS b_surname,
+                au.email AS approving_email
+         FROM partnerships p
+         JOIN persons pa ON pa.id = p.person_a_id
+         JOIN persons pb ON pb.id = p.person_b_id
+         JOIN users au ON au.id = p.approving_user_id
+         WHERE p.status = 'pending_approval' AND p.created_by_user_id = :uid
+         ORDER BY p.created_at"
+    );
+    $part->execute(['uid' => $userId]);
+
+    return ['relationships' => $rel->fetchAll(), 'partnerships' => $part->fetchAll()];
+}
+
+/** Coarse, friendly relative time ("just now" / "3 days ago") — good enough
+ *  for a pending-requests list, no need for anything more precise. */
+function human_time_ago(string $datetime): string
+{
+    $diff = max(0, time() - strtotime($datetime));
+    if ($diff < 60) {
+        return 'just now';
+    }
+    $units = [
+        31536000 => 'year',
+        2592000  => 'month',
+        86400    => 'day',
+        3600     => 'hour',
+        60       => 'minute',
+    ];
+    foreach ($units as $seconds => $label) {
+        $count = intdiv($diff, $seconds);
+        if ($count >= 1) {
+            return $count . ' ' . $label . ($count === 1 ? '' : 's') . ' ago';
+        }
+    }
+    return 'just now';
+}
+
 function create_claim_token(PDO $pdo, int $personId, int $createdByUserId): string
 {
     $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
