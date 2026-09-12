@@ -31,9 +31,10 @@ $displayName = trim($me['first_name'] . ' ' . ($me['surname'] ?? ''));
     <p style="color:var(--ink-faint);font-size:14px;">
       Signed in as <?= htmlspecialchars($me['email'], ENT_QUOTES) ?> · person #<?= (int) $me['person_id'] ?>
     </p>
-    <p style="margin-top:20px;"><a href="/tree.php" style="color:var(--accent);font-weight:600;">Go to my tree →</a></p>
-    <p style="color:var(--ink-faint);font-size:14px;">
-      Timeline/diary uploads move here in a later build phase — the tree (adding relatives, invite links, linking existing accounts) is live now.
+    <p style="margin-top:20px;">
+      <a href="/tree.php" style="color:var(--accent);font-weight:600;">My tree →</a>
+      &nbsp;·&nbsp;
+      <a href="/timeline.php" style="color:var(--accent);font-weight:600;">My timeline →</a>
     </p>
 
     <form method="post" action="/logout.php" style="margin-top:20px;">

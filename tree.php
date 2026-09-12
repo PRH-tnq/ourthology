@@ -86,7 +86,7 @@ foreach ($graph['persons'] as $p) {
     <ul class="plain">
       <?php foreach ($graph['persons'] as $p): ?>
         <li>
-          <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
+          <a href="/timeline.php?person_id=<?= (int) $p['id'] ?>" style="color:var(--ink);text-decoration:none;font-weight:600;"><?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?></a>
           <?php if ((int) $p['id'] === $myPersonId): ?><em>(you)</em><?php endif; ?>
           <span class="tag <?= $p['claimed_by_user_id'] ? 'claimed' : 'unclaimed' ?>"><?= $p['claimed_by_user_id'] ? 'claimed' : 'unclaimed' ?></span>
           <?php if (!$p['claimed_by_user_id']): ?>
