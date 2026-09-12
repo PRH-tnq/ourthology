@@ -239,6 +239,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
   select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
   .field-group { margin-top:0; }
   .hint { margin:4px 0 0; font-size:12px; color:var(--ink-faint); }
+  input[type="text"]::placeholder { color:var(--ink-faint); opacity:1; }
 </style>
 </head>
 <body>
@@ -341,15 +342,15 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         <div class="row-2">
           <div>
             <label for="first_name">First name</label>
-            <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($first, ENT_QUOTES) ?>" maxlength="60" required>
+            <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($first, ENT_QUOTES) ?>" placeholder="e.g. Alex" maxlength="60" required>
           </div>
           <div>
             <label for="surname">Surname</label>
-            <input type="text" id="surname" name="surname" value="<?= htmlspecialchars($surname, ENT_QUOTES) ?>" maxlength="60">
+            <input type="text" id="surname" name="surname" value="<?= htmlspecialchars($surname, ENT_QUOTES) ?>" placeholder="e.g. Rivera" maxlength="60">
           </div>
         </div>
         <label for="middle_name">Middle name <span style="text-transform:none;font-weight:400;">(optional)</span></label>
-        <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($middle, ENT_QUOTES) ?>" maxlength="60">
+        <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($middle, ENT_QUOTES) ?>" placeholder="e.g. Marie" maxlength="60">
       <?php endif; ?>
 
       <button type="submit" class="btn-primary"><?= $existingPerson !== null ? 'Attach relationship' : 'Add person' ?></button>

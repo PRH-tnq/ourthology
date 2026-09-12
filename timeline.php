@@ -428,9 +428,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
     <div class="nav">
       <div class="nav-links">
-        <a href="/dashboard.php">Dashboard</a>
         <a href="/tree.php">My tree</a>
-        <a href="/edit_person.php">Edit a person</a>
         <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>">+ Add a memory</a><?php endif; ?>
       </div>
       <div class="whoami">
@@ -965,7 +963,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     function viewerLargeMediaHtml(m) {
       if (m.kind === "image") return '<img src="' + m.url + '" alt="">';
       if (m.kind === "video") return '<video src="' + m.url + '" controls playsinline></video>';
-      return '<div class="media-tile">' + DOC_ICON + '<span class="media-tile-badge">Open file</span></div>';
+      // A document (PDF, DOC, TXT, …) has no inline preview, so it needs an
+      // actual link to be reachable at all — the multi-file grid already
+      // wraps every tile in one (see viewerMediaViewHtml below), but this
+      // single-attachment path used to render a bare, non-clickable div
+      // with nothing to click, which is why opening a memory's one-and-only
+      // PDF never did anything. `.viewer-media-single a{display:contents}`
+      // was already sitting in the CSS for exactly this, just never used.
+      return '<a href="' + m.url + '" target="_blank" rel="noopener" title="Open file"><div class="media-tile">' + DOC_ICON + '<span class="media-tile-badge">Open file</span></div></a>';
     }
 
     function renderRail(list) {

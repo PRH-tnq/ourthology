@@ -228,8 +228,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // ever proceeds for a still-unclaimed person, checked here again
         // rather than trusting that the delete control was hidden for
         // anyone else.
+        $memCountStmt = $pdo->prepare('SELECT COUNT(*) FROM timeline_entries WHERE person_id = :pid');
+        $memCountStmt->execute(['pid' => $personId]);
+        $existingMemoryCount = (int) $memCountStmt->fetchColumn();
         if (!empty($person['claimed_by_user_id'])) {
             $errors[] = "This person has claimed their own record and can't be deleted.";
+        } elseif ($existingMemoryCount > 0) {
+            // Re-checked here too, not just by hiding the control below —
+            // someone could otherwise force this action directly even once
+            // a memory exists for a person who had none when the page first
+            // loaded in their browser.
+            $errors[] = 'This person has ' . $existingMemoryCount . ' ' . ($existingMemoryCount === 1 ? 'memory' : 'memories')
+                . " on their timeline, so they can't be deleted. Delete those memories first if this person really needs to go.";
         } else {
             try {
                 $pdo->beginTransaction();
@@ -323,6 +333,20 @@ if ($person !== null) {
     );
     $partStmt->execute(['pid' => $personId, 'pid2' => $personId]);
     $parts = $partStmt->fetchAll();
+}
+
+// Deleting a person also deletes every memory ever added for them (Phase
+// 17 made that routine — anyone in the family can add one, not just an
+// account holder acting for themselves), which is a much bigger loss than
+// the relationships/partnerships the confirm box already warns about, so
+// once there's at least one it's no longer offered at all rather than
+// just warned about — the memory itself has to be deleted first, from the
+// timeline, if that's really what's wanted.
+$memoryCount = 0;
+if ($person !== null) {
+    $memStmt = $pdo->prepare('SELECT COUNT(*) FROM timeline_entries WHERE person_id = :pid');
+    $memStmt->execute(['pid' => $personId]);
+    $memoryCount = (int) $memStmt->fetchColumn();
 }
 
 // Candidates for the "add a partner" picker: anyone else in the family
@@ -710,9 +734,9 @@ if ($postedProfile) {
       <p style="font-size:12px;color:var(--ink-faint);margin-top:-12px;">Use this after removing a wrong relationship above, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
       <?php endif; ?>
 
-      <?php if (empty($person['claimed_by_user_id'])): ?>
+      <?php if (empty($person['claimed_by_user_id']) && $memoryCount === 0): ?>
         <h3 style="margin:28px 0 4px;color:var(--error);">Delete this person</h3>
-        <p style="font-size:13px;color:var(--ink-faint);">Only possible while they're still unclaimed. Removes <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> completely, along with every relationship and partnership recorded for them.</p>
+        <p style="font-size:13px;color:var(--ink-faint);">Only possible while they're still unclaimed and have no memories on their timeline. Removes <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> completely, along with every relationship and partnership recorded for them.</p>
         <?php if (!$confirmDelete): ?>
           <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_delete=1" class="btn-danger">Delete this person</a>
         <?php else: ?>
@@ -732,6 +756,9 @@ if ($postedProfile) {
             </div>
           </div>
         <?php endif; ?>
+      <?php elseif (empty($person['claimed_by_user_id']) && $memoryCount > 0): ?>
+        <h3 style="margin:28px 0 4px;">Delete this person</h3>
+        <p style="font-size:13px;color:var(--ink-faint);">Not available — <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has <?= $memoryCount ?> <?= $memoryCount === 1 ? 'memory' : 'memories' ?> on their timeline. <a href="/timeline.php?person_id=<?= $personId ?>">Delete those first</a> if this person really needs to go.</p>
       <?php endif; ?>
 
     <?php endif; ?>
