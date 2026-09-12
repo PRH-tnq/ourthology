@@ -14,15 +14,26 @@ declare(strict_types=1);
  * always be perfectly crossing-free, but it always produces a stable,
  * readable, generation-correct chart, and never fails to lay out a person
  * out just because their family history is complicated.
+ *
+ * Sizing/spacing mirrors the original prototype's tree (same node envelope
+ * and gaps: prototypes/timeline.html's TREE_NODE_W/H, TREE_NODE_GAP,
+ * TREE_TIER_GAP, TREE_SPOUSE_GAP), since the point of this pass is to look
+ * and feel like that tree even though the layout algorithm underneath is
+ * new (the prototype's was built around a different, single-user model).
  */
 
-const TREE_NODE_W = 150;
-const TREE_NODE_H = 56;
-const TREE_NODE_SPACING_X = 190;
-const TREE_TIER_SPACING_Y = 150;
-const TREE_TOP_PAD = 50;
-// Half a node's width plus a little breathing room, so the outermost node
-// in the widest row doesn't get clipped flush against the canvas edge.
+const TREE_NODE_W = 118;
+const TREE_NODE_H = 62;
+const TREE_ME_W = 96;
+const TREE_ME_H = 50;
+const TREE_NODE_GAP = 150;   // horizontal distance between ordinary adjacent people
+const TREE_SPOUSE_GAP = 120; // tighter — keeps a partner visually paired
+const TREE_TIER_GAP = 148;   // vertical distance between generations
+const TREE_TOP_PAD = 60;
+const TREE_ROW_LABEL_W = 90; // left margin reserved for "PARENTS" / "GRANDPARENTS" etc.
+// Half the widest node's width plus a little breathing room, so the
+// outermost node in the widest row doesn't get clipped flush against the
+// canvas edge.
 const TREE_SIDE_PAD = TREE_NODE_W / 2 + 30;
 
 /**
@@ -70,18 +81,38 @@ function tree_compute_tiers(array $persons, array $childrenOf, array $parentsOf,
     return $tier;
 }
 
-/** Average x-slot of a unit's already-positioned parents, or null if none are positioned yet. */
-function tree_unit_barycenter(array $unit, array $parentsOf, array $xslot): ?float
+/** Average relative x of a unit's already-positioned parents, or null if none are positioned yet. */
+function tree_unit_barycenter(array $unit, array $parentsOf, array $xrel): ?float
 {
     $vals = [];
     foreach ($unit as $id) {
         foreach ($parentsOf[$id] ?? [] as $pid) {
-            if (isset($xslot[$pid])) {
-                $vals[] = $xslot[$pid];
+            if (isset($xrel[$pid])) {
+                $vals[] = $xrel[$pid];
             }
         }
     }
     return $vals ? array_sum($vals) / count($vals) : null;
+}
+
+/** "PARENTS" / "GRANDPARENTS" / "3× GREAT-GRANDCHILDREN" etc., or null for the viewer's own row. */
+function tree_tier_label(int $offsetFromViewer): ?string
+{
+    if ($offsetFromViewer === 0) {
+        return null;
+    }
+    $abs = abs($offsetFromViewer);
+    $down = $offsetFromViewer > 0;
+    if ($abs === 1) {
+        return $down ? 'CHILDREN' : 'PARENTS';
+    }
+    if ($abs === 2) {
+        return $down ? 'GRANDCHILDREN' : 'GRANDPARENTS';
+    }
+    $greats = $abs - 2; // "great" steps beyond grandparent/grandchild
+    $word = $down ? 'GRANDCHILDREN' : 'GRANDPARENTS';
+    $prefix = $greats === 1 ? 'GREAT-' : $greats . '× GREAT-';
+    return $prefix . $word;
 }
 
 function compute_tree_layout(array $graph, int $viewerPersonId): array
@@ -115,7 +146,7 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
     ksort($byTier);
 
     $order = [];  // tier => ordered person ids, couples kept adjacent
-    $xslot = [];  // person_id => integer slot index within its own tier
+    $xrel  = [];  // person_id => relative x within its own tier (0-based, gap-weighted)
 
     foreach ($byTier as $t => $ids) {
         $seen = [];
@@ -135,9 +166,9 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
             }
         }
 
-        usort($units, function ($u1, $u2) use ($parentsOf, $xslot) {
-            $b1 = tree_unit_barycenter($u1, $parentsOf, $xslot);
-            $b2 = tree_unit_barycenter($u2, $parentsOf, $xslot);
+        usort($units, function ($u1, $u2) use ($parentsOf, $xrel) {
+            $b1 = tree_unit_barycenter($u1, $parentsOf, $xrel);
+            $b2 = tree_unit_barycenter($u2, $parentsOf, $xrel);
             if ($b1 === null && $b2 === null) {
                 return $u1[0] <=> $u2[0];
             }
@@ -150,38 +181,46 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
             return $b1 <=> $b2 ?: ($u1[0] <=> $u2[0]);
         });
 
-        $slot = 0;
+        // Cumulative placement: a bonded couple sits TREE_SPOUSE_GAP apart
+        // (tight, reads as one unit), everyone else TREE_NODE_GAP apart —
+        // matching the prototype's own spacing choices exactly.
+        $cum = 0;
         $orderedIds = [];
+        $prevId = null;
         foreach ($units as $unit) {
             foreach ($unit as $id) {
-                $xslot[$id] = $slot;
+                if ($prevId === null) {
+                    $xrel[$id] = 0;
+                } else {
+                    $gap = (($partnerOf[$prevId] ?? null) === $id) ? TREE_SPOUSE_GAP : TREE_NODE_GAP;
+                    $cum += $gap;
+                    $xrel[$id] = $cum;
+                }
                 $orderedIds[] = $id;
-                $slot++;
+                $prevId = $id;
             }
         }
         $order[$t] = $orderedIds;
     }
 
-    // Convert slot indices into actual pixel positions, centering every
-    // tier's row around a shared horizontal midline regardless of how many
-    // people are in it.
-    $maxRowWidth = 0;
-    foreach ($order as $ids) {
-        $rowWidth = (count($ids) - 1) * TREE_NODE_SPACING_X;
-        $maxRowWidth = max($maxRowWidth, $rowWidth);
+    // Center every tier's row around a shared horizontal midline regardless
+    // of how many people (or how tightly spaced) are in it.
+    $rowWidth = [];
+    foreach ($order as $t => $ids) {
+        $rowWidth[$t] = $ids ? max($xrel[end($ids)], 0) : 0;
     }
+    $maxRowWidth = $rowWidth ? max($rowWidth) : 0;
 
     $tiersAsc = array_keys($order);
     $minTier = $tiersAsc ? min($tiersAsc) : 0;
 
     $pos = []; // person_id => ['x'=>..,'y'=>..,'tier'=>..]
     foreach ($order as $t => $ids) {
-        $rowWidth = (count($ids) - 1) * TREE_NODE_SPACING_X;
-        $offset = ($maxRowWidth - $rowWidth) / 2;
-        foreach ($ids as $i => $id) {
+        $offset = ($maxRowWidth - $rowWidth[$t]) / 2;
+        foreach ($ids as $id) {
             $pos[$id] = [
-                'x'    => TREE_SIDE_PAD + $offset + $i * TREE_NODE_SPACING_X,
-                'y'    => TREE_TOP_PAD + ($t - $minTier) * TREE_TIER_SPACING_Y,
+                'x'    => TREE_ROW_LABEL_W + TREE_SIDE_PAD + $offset + $xrel[$id],
+                'y'    => TREE_TOP_PAD + ($t - $minTier) * TREE_TIER_GAP,
                 'tier' => $t,
             ];
         }
@@ -199,14 +238,26 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
         $familyUnits[$key]['children'][] = $childId;
     }
 
-    $totalWidth = $maxRowWidth + 2 * TREE_SIDE_PAD;
-    $totalHeight = TREE_TOP_PAD + (count($order) ? (max($tiersAsc) - $minTier) * TREE_TIER_SPACING_Y : 0) + TREE_NODE_H / 2 + 30;
+    // Row labels ("PARENTS", "GRANDCHILDREN", ...) — one per tier, at that
+    // tier's y, skipping the viewer's own row (the highlighted "you" node
+    // already marks it).
+    $rowLabels = [];
+    foreach ($tiersAsc as $t) {
+        $label = tree_tier_label($t);
+        if ($label !== null) {
+            $rowLabels[] = ['y' => TREE_TOP_PAD + ($t - $minTier) * TREE_TIER_GAP, 'text' => $label];
+        }
+    }
+
+    $totalWidth = TREE_ROW_LABEL_W + $maxRowWidth + 2 * TREE_SIDE_PAD;
+    $totalHeight = TREE_TOP_PAD + (count($order) ? (max($tiersAsc) - $minTier) * TREE_TIER_GAP : 0) + TREE_NODE_H / 2 + 40;
 
     return [
         'positions'    => $pos,
         'order'        => $order,
         'partnerOf'    => $partnerOf,
         'familyUnits'  => array_values($familyUnits),
+        'rowLabels'    => $rowLabels,
         'width'        => $totalWidth,
         'height'       => $totalHeight,
     ];

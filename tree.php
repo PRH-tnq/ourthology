@@ -56,8 +56,14 @@ $treeNodeH = TREE_NODE_H;
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My tree — ourthology.com</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 <style>
+  :root {
+    --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
+  }
   body { align-items: flex-start; }
   .wide { max-width: 900px; }
   .nav { display:flex; gap:10px; flex-wrap:wrap; margin: 18px 0 4px; }
@@ -65,26 +71,28 @@ $treeNodeH = TREE_NODE_H;
   .nav a.badge { background: var(--error-bg); border-color: var(--error-bg); color: var(--accent); font-weight:600; }
   ul.plain { list-style:none; padding:0; margin:8px 0; }
   ul.plain li { padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
-  .tag { display:inline-block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; padding:2px 6px; border-radius:4px; margin-left:6px; }
-  .tag.claimed { background:#e2ecdf; color:#3a6b4f; }
-  .tag.unclaimed { background:var(--paper-2); color:var(--ink-faint); }
   .linklet { font-size:12px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; }
   .flash { word-break:break-all; font-size:13px; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0 16px; }
-  .tree-scroll { overflow-x:auto; overflow-y:hidden; border:1px solid var(--line); border-radius:10px; background:#fff; margin-top:10px; }
-  .tree-scroll svg { display:block; }
-  .tree-link, .tree-bond { stroke:var(--line); stroke-width:1.6; fill:none; }
-  .tree-node rect { fill:#fff; stroke:var(--line); stroke-width:1.4; rx:9; }
-  .tree-node.you rect { stroke:var(--accent); stroke-width:2; }
-  .tree-node.unclaimed rect { stroke-dasharray:4 3; fill:var(--paper-2); }
-  .tree-node text { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; fill:var(--ink); }
-  .tree-node .tn-name { font-size:13px; font-weight:600; }
-  .tree-node .tn-tag { font-size:10px; fill:var(--ink-faint); text-transform:uppercase; letter-spacing:.03em; }
-  .tree-node a { cursor:pointer; }
-  .tree-legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--ink-faint); margin-top:8px; }
-  .tree-legend span { display:inline-flex; align-items:center; gap:5px; }
-  .tree-legend i { width:10px; height:10px; border-radius:3px; display:inline-block; border:1.4px solid var(--line); }
-  .tree-legend i.unclaimed { background:var(--paper-2); border-style:dashed; }
-  .tree-legend i.you { border-color:var(--accent); border-width:2px; }
+
+  /* Tree diagram — styled to match the original prototype's family-tree
+     view: a soft paper-toned well, no boxes around people (just stacked
+     text, name over status), warm serif type, blood lines plain and thin,
+     partner bonds picked out in accent. */
+  .tree-wrap { background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; }
+  .tree-wrap svg { display:block; margin:0 auto; }
+  .tree-link { fill:none; stroke:var(--ink-soft); stroke-width:1.4; }
+  .tree-bond { fill:none; stroke:var(--accent); stroke-width:2.4; }
+  .tree-row-label { fill:var(--ink-faint); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+  .tree-node { cursor:pointer; }
+  .tree-node .tn-hit { fill:transparent; stroke:none; }
+  .tree-node .tn-name { font-family:"Fraunces",Georgia,serif; font-weight:700; font-size:14px; text-anchor:middle; fill:var(--ink); transition:fill .15s ease; }
+  .tree-node .tn-tag { font-family:"Newsreader",Georgia,serif; font-size:10px; text-transform:uppercase; letter-spacing:.05em; text-anchor:middle; fill:var(--ink-soft); }
+  .tree-node.unclaimed .tn-name { fill:var(--ink-soft); }
+  .tree-node:hover .tn-name { fill:var(--accent); }
+  .tree-node.you .tn-name { fill:var(--accent); font-size:17px; text-decoration:underline; text-decoration-color:var(--accent-glow); text-underline-offset:4px; }
+  .tree-node.you:hover .tn-name { fill:var(--accent); }
+  .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
+  .tree-key strong { color:var(--ink); }
 </style>
 </head>
 <body>
@@ -109,8 +117,11 @@ $treeNodeH = TREE_NODE_H;
     <?php if (count($graph['persons']) <= 1): ?>
       <p style="color:var(--ink-faint);margin-top:8px;">No relationships yet — add a relative to get started.</p>
     <?php else: ?>
-      <div class="tree-scroll">
+      <div class="tree-wrap">
         <svg viewBox="0 0 <?= (int) $layout['width'] ?> <?= (int) $layout['height'] ?>" width="<?= (int) $layout['width'] ?>" height="<?= (int) $layout['height'] ?>">
+          <?php foreach ($layout['rowLabels'] as $rl): ?>
+            <text class="tree-row-label" x="14" y="<?= $rl['y'] + 4 ?>"><?= htmlspecialchars($rl['text'], ENT_QUOTES) ?></text>
+          <?php endforeach; ?>
           <?php foreach ($layout['familyUnits'] as $unit): ?>
             <?php
               $parentXs = [];
@@ -152,29 +163,41 @@ $treeNodeH = TREE_NODE_H;
               $left = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$aId] : $layout['positions'][$bId];
               $right = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$bId] : $layout['positions'][$aId];
             ?>
-            <line class="tree-bond" x1="<?= $left['x'] + $treeNodeW / 2 ?>" y1="<?= $left['y'] ?>" x2="<?= $right['x'] - $treeNodeW / 2 ?>" y2="<?= $right['y'] ?>"></line>
+            <?php
+              // A small fixed inset (rather than half the node's hit-width)
+              // so the bond reads as a clear connecting stroke regardless of
+              // how short or long each name is.
+              $bondInset = 18;
+            ?>
+            <line class="tree-bond" x1="<?= $left['x'] + $bondInset ?>" y1="<?= $left['y'] ?>" x2="<?= $right['x'] - $bondInset ?>" y2="<?= $right['y'] ?>"></line>
           <?php endforeach; ?>
 
           <?php foreach ($layout['positions'] as $pid => $pos): ?>
-            <?php $person = $personsById[$pid] ?? null; if (!$person) continue; ?>
+            <?php
+              $person = $personsById[$pid] ?? null;
+              if (!$person) continue;
+              $isYou = $pid === $myPersonId;
+              $hitW = $isYou ? TREE_ME_W : TREE_NODE_W;
+              $hitH = $isYou ? TREE_ME_H : $treeNodeH;
+            ?>
             <a href="/timeline.php?person_id=<?= $pid ?>">
-              <g class="tree-node<?= $pid === $myPersonId ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] - $treeNodeW / 2 ?>, <?= $pos['y'] - $treeNodeH / 2 ?>)">
-                <rect width="<?= $treeNodeW ?>" height="<?= $treeNodeH ?>"></rect>
-                <text class="tn-name" x="<?= $treeNodeW / 2 ?>" y="24" text-anchor="middle"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 20, '…'), ENT_QUOTES) ?></text>
-                <text class="tn-tag" x="<?= $treeNodeW / 2 ?>" y="40" text-anchor="middle">
-                  <?= $pid === $myPersonId ? 'You' : ($person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed') ?>
-                </text>
+              <g class="tree-node<?= $isYou ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] ?>, <?= $pos['y'] ?>)">
+                <rect class="tn-hit" x="<?= -$hitW / 2 ?>" y="<?= -$hitH / 2 ?>" width="<?= $hitW ?>" height="<?= $hitH ?>"></rect>
+                <?php if ($isYou): ?>
+                  <text class="tn-name" y="6">You</text>
+                <?php else: ?>
+                  <text class="tn-name" y="-3"><?= htmlspecialchars(mb_strimwidth(person_display_name($person), 0, 18, '…'), ENT_QUOTES) ?></text>
+                  <text class="tn-tag" y="13"><?= $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed' ?></text>
+                <?php endif; ?>
               </g>
             </a>
           <?php endforeach; ?>
         </svg>
       </div>
-      <div class="tree-legend">
-        <span><i class="you"></i> you</span>
-        <span><i></i> claimed account</span>
-        <span><i class="unclaimed"></i> not yet claimed</span>
-      </div>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Click anyone to see their timeline. Scroll sideways if the tree is wider than the screen.</p>
+      <p class="tree-key">
+        <strong>You</strong> are underlined in red · plain name = claimed account · <em>Unclaimed</em> label = not yet claimed<br>
+        Click anyone to see their timeline. Scroll if the tree is wider than the screen.
+      </p>
     <?php endif; ?>
 
     <?php if ($unclaimed): ?>
