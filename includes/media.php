@@ -24,7 +24,12 @@ function ourthology_media_dir(): string
     return dirname(__DIR__) . '/private-media';
 }
 
-const MEDIA_MAX_BYTES = 25 * 1024 * 1024; // 25MB
+const MEDIA_MAX_BYTES = 25 * 1024 * 1024; // 25MB, per file
+
+// A single timeline entry can carry more than one attachment (see
+// store_uploaded_media_files() below) — capped so one submission can't be
+// used to dump an unbounded number of files on the server in one request.
+const MEDIA_MAX_FILES_PER_ENTRY = 10;
 
 /** extension => [allowed mime types] — used to validate the file's REAL content, not the client-supplied name/type. */
 const MEDIA_ALLOWED = [
@@ -36,6 +41,10 @@ const MEDIA_ALLOWED = [
     'mp4'  => ['video/mp4'],
     'mov'  => ['video/quicktime'],
     'webm' => ['video/webm'],
+    'pdf'  => ['application/pdf'],
+    'doc'  => ['application/msword'],
+    'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    'txt'  => ['text/plain'],
 ];
 
 /**
@@ -73,7 +82,7 @@ function store_uploaded_media(array $file, int $personId): array
         }
     }
     if ($extension === null) {
-        throw new RuntimeException('That file type is not supported — please use a JPEG, PNG, GIF, WEBP, MP4, MOV, or WEBM file.');
+        throw new RuntimeException('That file type is not supported — please use a JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT file.');
     }
 
     $dir = ourthology_media_dir() . '/' . $personId;
@@ -104,6 +113,76 @@ function store_uploaded_media(array $file, int $personId): array
         'width'     => $width,
         'height'    => $height,
     ];
+}
+
+/**
+ * Flattens PHP's nested $_FILES structure for a name="media[]" multi-file
+ * input into a plain list of individual file arrays (one per selected
+ * file, in submitted order), skipping any slot left empty
+ * (UPLOAD_ERR_NO_FILE) — normally the JS-managed picker never submits an
+ * empty slot, but an empty/absent field is handled the same way so callers
+ * don't need their own special case for "nothing chosen".
+ */
+function normalize_multi_file_upload(array $filesField): array
+{
+    $names = $filesField['name'] ?? [];
+    $count = is_array($names) ? count($names) : 0;
+    $out = [];
+    for ($i = 0; $i < $count; $i++) {
+        if (($filesField['error'][$i] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        $out[] = [
+            'name'     => $filesField['name'][$i] ?? '',
+            'type'     => $filesField['type'][$i] ?? '',
+            'tmp_name' => $filesField['tmp_name'][$i] ?? '',
+            'error'    => $filesField['error'][$i] ?? UPLOAD_ERR_NO_FILE,
+            'size'     => $filesField['size'][$i] ?? 0,
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Validates and stores every file from a name="media[]" multi-file upload
+ * for a person — one call per timeline entry, so an entry can carry several
+ * photos, videos and/or documents together (e.g. a memory with three
+ * photos and the scanned certificate that goes with them).
+ *
+ * All-or-nothing: if any file is invalid, every file already written to
+ * disk earlier in this same call is deleted again before the exception
+ * propagates, so a rejected submission never leaves an orphaned file
+ * behind on disk with no database row pointing at it — the same atomicity
+ * the surrounding DB transaction already gives the timeline_entries/media
+ * rows themselves.
+ *
+ * Returns a list of ['file_path','mime_type','byte_size','width','height']
+ * (the same shape store_uploaded_media() returns for one file), in
+ * submitted order, or throws RuntimeException with a user-facing message
+ * that names the offending file when there is more than one.
+ */
+function store_uploaded_media_files(array $filesField, int $personId): array
+{
+    $files = normalize_multi_file_upload($filesField);
+    if (count($files) > MEDIA_MAX_FILES_PER_ENTRY) {
+        throw new RuntimeException('Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files to one entry.');
+    }
+
+    $stored = [];
+    $multiple = count($files) > 1;
+    foreach ($files as $file) {
+        try {
+            $stored[] = store_uploaded_media($file, $personId);
+        } catch (RuntimeException $e) {
+            foreach ($stored as $done) {
+                delete_media_file($done['file_path']);
+            }
+            $label = trim((string) ($file['name'] ?? ''));
+            $prefix = ($multiple && $label !== '') ? '"' . $label . '": ' : '';
+            throw new RuntimeException($prefix . $e->getMessage());
+        }
+    }
+    return $stored;
 }
 
 /** Delete a media row's underlying file from disk (call before/alongside deleting the DB row). */
