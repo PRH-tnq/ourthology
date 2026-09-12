@@ -170,7 +170,87 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
             }
         }
 
-        usort($units, function ($u1, $u2) use ($parentsOf, $xrel) {
+        // Co-parents of the same child(ren) should sort next to each
+        // other, the same way actual partners already do by being kept in
+        // one unit from the pairing step above — most often two people
+        // who share children but were never recorded as partners of each
+        // other (this app has no way yet to mark two unclaimed
+        // placeholders as partners of one another). Without this, a unit
+        // with no positioned parents of its own has nothing to compute
+        // its own barycenter from, sorts purely by id, and can easily
+        // land between two OTHER units — splitting a family unit's two
+        // parents apart and running that family's connecting line
+        // straight past (or through) whoever landed in the middle.
+        // Clustering first, by shared-child overlap, then sorting
+        // clusters (falling back to whichever member has a real
+        // barycenter, or id order if none do) keeps every such pair
+        // adjacent regardless of which one happens to have a computable
+        // barycenter of its own.
+        $childSetOf = function (array $unit) use ($childrenOf): array {
+            $out = [];
+            foreach ($unit as $id) {
+                foreach ($childrenOf[$id] ?? [] as $c) {
+                    $out[$c] = true;
+                }
+            }
+            return array_keys($out);
+        };
+        $clusterOf = range(0, count($units) - 1);
+        $childSets = array_map($childSetOf, $units);
+        for ($i = 0; $i < count($units); $i++) {
+            if (!$childSets[$i]) {
+                continue;
+            }
+            for ($j = $i + 1; $j < count($units); $j++) {
+                if ($clusterOf[$j] === $clusterOf[$i] || !$childSets[$j]) {
+                    continue;
+                }
+                if (array_intersect($childSets[$i], $childSets[$j])) {
+                    $old = $clusterOf[$j];
+                    $new = $clusterOf[$i];
+                    foreach ($clusterOf as $k => $c) {
+                        if ($c === $old) {
+                            $clusterOf[$k] = $new;
+                        }
+                    }
+                }
+            }
+        }
+        $clusterBarycenter = [];
+        $clusterMinId = [];
+        foreach ($units as $i => $unit) {
+            $c = $clusterOf[$i];
+            $b = tree_unit_barycenter($unit, $parentsOf, $xrel);
+            if ($b !== null && !isset($clusterBarycenter[$c])) {
+                $clusterBarycenter[$c] = $b;
+            }
+            if (!isset($clusterMinId[$c]) || $unit[0] < $clusterMinId[$c]) {
+                $clusterMinId[$c] = $unit[0];
+            }
+        }
+
+        usort($units, function ($u1, $u2) use ($units, $clusterOf, $clusterBarycenter, $clusterMinId, $parentsOf, $xrel) {
+            $i1 = array_search($u1, $units, true);
+            $i2 = array_search($u2, $units, true);
+            $c1 = $clusterOf[$i1];
+            $c2 = $clusterOf[$i2];
+            if ($c1 !== $c2) {
+                $b1 = $clusterBarycenter[$c1] ?? null;
+                $b2 = $clusterBarycenter[$c2] ?? null;
+                if ($b1 === null && $b2 === null) {
+                    return $clusterMinId[$c1] <=> $clusterMinId[$c2];
+                }
+                if ($b1 === null) {
+                    return 1;
+                }
+                if ($b2 === null) {
+                    return -1;
+                }
+                return $b1 <=> $b2 ?: ($clusterMinId[$c1] <=> $clusterMinId[$c2]);
+            }
+            // Same cluster (co-parents, or already a partner unit): order
+            // by each unit's own barycenter/id so the result is still
+            // stable, without pulling them apart from each other.
             $b1 = tree_unit_barycenter($u1, $parentsOf, $xrel);
             $b2 = tree_unit_barycenter($u2, $parentsOf, $xrel);
             if ($b1 === null && $b2 === null) {
@@ -207,23 +287,173 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
         $order[$t] = $orderedIds;
     }
 
-    // Center every tier's row around a shared horizontal midline regardless
-    // of how many people (or how tightly spaced) are in it.
-    $rowWidth = [];
-    foreach ($order as $t => $ids) {
-        $rowWidth[$t] = $ids ? max($xrel[end($ids)], 0) : 0;
-    }
-    $maxRowWidth = $rowWidth ? max($rowWidth) : 0;
-
     $tiersAsc = array_keys($order);
     $minTier = $tiersAsc ? min($tiersAsc) : 0;
 
+    // Turn each tier's order back into units (adjacent partner pairs = one
+    // unit) so the centering pass below can move a couple together.
+    $unitsByTier = [];
+    foreach ($order as $t => $ids) {
+        $units = [];
+        $seen = [];
+        foreach ($ids as $i => $id) {
+            if (isset($seen[$id])) {
+                continue;
+            }
+            $next = $ids[$i + 1] ?? null;
+            if ($next !== null && ($partnerOf[$id] ?? null) === $next) {
+                $units[] = [$id, $next];
+                $seen[$id] = true;
+                $seen[$next] = true;
+            } else {
+                $units[] = [$id];
+                $seen[$id] = true;
+            }
+        }
+        $unitsByTier[$t] = $units;
+    }
+
+    // Final, GLOBALLY comparable x per person. $xrel above restarts at 0
+    // independently for every tier, so one tier's own left edge carries no
+    // meaning relative to any other tier's — the previous version papered
+    // over that by centering each row's overall *bounding box* within the
+    // widest row, which usually looked plausible but never actually
+    // aligned a specific parent's trunk with a specific child underneath
+    // it (an only child, or a whole chain of only-children spanning
+    // several generations, would dogleg sideways at every junction purely
+    // because each tier's width happened to differ from its neighbors').
+    //
+    // Instead: the viewer's own tier keeps exactly the spacing/order
+    // already computed above (nothing to visually center it on yet, and
+    // its own sibling order/spacing is already correct), and every other
+    // tier is then pulled — working outward from the viewer's tier in
+    // both directions, one tier at a time — toward the average x of
+    // whichever already-positioned adjacent tier it connects to:
+    // descendants toward their own parents, ancestors toward their own
+    // children. A single child then lines up in a dead straight line
+    // under its parents' trunk (and a chain of them stays straight across
+    // any number of generations), because its x *is* that trunk's x, not
+    // a separately-spaced value that merely landed close to it. A unit
+    // with nothing to reference in the adjacent tier (the oldest
+    // ancestors on record, a marry-in with no represented family of their
+    // own) simply takes the next free slot after its left neighbor.
+    $finalX = [];
+    foreach ($unitsByTier[0] ?? [] as $unit) {
+        foreach ($unit as $id) {
+            $finalX[$id] = $xrel[$id];
+        }
+    }
+
+    $placeTierOutward = function (int $t, array $refMap) use (&$finalX, $unitsByTier, $partnerOf) {
+        // Two adjacent units that are both parents (or both children) of
+        // the exact *same* set of people on the other side — most often
+        // two co-parents of the same kids who were never actually
+        // recorded as partners of each other, which this app can't always
+        // avoid (there's no way yet to mark two unclaimed placeholders as
+        // partners — see the Phase 6a note) — get grouped and centered as
+        // one pair, rather than each pulled toward the same point
+        // independently: pulling them one at a time landed the first
+        // exactly on target and shoved the second a full extra gap to the
+        // right of it, which is correct (no overlap) but visibly lopsided
+        // for something that's conceptually one pair. A formally
+        // partnered couple is just the special case where this was
+        // already true by construction (partnerOf keeps them adjacent as
+        // a single unit to begin with).
+        $groups = [];
+        $lastKey = null;
+        foreach ($unitsByTier[$t] as $unit) {
+            $targets = [];
+            foreach ($unit as $id) {
+                foreach ($refMap[$id] ?? [] as $rid) {
+                    $targets[$rid] = true;
+                }
+            }
+            $targetIds = array_keys($targets);
+            sort($targetIds);
+            $key = $targetIds ? implode(',', $targetIds) : null;
+            if ($key !== null && $key === $lastKey) {
+                $groups[count($groups) - 1][] = $unit;
+            } else {
+                $groups[] = [$unit];
+            }
+            $lastKey = $key;
+        }
+
+        $prevRight = null;
+        foreach ($groups as $group) {
+            // The group's own members, laid out left-to-right at their
+            // normal relative spacing (tight within an actual partner
+            // pair, the ordinary gap otherwise) — this only determines the
+            // group's own internal spacing and total width, never whether
+            // it merged with its neighbor, so nothing here changes how far
+            // apart two genuine partners, or two merely-adjacent co-
+            // parents, are drawn from each other.
+            $offsets = [];
+            $cum = 0;
+            $prevIdInGroup = null;
+            foreach ($group as $unit) {
+                foreach ($unit as $id) {
+                    if ($prevIdInGroup !== null) {
+                        $cum += (($partnerOf[$prevIdInGroup] ?? null) === $id) ? TREE_SPOUSE_GAP : TREE_NODE_GAP;
+                    }
+                    $offsets[$id] = $cum;
+                    $prevIdInGroup = $id;
+                }
+            }
+            $groupWidth = $cum;
+
+            $targets = [];
+            foreach ($group as $unit) {
+                foreach ($unit as $id) {
+                    foreach ($refMap[$id] ?? [] as $rid) {
+                        if (isset($finalX[$rid])) {
+                            $targets[] = $finalX[$rid];
+                        }
+                    }
+                }
+            }
+            $desiredCenter = $targets ? array_sum($targets) / count($targets) : null;
+            if ($desiredCenter === null) {
+                $desiredCenter = ($prevRight ?? 0) + $groupWidth / 2;
+            }
+            $left = $desiredCenter - $groupWidth / 2;
+            if ($prevRight !== null && $left < $prevRight) {
+                $left = $prevRight;
+            }
+            foreach ($offsets as $id => $off) {
+                $finalX[$id] = $left + $off;
+            }
+            $prevRight = $left + $groupWidth + TREE_NODE_GAP;
+        }
+    };
+
+    // Descendant tiers, nearest the viewer outward (1, 2, 3, ...): each
+    // pulls toward its own parentsOf, one tier closer to 0 and therefore
+    // already placed.
+    $descTiers = array_values(array_filter($tiersAsc, fn($t) => $t > 0));
+    sort($descTiers);
+    foreach ($descTiers as $t) {
+        $placeTierOutward($t, $parentsOf);
+    }
+
+    // Ancestor tiers, nearest the viewer outward (-1, -2, -3, ...): each
+    // pulls toward its own childrenOf, one tier closer to 0.
+    $ancTiers = array_values(array_filter($tiersAsc, fn($t) => $t < 0));
+    rsort($ancTiers);
+    foreach ($ancTiers as $t) {
+        $placeTierOutward($t, $childrenOf);
+    }
+
+    $allX = array_values($finalX);
+    $minX = $allX ? min($allX) : 0;
+    $maxX = $allX ? max($allX) : 0;
+    $maxRowWidth = $maxX - $minX;
+
     $pos = []; // person_id => ['x'=>..,'y'=>..,'tier'=>..]
     foreach ($order as $t => $ids) {
-        $offset = ($maxRowWidth - $rowWidth[$t]) / 2;
         foreach ($ids as $id) {
             $pos[$id] = [
-                'x'    => TREE_ROW_LABEL_W + TREE_SIDE_PAD + $offset + $xrel[$id],
+                'x'    => TREE_ROW_LABEL_W + TREE_SIDE_PAD + ($finalX[$id] - $minX),
                 'y'    => TREE_TOP_PAD + ($t - $minTier) * TREE_TIER_GAP,
                 'tier' => $t,
             ];
