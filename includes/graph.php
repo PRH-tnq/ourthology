@@ -362,6 +362,47 @@ function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $d
     }
 }
 
+/**
+ * Insert a confirmed partnership between two people already in the same
+ * family group. Shared by add_relative.php's "attach an existing person"
+ * mode and edit_person.php's own "add a partnership" action, so the two
+ * can't drift apart on the duplicate-pair check.
+ *
+ * Throws RuntimeException('duplicate_partnership') if a confirmed
+ * partnership between this exact pair already exists — partnerships has
+ * no unique constraint on the pair the way relationships does
+ * (uniq_parent_child), so this guard has to be explicit.
+ */
+function create_confirmed_partnership(PDO $pdo, int $aId, int $bId, string $kind, int $createdByUserId): void
+{
+    $lo = min($aId, $bId);
+    $hi = max($aId, $bId);
+    $exists = $pdo->prepare(
+        'SELECT 1 FROM partnerships WHERE status = :status AND person_a_id = :a AND person_b_id = :b'
+    );
+    $exists->execute(['status' => 'confirmed', 'a' => $lo, 'b' => $hi]);
+    if ($exists->fetchColumn()) {
+        throw new RuntimeException('duplicate_partnership');
+    }
+    $pdo->prepare(
+        "INSERT INTO partnerships (person_a_id, person_b_id, kind, status, created_by_user_id)
+         VALUES (:a, :b, :kind, 'confirmed', :uid)"
+    )->execute(['a' => $lo, 'b' => $hi, 'kind' => $kind, 'uid' => $createdByUserId]);
+}
+
+/**
+ * Can $viewerUserId edit $person's own record (name/dates) and the
+ * relationships/partnerships shown on their edit_person.php page? True
+ * for any unclaimed person (a placeholder anyone in the family group can
+ * correct) or for your own claimed record — false for anyone else's
+ * claimed record, which only that account holder may change.
+ */
+function person_is_editable_by(array $person, int $viewerUserId): bool
+{
+    $claimedBy = $person['claimed_by_user_id'] ?? null;
+    return $claimedBy === null || (int) $claimedBy === $viewerUserId;
+}
+
 function create_claim_token(PDO $pdo, int $personId, int $createdByUserId): string
 {
     $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');

@@ -136,24 +136,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($plan['partnerships'] ?? [] as $part) {
                 $a = $resolveNew($part['a']);
                 $b = $resolveNew($part['b']);
-                $lo = min($a, $b);
-                $hi = max($a, $b);
-                // partnerships has no unique constraint the way relationships
-                // does (uniq_parent_child), so a duplicate would otherwise
-                // insert silently — worth guarding directly, especially now
-                // that "attach an existing person" makes it easy to
-                // re-submit a link that's already there.
-                $exists = $pdo->prepare(
-                    'SELECT 1 FROM partnerships WHERE status = :status AND person_a_id = :a AND person_b_id = :b'
-                );
-                $exists->execute(['status' => 'confirmed', 'a' => $lo, 'b' => $hi]);
-                if ($exists->fetchColumn()) {
-                    throw new RuntimeException('duplicate_partnership');
-                }
-                $pdo->prepare(
-                    "INSERT INTO partnerships (person_a_id, person_b_id, kind, status, created_by_user_id)
-                     VALUES (:a, :b, 'married', 'confirmed', :uid)"
-                )->execute(['a' => $lo, 'b' => $hi, 'uid' => $me['user_id']]);
+                // create_confirmed_partnership() throws RuntimeException(
+                // 'duplicate_partnership') if this exact pair is already
+                // recorded — worth guarding directly, especially now that
+                // "attach an existing person" makes it easy to re-submit a
+                // link that's already there.
+                create_confirmed_partnership($pdo, $a, $b, 'married', (int) $me['user_id']);
             }
 
             if ($existingPersonId !== null) {

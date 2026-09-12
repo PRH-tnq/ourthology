@@ -14,6 +14,7 @@ if ($me === null) {
 }
 $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
+$myUserId = (int) $me['user_id'];
 $myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
 
 ourthology_start_session();
@@ -25,6 +26,15 @@ $personIdRaw = $_GET['person_id'] ?? $_POST['person_id'] ?? '';
 $personIdFilter = filter_var($personIdRaw, FILTER_VALIDATE_INT);
 $personId = ($personIdFilter !== false && person_in_group($pdo, (int) $personIdFilter, $myGroup)) ? (int) $personIdFilter : null;
 
+// Fetched up front (before any POST handling) so the edit permission is
+// known before deciding whether to act on a submitted form at all — an
+// unclaimed person can be corrected by anyone in the family group, but a
+// claimed person's own record and relationships belong to that account
+// holder alone, exactly like their name always has been.
+$person = $personId !== null ? person_row($pdo, $personId) : null;
+$canEdit = $person !== null && person_is_editable_by($person, $myUserId);
+$isClaimedByOther = $person !== null && !empty($person['claimed_by_user_id']) && !$canEdit;
+
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -33,28 +43,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($personId === null) {
         $errors[] = 'Choose a person first.';
-    } elseif ($action === 'update_name') {
-        $person = person_row($pdo, $personId);
-        if ($person && $person['claimed_by_user_id']) {
-            $errors[] = "This person has claimed their own record, so their name can't be changed here.";
-        } else {
-            $first = trim((string) ($_POST['first_name'] ?? ''));
-            $middle = trim((string) ($_POST['middle_name'] ?? ''));
-            $surname = trim((string) ($_POST['surname'] ?? ''));
-            if ($first === '') {
-                $errors[] = 'First name is required.';
+    } elseif (!$canEdit) {
+        $errors[] = 'This person has claimed their own record — only they can edit their profile.';
+    } elseif ($action === 'update_profile') {
+        $first = trim((string) ($_POST['first_name'] ?? ''));
+        $middle = trim((string) ($_POST['middle_name'] ?? ''));
+        $surname = trim((string) ($_POST['surname'] ?? ''));
+        if ($first === '') {
+            $errors[] = 'First name is required.';
+        }
+
+        // Born/died, each entered as three distinct slots (DD/MM/YYYY),
+        // same pattern as add_entry.php's date fields — optional, but only
+        // together, so the format can't come out wrong.
+        $bDay   = trim((string) ($_POST['born_day'] ?? ''));
+        $bMonth = trim((string) ($_POST['born_month'] ?? ''));
+        $bYear  = trim((string) ($_POST['born_year'] ?? ''));
+        $dDay   = trim((string) ($_POST['died_day'] ?? ''));
+        $dMonth = trim((string) ($_POST['died_month'] ?? ''));
+        $dYear  = trim((string) ($_POST['died_year'] ?? ''));
+
+        $bornValue = null;
+        $bCount = (int) ($bDay !== '') + (int) ($bMonth !== '') + (int) ($bYear !== '');
+        if ($bCount > 0 && $bCount < 3) {
+            $errors[] = 'Fill in the day, month, and year of birth, or leave all three blank.';
+        } elseif ($bCount === 3) {
+            if (!ctype_digit($bDay) || !ctype_digit($bMonth) || !ctype_digit($bYear)
+                || !checkdate((int) $bMonth, (int) $bDay, (int) $bYear)) {
+                $errors[] = 'Enter a real birth date (or leave day/month/year all blank).';
             } else {
-                $pdo->prepare('UPDATE persons SET first_name = :f, middle_name = :m, surname = :s WHERE id = :id')
-                    ->execute([
-                        'f'  => $first,
-                        'm'  => $middle !== '' ? $middle : null,
-                        's'  => $surname !== '' ? $surname : null,
-                        'id' => $personId,
-                    ]);
-                $_SESSION['flash_edit_notice'] = 'Name updated.';
-                header('Location: /edit_person.php?person_id=' . $personId);
-                exit;
+                $bornValue = sprintf('%04d-%02d-%02d', (int) $bYear, (int) $bMonth, (int) $bDay);
             }
+        }
+
+        $diedValue = null;
+        $dCount = (int) ($dDay !== '') + (int) ($dMonth !== '') + (int) ($dYear !== '');
+        if ($dCount > 0 && $dCount < 3) {
+            $errors[] = 'Fill in the day, month, and year of death, or leave all three blank.';
+        } elseif ($dCount === 3) {
+            if (!ctype_digit($dDay) || !ctype_digit($dMonth) || !ctype_digit($dYear)
+                || !checkdate((int) $dMonth, (int) $dDay, (int) $dYear)) {
+                $errors[] = 'Enter a real date of death (or leave day/month/year all blank).';
+            } else {
+                $diedValue = sprintf('%04d-%02d-%02d', (int) $dYear, (int) $dMonth, (int) $dDay);
+            }
+        }
+
+        if (!$errors && $bornValue !== null && $diedValue !== null && $diedValue < $bornValue) {
+            $errors[] = 'The date of death is before the date of birth.';
+        }
+
+        if (!$errors) {
+            $pdo->prepare(
+                'UPDATE persons SET first_name = :f, middle_name = :m, surname = :s, born = :b, died = :d WHERE id = :id'
+            )->execute([
+                'f'  => $first,
+                'm'  => $middle !== '' ? $middle : null,
+                's'  => $surname !== '' ? $surname : null,
+                'b'  => $bornValue,
+                'd'  => $diedValue,
+                'id' => $personId,
+            ]);
+            $_SESSION['flash_edit_notice'] = 'Profile updated.';
+            header('Location: /edit_person.php?person_id=' . $personId);
+            exit;
         }
     } elseif ($action === 'update_kind') {
         $relId = filter_var($_POST['relationship_id'] ?? '', FILTER_VALIDATE_INT);
@@ -65,8 +117,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare('SELECT parent_id, child_id FROM relationships WHERE id = :id');
             $stmt->execute(['id' => (int) $relId]);
             $rel = $stmt->fetch();
-            if (!$rel || !person_in_group($pdo, (int) $rel['parent_id'], $myGroup) || !person_in_group($pdo, (int) $rel['child_id'], $myGroup)) {
-                $errors[] = 'That relationship is not in your family tree.';
+            if (!$rel || ((int) $rel['parent_id'] !== $personId && (int) $rel['child_id'] !== $personId)) {
+                $errors[] = 'That relationship is not this person\'s to edit.';
             } else {
                 $pdo->prepare("UPDATE relationships SET relation_kind = :k WHERE id = :id")
                     ->execute(['k' => $kind, 'id' => (int) $relId]);
@@ -83,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare('SELECT parent_id, child_id FROM relationships WHERE id = :id');
             $stmt->execute(['id' => (int) $relId]);
             $rel = $stmt->fetch();
-            if (!$rel || !person_in_group($pdo, (int) $rel['parent_id'], $myGroup) || !person_in_group($pdo, (int) $rel['child_id'], $myGroup)) {
-                $errors[] = 'That relationship is not in your family tree.';
+            if (!$rel || ((int) $rel['parent_id'] !== $personId && (int) $rel['child_id'] !== $personId)) {
+                $errors[] = 'That relationship is not this person\'s to edit.';
             } else {
                 $pdo->prepare('DELETE FROM relationships WHERE id = :id')->execute(['id' => (int) $relId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship removed. If this was recorded by mistake, use "Attach as a relative" below to add the correct one.';
@@ -100,13 +152,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare('SELECT person_a_id, person_b_id FROM partnerships WHERE id = :id');
             $stmt->execute(['id' => (int) $partId]);
             $part = $stmt->fetch();
-            if (!$part || !person_in_group($pdo, (int) $part['person_a_id'], $myGroup) || !person_in_group($pdo, (int) $part['person_b_id'], $myGroup)) {
-                $errors[] = 'That relationship is not in your family tree.';
+            if (!$part || ((int) $part['person_a_id'] !== $personId && (int) $part['person_b_id'] !== $personId)) {
+                $errors[] = 'That relationship is not this person\'s to edit.';
             } else {
                 $pdo->prepare('DELETE FROM partnerships WHERE id = :id')->execute(['id' => (int) $partId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship removed.';
                 header('Location: /edit_person.php?person_id=' . $personId);
                 exit;
+            }
+        }
+    } elseif ($action === 'add_partnership') {
+        $otherId = filter_var($_POST['other_person_id'] ?? '', FILTER_VALIDATE_INT);
+        $kind = (string) ($_POST['kind'] ?? 'married');
+        if (!in_array($kind, ['married', 'partner'], true)) {
+            $kind = 'married';
+        }
+        if ($otherId === false || (int) $otherId === $personId || !person_in_group($pdo, (int) $otherId, $myGroup)) {
+            $errors[] = 'Choose someone else in your family tree to record as their partner.';
+        } else {
+            try {
+                create_confirmed_partnership($pdo, $personId, (int) $otherId, $kind, $myUserId);
+                $_SESSION['flash_edit_notice'] = 'Partner added.';
+                header('Location: /edit_person.php?person_id=' . $personId);
+                exit;
+            } catch (RuntimeException $e) {
+                $errors[] = 'They are already recorded as partners.';
             }
         }
     }
@@ -118,7 +188,15 @@ foreach ($graph['persons'] as $p) {
     $personsById[(int) $p['id']] = $p;
 }
 
-$person = $personId !== null ? ($personsById[$personId] ?? null) : null;
+// Re-fetch after any successful mutation above would already have redirected,
+// so this only runs for a fresh GET or a failed/blocked POST — either way
+// $personsById (from the family graph, used for display) should reflect the
+// same row $person does.
+if ($personId !== null && isset($personsById[$personId])) {
+    $person = $personsById[$personId];
+    $canEdit = person_is_editable_by($person, $myUserId);
+    $isClaimedByOther = !empty($person['claimed_by_user_id']) && !$canEdit;
+}
 
 $rels = [];
 $parts = [];
@@ -137,7 +215,7 @@ if ($person !== null) {
     $rels = $relStmt->fetchAll();
 
     $partStmt = $pdo->prepare(
-        "SELECT p.id, p.person_a_id, p.person_b_id,
+        "SELECT p.id, p.person_a_id, p.person_b_id, p.kind,
                 pa.first_name AS a_first, pa.surname AS a_surname,
                 pb.first_name AS b_first, pb.surname AS b_surname
          FROM partnerships p
@@ -150,12 +228,61 @@ if ($person !== null) {
     $parts = $partStmt->fetchAll();
 }
 
+// Candidates for the "add a partner" picker: anyone else in the family
+// group who isn't already recorded as this person's partner.
+$existingPartnerIds = [];
+foreach ($parts as $p) {
+    $existingPartnerIds[] = (int) $p['person_a_id'] === $personId ? (int) $p['person_b_id'] : (int) $p['person_a_id'];
+}
+$partnerCandidates = [];
+if ($person !== null) {
+    foreach ($graph['persons'] as $p) {
+        $pid = (int) $p['id'];
+        if ($pid !== $personId && !in_array($pid, $existingPartnerIds, true)) {
+            $partnerCandidates[] = $p;
+        }
+    }
+}
+
 $confirmRel = filter_var($_GET['confirm_rel'] ?? '', FILTER_VALIDATE_INT);
 $confirmRel = $confirmRel === false ? null : (int) $confirmRel;
 $confirmPart = filter_var($_GET['confirm_part'] ?? '', FILTER_VALIDATE_INT);
 $confirmPart = $confirmPart === false ? null : (int) $confirmPart;
 
 $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive'];
+
+// Re-populate the profile form's fields from the just-submitted POST on a
+// validation error, so a mistake in one field doesn't lose the others —
+// otherwise fall back to the stored values.
+function ourthology_split_date(?string $value): array
+{
+    if (!$value) {
+        return ['', '', ''];
+    }
+    [$y, $m, $d] = array_map('intval', explode('-', $value));
+    return [(string) $d, (string) $m, (string) $y];
+}
+
+$postedProfile = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_profile' && $errors;
+if ($postedProfile) {
+    $pFirst = trim((string) ($_POST['first_name'] ?? ''));
+    $pMiddle = trim((string) ($_POST['middle_name'] ?? ''));
+    $pSurname = trim((string) ($_POST['surname'] ?? ''));
+    $pBornDay = trim((string) ($_POST['born_day'] ?? ''));
+    $pBornMonth = trim((string) ($_POST['born_month'] ?? ''));
+    $pBornYear = trim((string) ($_POST['born_year'] ?? ''));
+    $pDiedDay = trim((string) ($_POST['died_day'] ?? ''));
+    $pDiedMonth = trim((string) ($_POST['died_month'] ?? ''));
+    $pDiedYear = trim((string) ($_POST['died_year'] ?? ''));
+} elseif ($person !== null) {
+    $pFirst = (string) $person['first_name'];
+    $pMiddle = (string) ($person['middle_name'] ?? '');
+    $pSurname = (string) ($person['surname'] ?? '');
+    [$pBornDay, $pBornMonth, $pBornYear] = ourthology_split_date($person['born'] ?? null);
+    [$pDiedDay, $pDiedMonth, $pDiedYear] = ourthology_split_date($person['died'] ?? null);
+} else {
+    $pFirst = $pMiddle = $pSurname = $pBornDay = $pBornMonth = $pBornYear = $pDiedDay = $pDiedMonth = $pDiedYear = '';
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -174,6 +301,7 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
   .whoami .linklet { font-size:12.5px; }
   select { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; font-family:inherit; background:#fff; color:var(--ink); }
   .notice { background:var(--paper-2); border-radius:8px; padding:10px 12px; font-size:14px; margin-top:16px; }
+  .locked-notice { background:var(--paper-2); border-radius:8px; padding:10px 12px; font-size:14px; margin-top:8px; color:var(--ink-soft); }
   .rel-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; flex-wrap:wrap; }
   .rel-desc { flex:1 1 auto; min-width:220px; }
   .rel-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -184,6 +312,12 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
   .confirm-box { background:var(--error-bg); border-radius:8px; padding:12px 14px; margin:10px 0; font-size:14px; }
   .confirm-box .actions { display:flex; gap:10px; margin-top:10px; }
   select.kind-select { font-size:12px; padding:4px 6px; }
+  .date-row { display:flex; gap:10px; margin-top:6px; }
+  .date-slot input { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; font-family:inherit; text-align:center; }
+  .date-slot { flex:1 1 0; }
+  .date-slot span { display:block; font-size:11px; color:var(--ink-faint); text-align:center; margin-top:4px; }
+  .add-partner-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:10px; }
+  .add-partner-row select { min-width:180px; }
 </style>
 </head>
 <body>
@@ -196,6 +330,7 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
         <a href="/timeline.php">My timeline</a>
         <a href="/tree.php">My tree</a>
         <a href="/add_relative.php">+ Add a relative</a>
+        <a href="/edit_person.php?person_id=<?= $myPersonId ?>">Edit my own profile</a>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
@@ -216,7 +351,7 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
     <?php endif; ?>
 
     <p style="font-size:13px;color:var(--ink-faint);margin-top:12px;">
-      Fix a person's name or details, or correct a relationship that was recorded wrong (for example, someone who should show up as a sibling but was accidentally added as a parent).
+      Fix a person's name, dates, or partners, or correct a relationship that was recorded wrong (for example, someone who should show up as a sibling but was accidentally added as a parent). Anyone in your family tree can be corrected here while they're still unclaimed; once someone claims their own record, only they can change it.
     </p>
 
     <form method="get" style="margin-top:12px;">
@@ -234,33 +369,76 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
 
     <?php if ($person !== null): ?>
 
-      <h3 style="margin:24px 0 4px;">Name</h3>
-      <?php if ($person['claimed_by_user_id']): ?>
-        <p style="font-size:14px;"><?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> — this person has claimed their own record, so their name can only be changed by them.</p>
-      <?php else: ?>
-        <form method="post" class="row-2" style="margin-top:8px;">
+      <?php if ($isClaimedByOther): ?>
+        <div class="locked-notice">
+          <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has claimed their own record, so only they can edit their profile, dates, and relationships. You can still see what's on record below.
+        </div>
+      <?php endif; ?>
+
+      <h3 style="margin:24px 0 4px;">Profile</h3>
+      <?php if ($canEdit): ?>
+        <form method="post" style="margin-top:8px;">
           <?= csrf_field() ?>
           <input type="hidden" name="person_id" value="<?= $personId ?>">
-          <input type="hidden" name="action" value="update_name">
-          <div>
-            <label for="first_name">First name</label>
-            <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($person['first_name'], ENT_QUOTES) ?>" maxlength="60" required>
+          <input type="hidden" name="action" value="update_profile">
+          <div class="row-2">
+            <div>
+              <label for="first_name">First name</label>
+              <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($pFirst, ENT_QUOTES) ?>" maxlength="60" required>
+            </div>
+            <div>
+              <label for="surname">Surname</label>
+              <input type="text" id="surname" name="surname" value="<?= htmlspecialchars($pSurname, ENT_QUOTES) ?>" maxlength="60">
+            </div>
           </div>
-          <div>
-            <label for="surname">Surname</label>
-            <input type="text" id="surname" name="surname" value="<?= htmlspecialchars((string) $person['surname'], ENT_QUOTES) ?>" maxlength="60">
+          <label for="middle_name">Middle name <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+          <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($pMiddle, ENT_QUOTES) ?>" maxlength="60">
+
+          <label style="margin-top:14px;display:block;">Born <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+          <div class="date-row">
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="born_day" placeholder="DD" value="<?= htmlspecialchars($pBornDay, ENT_QUOTES) ?>">
+              <span>Day</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="born_month" placeholder="MM" value="<?= htmlspecialchars($pBornMonth, ENT_QUOTES) ?>">
+              <span>Month</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" name="born_year" placeholder="YYYY" value="<?= htmlspecialchars($pBornYear, ENT_QUOTES) ?>">
+              <span>Year</span>
+            </div>
           </div>
-          <div style="grid-column:1 / -1;">
-            <label for="middle_name">Middle name <span style="text-transform:none;font-weight:400;">(optional)</span></label>
-            <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars((string) $person['middle_name'], ENT_QUOTES) ?>" maxlength="60">
-            <button type="submit" class="btn-primary" style="margin-top:14px;">Save name</button>
+
+          <label style="margin-top:14px;display:block;">Died <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+          <div class="date-row">
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="died_day" placeholder="DD" value="<?= htmlspecialchars($pDiedDay, ENT_QUOTES) ?>">
+              <span>Day</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="died_month" placeholder="MM" value="<?= htmlspecialchars($pDiedMonth, ENT_QUOTES) ?>">
+              <span>Month</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" name="died_year" placeholder="YYYY" value="<?= htmlspecialchars($pDiedYear, ENT_QUOTES) ?>">
+              <span>Year</span>
+            </div>
           </div>
+
+          <button type="submit" class="btn-primary" style="margin-top:14px;">Save profile</button>
         </form>
+      <?php else: ?>
+        <p style="font-size:14px;">
+          <strong><?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></strong>
+          <?php if (!empty($person['born'])): ?> · born <?= htmlspecialchars(date('j M Y', strtotime((string) $person['born'])), ENT_QUOTES) ?><?php endif; ?>
+          <?php if (!empty($person['died'])): ?> · died <?= htmlspecialchars(date('j M Y', strtotime((string) $person['died'])), ENT_QUOTES) ?><?php endif; ?>
+        </p>
       <?php endif; ?>
 
       <h3 style="margin:24px 0 4px;">Relationships</h3>
-      <?php if (!$rels && !$parts): ?>
-        <p style="font-size:14px;color:var(--ink-faint);">Not connected to anyone yet.</p>
+      <?php if (!$rels): ?>
+        <p style="font-size:14px;color:var(--ink-faint);">Not connected to any parent or child yet.</p>
       <?php endif; ?>
 
       <?php foreach ($rels as $r): ?>
@@ -275,6 +453,7 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
         ?>
         <div class="rel-row">
           <div class="rel-desc"><?= $desc ?> <span style="color:var(--ink-faint);">(<?= htmlspecialchars($kindLabels[$r['relation_kind']] ?? $r['relation_kind'], ENT_QUOTES) ?>)</span></div>
+          <?php if ($canEdit): ?>
           <div class="rel-actions">
             <form method="post">
               <?= csrf_field() ?>
@@ -290,8 +469,9 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
             </form>
             <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_rel=<?= (int) $r['id'] ?>" class="btn-danger">Remove</a>
           </div>
+          <?php endif; ?>
         </div>
-        <?php if ($confirmRel === (int) $r['id']): ?>
+        <?php if ($canEdit && $confirmRel === (int) $r['id']): ?>
           <div class="confirm-box">
             Remove this relationship — <?= htmlspecialchars($parentName, ENT_QUOTES) ?> as parent of <?= htmlspecialchars($childName, ENT_QUOTES) ?>? This can't be undone (you'd need to add it again from scratch).
             <div class="actions">
@@ -308,6 +488,11 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
         <?php endif; ?>
       <?php endforeach; ?>
 
+      <h3 style="margin:24px 0 4px;">Partners</h3>
+      <?php if (!$parts): ?>
+        <p style="font-size:14px;color:var(--ink-faint);">No partner recorded yet.</p>
+      <?php endif; ?>
+
       <?php foreach ($parts as $p): ?>
         <?php
           $aName = trim($p['a_first'] . ' ' . $p['a_surname']);
@@ -315,12 +500,14 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
           $otherName = (int) $p['person_a_id'] === $personId ? $bName : $aName;
         ?>
         <div class="rel-row">
-          <div class="rel-desc"><strong><?= htmlspecialchars($otherName, ENT_QUOTES) ?></strong> is their spouse / partner</div>
+          <div class="rel-desc"><strong><?= htmlspecialchars($otherName, ENT_QUOTES) ?></strong> is their <?= $p['kind'] === 'partner' ? 'partner' : 'spouse' ?></div>
+          <?php if ($canEdit): ?>
           <div class="rel-actions">
             <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_part=<?= (int) $p['id'] ?>" class="btn-danger">Remove</a>
           </div>
+          <?php endif; ?>
         </div>
-        <?php if ($confirmPart === (int) $p['id']): ?>
+        <?php if ($canEdit && $confirmPart === (int) $p['id']): ?>
           <div class="confirm-box">
             Remove the partnership between <?= htmlspecialchars($aName, ENT_QUOTES) ?> and <?= htmlspecialchars($bName, ENT_QUOTES) ?>? This can't be undone (you'd need to add it again from scratch).
             <div class="actions">
@@ -337,10 +524,37 @@ $kindLabels = ['genetic' => 'genetic', 'step' => 'step', 'adoptive' => 'adoptive
         <?php endif; ?>
       <?php endforeach; ?>
 
+      <?php if ($canEdit && $partnerCandidates): ?>
+        <form method="post" class="add-partner-row">
+          <?= csrf_field() ?>
+          <input type="hidden" name="person_id" value="<?= $personId ?>">
+          <input type="hidden" name="action" value="add_partnership">
+          <div>
+            <label for="other_person_id">Add a partner</label>
+            <select id="other_person_id" name="other_person_id">
+              <?php foreach ($partnerCandidates as $c): ?>
+                <option value="<?= (int) $c['id'] ?>"><?= htmlspecialchars(person_display_name($c), ENT_QUOTES) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div>
+            <label for="kind">As</label>
+            <select id="kind" name="kind">
+              <option value="married">Married</option>
+              <option value="partner">Partner</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-small">Add</button>
+        </form>
+        <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Works for two people who don't have their own accounts yet too — this is how to show two placeholder relatives as a couple.</p>
+      <?php endif; ?>
+
+      <?php if ($canEdit): ?>
       <p class="foot-link" style="margin-top:20px;">
         <a href="/add_relative.php?existing_person_id=<?= $personId ?>">Attach <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> as a relative of someone else</a>
       </p>
       <p style="font-size:12px;color:var(--ink-faint);margin-top:-12px;">Use this after removing a wrong relationship above, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
+      <?php endif; ?>
 
     <?php endif; ?>
 
