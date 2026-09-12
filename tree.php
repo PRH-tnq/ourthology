@@ -110,6 +110,7 @@ $treeNodeH = TREE_NODE_H;
         <a href="/timeline.php">My timeline</a>
         <a href="/dashboard.php">Dashboard</a>
         <a href="/add_relative.php">+ Add a relative</a>
+        <a href="/edit_person.php">Edit a person</a>
         <a href="/link_existing.php">Link to existing account</a>
         <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
       </div>
@@ -189,8 +190,11 @@ $treeNodeH = TREE_NODE_H;
               $bId = (int) $p['person_b_id'];
               if (!isset($layout['positions'][$aId], $layout['positions'][$bId])) continue;
               if ($layout['positions'][$aId]['tier'] !== $layout['positions'][$bId]['tier']) continue;
-              $left = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$aId] : $layout['positions'][$bId];
-              $right = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'] ? $layout['positions'][$bId] : $layout['positions'][$aId];
+              $aIsLeft = $layout['positions'][$aId]['x'] < $layout['positions'][$bId]['x'];
+              $leftId = $aIsLeft ? $aId : $bId;
+              $rightId = $aIsLeft ? $bId : $aId;
+              $left = $layout['positions'][$leftId];
+              $right = $layout['positions'][$rightId];
               $tier = $left['tier'];
               // Almost always the two partners are seated right next to each
               // other (the layout keeps a couple adjacent on purpose), but a
@@ -212,13 +216,25 @@ $treeNodeH = TREE_NODE_H;
               }
             ?>
             <?php
-              // A small fixed inset (rather than half the node's hit-width)
-              // so the bond reads as a clear connecting stroke regardless of
-              // how short or long each name is.
-              $bondInset = 18;
-              $bx1 = $left['x'] + $bondInset;
+              // Inset from each side's own node width (the "You" node is
+              // narrower than an ordinary one), plus a small fixed
+              // clearance — not a flat pixel count. A flat inset (the
+              // first version used 18px regardless of node width) is only
+              // safe for short names; a longer name — anything approaching
+              // the 15-character truncation limit the node width was
+              // itself sized for — renders wider than that, so the bond's
+              // endpoint landed underneath the person's own text instead
+              // of stopping at the edge of it. Since every name is
+              // guaranteed to fit within its node's own envelope (that's
+              // what TREE_NODE_W/TREE_ME_W and the truncation limit are
+              // for), insetting by half that envelope's width always
+              // clears the text, however long the name actually is.
+              $leftHalfW = ($leftId === $myPersonId ? TREE_ME_W : TREE_NODE_W) / 2;
+              $rightHalfW = ($rightId === $myPersonId ? TREE_ME_W : TREE_NODE_W) / 2;
+              $bondClearance = 6;
+              $bx1 = $left['x'] + $leftHalfW + $bondClearance;
               $by1 = $left['y'];
-              $bx2 = $right['x'] - $bondInset;
+              $bx2 = $right['x'] - $rightHalfW - $bondClearance;
               $by2 = $right['y'];
               // Two parallel strokes offset a couple of pixels either side of
               // the bond's own line — the standard genealogy-chart "married"
@@ -278,6 +294,7 @@ $treeNodeH = TREE_NODE_H;
               <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
               <button type="submit" class="linklet">get invite link</button>
             </form>
+            · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
           </li>
         <?php endforeach; ?>
       </ul>

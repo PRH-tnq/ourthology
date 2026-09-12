@@ -232,12 +232,24 @@ function compute_tree_layout(array $graph, int $viewerPersonId): array
 
     // Group children by their exact set of parents, so half-siblings (who
     // don't share both parents) get their own connector rather than being
-    // pulled into the wrong family unit.
+    // pulled into the wrong family unit. Sorted before keying: parentsOf[]
+    // is built by iterating relationship rows in whatever order they were
+    // created/fetched, so two full siblings recorded via different flows
+    // (e.g. one added directly as a parent's child, the other added later
+    // via "sibling", which walks the anchor's parents in map order) can
+    // end up with the *same set* of parent ids in a *different order* —
+    // "2,5" vs "5,2" — which, unsorted, produced two distinct string keys
+    // and therefore two separate, needlessly-duplicated trunks for
+    // siblings who share both parents. Sorting first makes the key depend
+    // only on the actual set of parents, not the order they happened to be
+    // recorded in.
     $familyUnits = []; // "sortedParentIds" => ['parents'=>[...], 'children'=>[...]]
     foreach ($parentsOf as $childId => $pids) {
-        $key = implode(',', $pids);
+        $sortedPids = $pids;
+        sort($sortedPids);
+        $key = implode(',', $sortedPids);
         if (!isset($familyUnits[$key])) {
-            $familyUnits[$key] = ['parents' => $pids, 'children' => []];
+            $familyUnits[$key] = ['parents' => $sortedPids, 'children' => []];
         }
         $familyUnits[$key]['children'][] = $childId;
     }

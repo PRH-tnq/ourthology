@@ -16,7 +16,6 @@ $pdo = ourthology_pdo();
 $myGroup = (int) person_row($pdo, (int) $me['person_id'])['family_group_id'];
 
 $graph = fetch_family_graph($pdo, $myGroup);
-$anchors = $graph['persons'];
 $maps = graph_build_maps($graph);
 $personsById = [];
 foreach ($graph['persons'] as $p) {
@@ -24,149 +23,37 @@ foreach ($graph['persons'] as $p) {
 }
 
 /**
- * The full relationship vocabulary from the original prototype
- * (prototypes/timeline.html's RELATIONSHIPS list), grouped the same way.
- * Unlike the prototype — which just filed each one under a fixed
- * generation tier with a label, with no real graph behind it — every one
- * of these has to resolve to actual parent/child/partner edges in this
- * app's shared multi-user graph. Most of them (grandparent, aunt/uncle,
- * sibling, cousin, niece/nephew, grandchild, the in-laws) only make sense
- * "through" some other person already in the tree, so those show a
- * "Connected through" picker (see $VIA_SOURCE below); "parent", "child",
- * "spouse" and "other" don't need one.
+ * Attach mode: instead of creating a brand-new person, this run connects
+ * an EXISTING person already in the family group (reached from
+ * edit_person.php, e.g. "attach this person as a relative of someone
+ * else" — the fix for a person who was recorded with the wrong
+ * relationship the first time, since there's no other way to reclassify
+ * them). Same relationship vocabulary and resolution logic either way;
+ * only what "NEW" resolves to, and what happens on success, differs.
  */
-$RELATIONSHIP_OPTIONS = [
-    'grandparent'    => ['label' => 'Grandparent',           'group' => 'Older generation'],
-    'parent'         => ['label' => 'Parent',                'group' => 'Older generation'],
-    'parent-in-law'  => ['label' => 'Parent-in-law',         'group' => 'Older generation'],
-    'step-parent'    => ['label' => 'Step-parent',           'group' => 'Older generation'],
-    'aunt-uncle'     => ['label' => 'Aunt / Uncle',          'group' => 'Older generation'],
-    'sibling'        => ['label' => 'Sibling',               'group' => 'Same generation'],
-    'spouse'         => ['label' => 'Spouse / Partner',      'group' => 'Same generation'],
-    'sibling-in-law' => ['label' => 'Sibling-in-law',        'group' => 'Same generation'],
-    'step-sibling'   => ['label' => 'Step-sibling',          'group' => 'Same generation'],
-    'cousin'         => ['label' => 'Cousin',                'group' => 'Same generation'],
-    'child'          => ['label' => 'Child',                 'group' => 'Younger generation'],
-    'child-in-law'   => ['label' => 'Child-in-law',          'group' => 'Younger generation'],
-    'step-child'     => ['label' => 'Step-child',            'group' => 'Younger generation'],
-    'niece-nephew'   => ['label' => 'Niece / Nephew',        'group' => 'Younger generation'],
-    'grandchild'     => ['label' => 'Grandchild',            'group' => 'Younger generation'],
-    'other'          => ['label' => 'Other / not connected', 'group' => 'Other'],
-];
+$existingPersonId = filter_var($_GET['existing_person_id'] ?? $_POST['existing_person_id'] ?? '', FILTER_VALIDATE_INT);
+$existingPersonId = ($existingPersonId !== false && isset($personsById[$existingPersonId])) ? (int) $existingPersonId : null;
+$existingPerson = $existingPersonId !== null ? $personsById[$existingPersonId] : null;
 
-/**
- * Which existing-person set the "connected through" picker offers for each
- * relationship that needs one, and what to say when that set is empty.
- * 'source' names a lookup this file and the page's own JS both know how to
- * compute from the same parent/child/partner maps ($maps here, mirrored as
- * plain JSON for the client) — so the dropdown the user sees and the
- * server-side check that runs on submit are always in agreement.
- */
-$VIA_NEEDED = [
-    'grandparent'    => ['source' => 'parentsOf',     'prompt' => 'Whose parent are they?',                 'empty' => 'Add one of their parents first, then add a grandparent through them.'],
-    'parent-in-law'  => ['source' => 'partnersOf',    'prompt' => 'They are the parent of…',                 'empty' => 'Add their spouse/partner first, then add a parent-in-law through them.'],
-    'aunt-uncle'     => ['source' => 'parentsOf',     'prompt' => 'Sibling of which of their parents?',      'empty' => 'Add one of their parents first, then add an aunt or uncle through them.'],
-    'sibling-in-law' => ['source' => 'siblingsOf',    'prompt' => 'Spouse of which sibling?',                'empty' => 'Add a sibling first, then add their spouse as a sibling-in-law.'],
-    'step-sibling'   => ['source' => 'parentsOf',     'prompt' => 'Step-child of which of their parents?',   'empty' => 'Add one of their parents first, then add a step-sibling through them.'],
-    'cousin'         => ['source' => 'auntsUnclesOf', 'prompt' => 'Child of which aunt or uncle?',           'empty' => 'Add an aunt or uncle first, then add their child as a cousin.'],
-    'child-in-law'   => ['source' => 'childrenOf',    'prompt' => 'Spouse of which child?',                  'empty' => 'Add a child first, then add their spouse as a child-in-law.'],
-    'niece-nephew'   => ['source' => 'siblingsOf',    'prompt' => 'Child of which sibling?',                 'empty' => 'Add a sibling first, then add their child as a niece or nephew.'],
-    'grandchild'     => ['source' => 'childrenOf',    'prompt' => 'Child of which child?',                   'empty' => 'Add a child first, then add their child as a grandchild.'],
-];
-
-function candidates_for_source(string $source, int $anchorId, array $maps): array
-{
-    switch ($source) {
-        case 'parentsOf':     return $maps['parentsOf'][$anchorId] ?? [];
-        case 'childrenOf':    return $maps['childrenOf'][$anchorId] ?? [];
-        case 'partnersOf':    return $maps['partnersOf'][$anchorId] ?? [];
-        case 'siblingsOf':    return graph_siblings_of($maps, $anchorId);
-        case 'auntsUnclesOf': return graph_aunts_uncles_of($maps, $anchorId);
-        default:              return [];
-    }
+$RELATIONSHIP_OPTIONS = relationship_options();
+if ($existingPerson !== null) {
+    // "Other / not connected" would attach nothing at all — meaningless
+    // when the person already exists in the tree.
+    unset($RELATIONSHIP_OPTIONS['other']);
 }
+$VIA_NEEDED = relationship_via_needed();
 
-/**
- * Independently re-derives what edges a submission means, never trusting
- * the client's dynamically-populated "connected through" list — it's
- * rebuilt here from the current database state. Returns
- * ['ok' => true, 'edges' => [...], 'partnerships' => [...]] (each edge/
- * partnership using the string 'NEW' as a stand-in for the not-yet-inserted
- * person) or ['ok' => false, 'error' => '...'].
- */
-function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $directKind, array $maps, array $personsById, array $viaNeeded): array
-{
-    if (isset($viaNeeded[$rel])) {
-        $cfg = $viaNeeded[$rel];
-        $candidates = candidates_for_source($cfg['source'], $anchorId, $maps);
-        if (!$candidates) {
-            return ['ok' => false, 'error' => $cfg['empty']];
-        }
-        if ($viaId === null || !in_array($viaId, $candidates, true)) {
-            return ['ok' => false, 'error' => 'Choose who to connect them through.'];
-        }
-    }
-
-    switch ($rel) {
-        case 'parent':
-            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => $directKind]]];
-        case 'step-parent':
-            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => 'step']]];
-        case 'child':
-            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => $directKind]]];
-        case 'step-child':
-            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => 'step']]];
-        case 'spouse':
-            return ['ok' => true, 'partnerships' => [['a' => $anchorId, 'b' => 'NEW']]];
-        case 'grandparent':
-            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
-        case 'parent-in-law':
-            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
-        case 'aunt-uncle':
-            $grandparents = $maps['parentsOf'][$viaId] ?? [];
-            if (!$grandparents) {
-                $name = isset($personsById[$viaId]) ? person_display_name($personsById[$viaId]) : 'That person';
-                return ['ok' => false, 'error' => $name . ' has no parent on record yet — add one first, then add an aunt or uncle through them.'];
-            }
-            $edges = [];
-            foreach ($grandparents as $g) {
-                $edges[] = ['parent' => $g, 'child' => 'NEW', 'kind' => 'genetic'];
-            }
-            return ['ok' => true, 'edges' => $edges];
-        case 'sibling':
-            $parents = $maps['parentsOf'][$anchorId] ?? [];
-            if (!$parents) {
-                return ['ok' => false, 'error' => 'Add one of their parents first, then add a sibling through them.'];
-            }
-            $edges = [];
-            foreach ($parents as $p) {
-                $edges[] = ['parent' => $p, 'child' => 'NEW', 'kind' => 'genetic'];
-            }
-            return ['ok' => true, 'edges' => $edges];
-        case 'sibling-in-law':
-            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
-        case 'step-sibling':
-            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'step']]];
-        case 'cousin':
-            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
-        case 'child-in-law':
-            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
-        case 'niece-nephew':
-            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
-        case 'grandchild':
-            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
-        case 'other':
-            return ['ok' => true, 'edges' => [], 'partnerships' => []];
-        default:
-            return ['ok' => false, 'error' => 'Choose a valid relationship.'];
-    }
+$anchors = $graph['persons'];
+if ($existingPersonId !== null) {
+    $anchors = array_values(array_filter($anchors, fn($a) => (int) $a['id'] !== $existingPersonId));
 }
 
 $errors = [];
 $successLink = null;
+$successMessage = null;
 $first = $middle = $surname = '';
 $anchorId = (string) $me['person_id'];
-$relationship = 'parent';
+$relationship = $existingPerson !== null ? 'sibling' : 'parent';
 $viaId = '';
 $relationKind = 'genetic';
 
@@ -181,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $viaId        = (string) ($_POST['via_id'] ?? '');
     $relationKind = (string) ($_POST['relation_kind'] ?? 'genetic');
 
-    if ($first === '') {
+    if ($existingPersonId === null && $first === '') {
         $errors[] = 'First name is required.';
     }
     if (!isset($RELATIONSHIP_OPTIONS[$relationship])) {
@@ -193,6 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $anchorIdInt = filter_var($anchorId, FILTER_VALIDATE_INT);
     if ($anchorIdInt === false || !person_in_group($pdo, (int) $anchorIdInt, $myGroup)) {
         $errors[] = 'That anchor person is not in your family tree.';
+    } elseif ($existingPersonId !== null && (int) $anchorIdInt === $existingPersonId) {
+        $errors[] = 'Choose someone else to connect them to.';
     }
     $viaIdInt = filter_var($viaId, FILTER_VALIDATE_INT);
     $viaIdInt = $viaIdInt === false ? null : (int) $viaIdInt;
@@ -212,18 +101,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare(
-                'INSERT INTO persons (first_name, middle_name, surname, claimed_by_user_id, created_by_user_id, family_group_id)
-                 VALUES (:first, :middle, :surname, NULL, :creator, :gid)'
-            );
-            $stmt->execute([
-                'first'   => $first,
-                'middle'  => $middle !== '' ? $middle : null,
-                'surname' => $surname !== '' ? $surname : null,
-                'creator' => $me['user_id'],
-                'gid'     => $myGroup,
-            ]);
-            $newPersonId = (int) $pdo->lastInsertId();
+            if ($existingPersonId !== null) {
+                $newPersonId = $existingPersonId;
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO persons (first_name, middle_name, surname, claimed_by_user_id, created_by_user_id, family_group_id)
+                     VALUES (:first, :middle, :surname, NULL, :creator, :gid)'
+                );
+                $stmt->execute([
+                    'first'   => $first,
+                    'middle'  => $middle !== '' ? $middle : null,
+                    'surname' => $surname !== '' ? $surname : null,
+                    'creator' => $me['user_id'],
+                    'gid'     => $myGroup,
+                ]);
+                $newPersonId = (int) $pdo->lastInsertId();
+            }
 
             $resolveNew = function ($v) use ($newPersonId) {
                 return $v === 'NEW' ? $newPersonId : (int) $v;
@@ -245,17 +138,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $b = $resolveNew($part['b']);
                 $lo = min($a, $b);
                 $hi = max($a, $b);
+                // partnerships has no unique constraint the way relationships
+                // does (uniq_parent_child), so a duplicate would otherwise
+                // insert silently — worth guarding directly, especially now
+                // that "attach an existing person" makes it easy to
+                // re-submit a link that's already there.
+                $exists = $pdo->prepare(
+                    'SELECT 1 FROM partnerships WHERE status = :status AND person_a_id = :a AND person_b_id = :b'
+                );
+                $exists->execute(['status' => 'confirmed', 'a' => $lo, 'b' => $hi]);
+                if ($exists->fetchColumn()) {
+                    throw new RuntimeException('duplicate_partnership');
+                }
                 $pdo->prepare(
                     "INSERT INTO partnerships (person_a_id, person_b_id, kind, status, created_by_user_id)
                      VALUES (:a, :b, 'married', 'confirmed', :uid)"
                 )->execute(['a' => $lo, 'b' => $hi, 'uid' => $me['user_id']]);
             }
 
-            $token = create_claim_token($pdo, $newPersonId, (int) $me['user_id']);
-
-            $pdo->commit();
-
-            $successLink = claim_link_url($token);
+            if ($existingPersonId !== null) {
+                $pdo->commit();
+                $anchorName = isset($personsById[(int) $anchorIdInt]) ? person_display_name($personsById[(int) $anchorIdInt]) : 'that person';
+                $successMessage = person_display_name($existingPerson) . ' is now recorded as a relative of ' . $anchorName . '.';
+            } else {
+                $token = create_claim_token($pdo, $newPersonId, (int) $me['user_id']);
+                $pdo->commit();
+                $successLink = claim_link_url($token);
+            }
+        } catch (RuntimeException $e) {
+            $pdo->rollBack();
+            $errors[] = 'They are already recorded as partners.';
         } catch (PDOException $e) {
             $pdo->rollBack();
             error_log('ourthology add_relative error: ' . $e->getMessage());
@@ -289,7 +201,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Add a relative — ourthology.com</title>
+<title><?= $existingPerson !== null ? 'Attach ' . htmlspecialchars(person_display_name($existingPerson), ENT_QUOTES) : 'Add a relative' ?> — ourthology.com</title>
 <link rel="stylesheet" href="/styles.css">
 <style>
   select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
@@ -309,7 +221,18 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         <p style="margin:8px 0 0;font-size:13px;color:var(--ink-faint);">Copy this and send it to them yourself (text, email, whatever) — it lets them set a password and claim this record as their own. It expires in 30 days; you can generate a fresh one later from your tree page.</p>
       </div>
       <p class="foot-link"><a href="/tree.php">Back to my tree</a> · <a href="/add_relative.php">Add another</a></p>
+    <?php elseif ($successMessage): ?>
+      <div style="background:var(--paper-2);border-radius:8px;padding:14px;margin-top:16px;">
+        <p style="margin:0;font-weight:600;"><?= htmlspecialchars($successMessage, ENT_QUOTES) ?></p>
+      </div>
+      <p class="foot-link"><a href="/tree.php">Back to my tree</a> · <a href="/edit_person.php?person_id=<?= $existingPersonId ?>">Their profile</a></p>
     <?php else: ?>
+
+    <?php if ($existingPerson !== null): ?>
+      <p style="margin-top:16px;font-size:14px;">
+        Attaching <strong><?= htmlspecialchars(person_display_name($existingPerson), ENT_QUOTES) ?></strong> — already in your tree — as a relative of someone else in it. This doesn't create a new person, it just records a new relationship for them.
+      </p>
+    <?php endif; ?>
 
     <?php if ($errors): ?>
       <div class="error">
@@ -321,6 +244,9 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
 
     <form method="post" novalidate id="addRelativeForm">
       <?= csrf_field() ?>
+      <?php if ($existingPersonId !== null): ?>
+        <input type="hidden" name="existing_person_id" value="<?= $existingPersonId ?>">
+      <?php endif; ?>
 
       <label for="anchor_id">Connected to</label>
       <select id="anchor_id" name="anchor_id">
@@ -331,7 +257,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         <?php endforeach; ?>
       </select>
 
-      <label for="relationship">New person is that person's</label>
+      <label for="relationship"><?= $existingPerson !== null ? htmlspecialchars(person_display_name($existingPerson), ENT_QUOTES) . ' is that person\'s' : 'New person is that person\'s' ?></label>
       <select id="relationship" name="relationship">
         <?php
           $groups = [];
@@ -363,20 +289,22 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         </select>
       </div>
 
-      <div class="row-2">
-        <div>
-          <label for="first_name">First name</label>
-          <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($first, ENT_QUOTES) ?>" maxlength="60" required>
+      <?php if ($existingPerson === null): ?>
+        <div class="row-2">
+          <div>
+            <label for="first_name">First name</label>
+            <input type="text" id="first_name" name="first_name" value="<?= htmlspecialchars($first, ENT_QUOTES) ?>" maxlength="60" required>
+          </div>
+          <div>
+            <label for="surname">Surname</label>
+            <input type="text" id="surname" name="surname" value="<?= htmlspecialchars($surname, ENT_QUOTES) ?>" maxlength="60">
+          </div>
         </div>
-        <div>
-          <label for="surname">Surname</label>
-          <input type="text" id="surname" name="surname" value="<?= htmlspecialchars($surname, ENT_QUOTES) ?>" maxlength="60">
-        </div>
-      </div>
-      <label for="middle_name">Middle name <span style="text-transform:none;font-weight:400;">(optional)</span></label>
-      <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($middle, ENT_QUOTES) ?>" maxlength="60">
+        <label for="middle_name">Middle name <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+        <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($middle, ENT_QUOTES) ?>" maxlength="60">
+      <?php endif; ?>
 
-      <button type="submit" class="btn-primary">Add person</button>
+      <button type="submit" class="btn-primary"><?= $existingPerson !== null ? 'Attach relationship' : 'Add person' ?></button>
     </form>
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
     <?php endif; ?>

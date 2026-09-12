@@ -333,6 +333,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       <div class="nav-links">
         <a href="/dashboard.php">Dashboard</a>
         <a href="/tree.php">My tree</a>
+        <a href="/edit_person.php">Edit a person</a>
         <?php if ($isOwner): ?><a href="/add_entry.php">+ Add a memory</a><?php endif; ?>
       </div>
       <div class="whoami">

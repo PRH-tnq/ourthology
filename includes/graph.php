@@ -218,6 +218,150 @@ function graph_aunts_uncles_of(array $maps, int $personId): array
     return array_keys($out);
 }
 
+/**
+ * The full relationship vocabulary offered when adding a new relative or
+ * attaching an existing person (originally prototypes/timeline.html's
+ * RELATIONSHIPS list), grouped the same "older/same/younger generation"
+ * way. Shared between add_relative.php (creates a new person) and
+ * edit_person.php (attaches an already-existing person) so the two never
+ * drift apart on what each relationship type means.
+ */
+function relationship_options(): array
+{
+    return [
+        'grandparent'    => ['label' => 'Grandparent',                                    'group' => 'Older generation'],
+        'parent'         => ['label' => 'Parent',                                         'group' => 'Older generation'],
+        'parent-in-law'  => ['label' => 'Parent-in-law',                                  'group' => 'Older generation'],
+        'step-parent'    => ['label' => 'Step-parent (married an existing parent)',       'group' => 'Older generation'],
+        'aunt-uncle'     => ['label' => 'Aunt / Uncle',                                   'group' => 'Older generation'],
+        'sibling'        => ['label' => 'Sibling',                                        'group' => 'Same generation'],
+        'spouse'         => ['label' => 'Spouse / Partner',                               'group' => 'Same generation'],
+        'sibling-in-law' => ['label' => 'Sibling-in-law (married an existing sibling)',   'group' => 'Same generation'],
+        'step-sibling'   => ['label' => 'Step-sibling (child of a step-parent)',          'group' => 'Same generation'],
+        'cousin'         => ['label' => 'Cousin',                                         'group' => 'Same generation'],
+        'child'          => ['label' => 'Child',                                          'group' => 'Younger generation'],
+        'child-in-law'   => ['label' => 'Child-in-law',                                   'group' => 'Younger generation'],
+        'step-child'     => ['label' => 'Step-child',                                     'group' => 'Younger generation'],
+        'niece-nephew'   => ['label' => 'Niece / Nephew',                                 'group' => 'Younger generation'],
+        'grandchild'     => ['label' => 'Grandchild',                                     'group' => 'Younger generation'],
+        'other'          => ['label' => 'Other / not connected',                          'group' => 'Other'],
+    ];
+}
+
+/**
+ * Which existing-person set the "connected through" picker offers for each
+ * relationship that needs one, and what to say when that set is empty.
+ * 'source' names a lookup both the server (candidates_for_source() below)
+ * and the page's own client-side JS know how to compute from the same
+ * parent/child/partner maps, so the dropdown the user sees and the
+ * server-side check that runs on submit are always in agreement.
+ */
+function relationship_via_needed(): array
+{
+    return [
+        'grandparent'    => ['source' => 'parentsOf',     'prompt' => 'Whose parent are they?',                 'empty' => 'Add one of their parents first, then add a grandparent through them.'],
+        'parent-in-law'  => ['source' => 'partnersOf',    'prompt' => 'They are the parent of…',                 'empty' => 'Add their spouse/partner first, then add a parent-in-law through them.'],
+        'aunt-uncle'     => ['source' => 'parentsOf',     'prompt' => 'Sibling of which of their parents?',      'empty' => 'Add one of their parents first, then add an aunt or uncle through them.'],
+        'sibling-in-law' => ['source' => 'siblingsOf',    'prompt' => 'Spouse of which sibling?',                'empty' => 'Add a sibling first, then add their spouse as a sibling-in-law.'],
+        'step-sibling'   => ['source' => 'parentsOf',     'prompt' => 'Step-child of which of their parents?',   'empty' => 'Add one of their parents first, then add a step-sibling through them.'],
+        'cousin'         => ['source' => 'auntsUnclesOf', 'prompt' => 'Child of which aunt or uncle?',           'empty' => 'Add an aunt or uncle first, then add their child as a cousin.'],
+        'child-in-law'   => ['source' => 'childrenOf',    'prompt' => 'Spouse of which child?',                  'empty' => 'Add a child first, then add their spouse as a child-in-law.'],
+        'niece-nephew'   => ['source' => 'siblingsOf',    'prompt' => 'Child of which sibling?',                 'empty' => 'Add a sibling first, then add their child as a niece or nephew.'],
+        'grandchild'     => ['source' => 'childrenOf',    'prompt' => 'Child of which child?',                   'empty' => 'Add a child first, then add their child as a grandchild.'],
+    ];
+}
+
+function candidates_for_source(string $source, int $anchorId, array $maps): array
+{
+    switch ($source) {
+        case 'parentsOf':     return $maps['parentsOf'][$anchorId] ?? [];
+        case 'childrenOf':    return $maps['childrenOf'][$anchorId] ?? [];
+        case 'partnersOf':    return $maps['partnersOf'][$anchorId] ?? [];
+        case 'siblingsOf':    return graph_siblings_of($maps, $anchorId);
+        case 'auntsUnclesOf': return graph_aunts_uncles_of($maps, $anchorId);
+        default:              return [];
+    }
+}
+
+/**
+ * Independently re-derives what edges a submission means, never trusting
+ * the client's dynamically-populated "connected through" list — it's
+ * rebuilt here from the current database state. Returns
+ * ['ok' => true, 'edges' => [...], 'partnerships' => [...]] (each edge/
+ * partnership using the string 'NEW' as a stand-in for the other person —
+ * a not-yet-inserted new person in add_relative.php, or an already-
+ * existing one being attached in edit_person.php; either way the caller
+ * resolves that placeholder to a real id before inserting) or
+ * ['ok' => false, 'error' => '...'].
+ */
+function resolve_relationship(string $rel, int $anchorId, ?int $viaId, string $directKind, array $maps, array $personsById, array $viaNeeded): array
+{
+    if (isset($viaNeeded[$rel])) {
+        $cfg = $viaNeeded[$rel];
+        $candidates = candidates_for_source($cfg['source'], $anchorId, $maps);
+        if (!$candidates) {
+            return ['ok' => false, 'error' => $cfg['empty']];
+        }
+        if ($viaId === null || !in_array($viaId, $candidates, true)) {
+            return ['ok' => false, 'error' => 'Choose who to connect them through.'];
+        }
+    }
+
+    switch ($rel) {
+        case 'parent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => $directKind]]];
+        case 'step-parent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $anchorId, 'kind' => 'step']]];
+        case 'child':
+            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => $directKind]]];
+        case 'step-child':
+            return ['ok' => true, 'edges' => [['parent' => $anchorId, 'child' => 'NEW', 'kind' => 'step']]];
+        case 'spouse':
+            return ['ok' => true, 'partnerships' => [['a' => $anchorId, 'b' => 'NEW']]];
+        case 'grandparent':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
+        case 'parent-in-law':
+            return ['ok' => true, 'edges' => [['parent' => 'NEW', 'child' => $viaId, 'kind' => 'genetic']]];
+        case 'aunt-uncle':
+            $grandparents = $maps['parentsOf'][$viaId] ?? [];
+            if (!$grandparents) {
+                $name = isset($personsById[$viaId]) ? person_display_name($personsById[$viaId]) : 'That person';
+                return ['ok' => false, 'error' => $name . ' has no parent on record yet — add one first, then add an aunt or uncle through them.'];
+            }
+            $edges = [];
+            foreach ($grandparents as $g) {
+                $edges[] = ['parent' => $g, 'child' => 'NEW', 'kind' => 'genetic'];
+            }
+            return ['ok' => true, 'edges' => $edges];
+        case 'sibling':
+            $parents = $maps['parentsOf'][$anchorId] ?? [];
+            if (!$parents) {
+                return ['ok' => false, 'error' => 'Add one of their parents first, then add a sibling through them.'];
+            }
+            $edges = [];
+            foreach ($parents as $p) {
+                $edges[] = ['parent' => $p, 'child' => 'NEW', 'kind' => 'genetic'];
+            }
+            return ['ok' => true, 'edges' => $edges];
+        case 'sibling-in-law':
+            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
+        case 'step-sibling':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'step']]];
+        case 'cousin':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'child-in-law':
+            return ['ok' => true, 'partnerships' => [['a' => $viaId, 'b' => 'NEW']]];
+        case 'niece-nephew':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'grandchild':
+            return ['ok' => true, 'edges' => [['parent' => $viaId, 'child' => 'NEW', 'kind' => 'genetic']]];
+        case 'other':
+            return ['ok' => true, 'edges' => [], 'partnerships' => []];
+        default:
+            return ['ok' => false, 'error' => 'Choose a valid relationship.'];
+    }
+}
+
 function create_claim_token(PDO $pdo, int $personId, int $createdByUserId): string
 {
     $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
