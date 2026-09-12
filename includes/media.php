@@ -213,11 +213,35 @@ function fetch_media_for_view(PDO $pdo, int $mediaId): ?array
     return $stmt->fetch() ?: null;
 }
 
-/** True if $viewerPersonId / $viewerFamilyGroupId may view this media row. */
-function can_view_media(array $media, int $viewerPersonId, int $viewerFamilyGroupId): bool
+/**
+ * True if $viewerPersonId / $viewerFamilyGroupId may view this media row.
+ * $pdo is only used for the tagged-viewer exception below — pass the
+ * live connection, not a cached one, since this is a per-request security
+ * check.
+ */
+function can_view_media(array $media, int $viewerPersonId, int $viewerFamilyGroupId, PDO $pdo): bool
 {
     if ((int) $media['owner_person_id'] === $viewerPersonId) {
         return true;
     }
-    return $media['visibility'] === 'public' && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId;
+    if ($media['visibility'] === 'public' && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId) {
+        return true;
+    }
+    // A memory tagged-and-approved for the viewer shows on their own
+    // timeline (Phase 17) even when it's marked private — the approval
+    // itself is what grants them access, same as it would be their own
+    // entry, so its media must be reachable for them too, not just the
+    // entry's text.
+    require_once __DIR__ . '/memory_tags.php';
+    return person_has_approved_tag($pdo, (int) $media['entry_id'], $viewerPersonId);
+}
+
+/** True if $personId has an approved tag on $timelineEntryId — the gate that lets a tagged person view an otherwise-private memory (and, via can_view_media() above, its attached media) wherever it's shared. */
+function person_has_approved_tag(PDO $pdo, int $timelineEntryId, int $personId): bool
+{
+    $stmt = $pdo->prepare(
+        "SELECT 1 FROM memory_tags WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'approved'"
+    );
+    $stmt->execute(['eid' => $timelineEntryId, 'pid' => $personId]);
+    return (bool) $stmt->fetchColumn();
 }

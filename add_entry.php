@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/media.php';
+require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/memory_tags.php';
 
 require_login();
 $me = current_user_with_person();
@@ -14,6 +16,39 @@ if ($me === null) {
 }
 $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
+$myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
+
+// Whose timeline this memory is being added to — defaults to yourself, but
+// an unclaimed person's profile can be picked instead (a "+ Add a memory
+// for them" link from edit_person.php, or the ?person_id= on this page's
+// own URL) since nobody is logged in as an unclaimed person to write it
+// themselves. person_is_editable_by() is the exact same "unclaimed, or
+// your own claimed record" rule Phase 10 already uses for editing a
+// person's own details — reused here so who may ADD a memory for someone
+// and who may EDIT that person's record are always the same people.
+$targetPersonId = filter_var($_GET['person_id'] ?? $_POST['target_person_id'] ?? $myPersonId, FILTER_VALIDATE_INT);
+if ($targetPersonId === false) {
+    http_response_code(400);
+    exit('Bad request.');
+}
+$targetPerson = person_row($pdo, (int) $targetPersonId);
+if ($targetPerson === null || (int) $targetPerson['family_group_id'] !== $myGroup
+    || !person_is_editable_by($targetPerson, (int) $me['user_id'])) {
+    http_response_code(403);
+    exit("You don't have permission to add a memory for that person.");
+}
+$targetPersonId = (int) $targetPerson['id'];
+$addingForSelf = $targetPersonId === $myPersonId;
+
+// Everyone else in the family group, for the "tag people in this memory"
+// picker below — never includes the target themselves (they're already
+// the memory's owner, tagging them would be meaningless).
+$familyGraph = fetch_family_graph($pdo, $myGroup);
+$familyPersonsById = [];
+foreach ($familyGraph['persons'] as $p) {
+    $familyPersonsById[(int) $p['id']] = $p;
+}
+$taggablePeople = taggable_people($familyGraph['persons'], $targetPersonId);
 
 $errors = [];
 $entryKind = 'memory'; // 'memory' or 'diary' — the only two choices shown to the user
@@ -91,6 +126,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     $selectedFiles = normalize_multi_file_upload($rawMediaField);
     $hasFile = count($selectedFiles) > 0;
 
+    // Never trust the submitted tag list blindly — only ids that are
+    // actually someone else in this family group (never the target
+    // themselves) survive; anything else can only get here via a
+    // tampered form, so it's silently dropped rather than erroring.
+    $submittedTagIds = array_map('intval', array_filter(
+        (array) ($_POST['tag_person_ids'] ?? []),
+        fn ($v) => filter_var($v, FILTER_VALIDATE_INT) !== false
+    ));
+    $taggablePersonIds = array_map(fn ($p) => (int) $p['id'], $taggablePeople);
+    $tagPersonIds = array_values(array_intersect($submittedTagIds, $taggablePersonIds));
+
     if ($entryKind === 'diary' && $body === '') {
         $errors[] = 'Write something for a diary entry.';
     }
@@ -108,7 +154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             // a photo or video entry accordingly. A diary entry keeps its
             // own type regardless of any attachment. store_uploaded_media_files()
             // is all-or-nothing across the whole batch (see includes/media.php).
-            $storedList = $hasFile ? store_uploaded_media_files($rawMediaField, $myPersonId) : [];
+            // Filed under the memory's OWNER (the target person), not
+            // necessarily whoever's actually clicking "save" — matters once
+            // someone else is adding this for an unclaimed person.
+            $storedList = $hasFile ? store_uploaded_media_files($rawMediaField, $targetPersonId) : [];
 
             if ($entryKind === 'diary') {
                 $dbEntryType = 'diary';
@@ -136,7 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                  VALUES (:pid, :type, :title, :body, :occurred, :vis, :uid)'
             );
             $stmt->execute([
-                'pid'      => $myPersonId,
+                'pid'      => $targetPersonId,
                 'type'     => $dbEntryType,
                 'title'    => $title !== '' ? $title : null,
                 'body'     => $body !== '' ? $body : null,
@@ -145,6 +194,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 'uid'      => $me['user_id'],
             ]);
             $entryId = (int) $pdo->lastInsertId();
+
+            foreach ($tagPersonIds as $tagId) {
+                create_memory_tag($pdo, $entryId, $familyPersonsById[$tagId], (int) $me['user_id']);
+            }
 
             if ($storedList) {
                 $mediaStmt = $pdo->prepare(
@@ -164,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             }
 
             $pdo->commit();
-            header('Location: /timeline.php');
+            header('Location: /timeline.php' . ($addingForSelf ? '' : '?person_id=' . $targetPersonId));
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();
@@ -220,12 +273,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
   .pick-remove:hover { background:var(--accent); }
   .media-picker-note { display:block; font-size:12px; color:var(--ink-faint); margin-top:6px; }
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
+  .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
+  .for-banner strong { color:var(--ink); }
+  .tag-picker { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; }
+  .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
+  .tag-picker-empty { font-size:13px; color:var(--ink-faint); margin:0; }
 </style>
 </head>
 <body>
   <div class="card" style="max-width:460px;">
     <p class="wordmark">ourthology<span class="tld">.com</span></p>
     <p class="subtitle">an anthology of us.</p>
+
+    <?php if (!$addingForSelf): ?>
+      <p class="for-banner">Adding a memory for <strong><?= htmlspecialchars(person_display_name($targetPerson), ENT_QUOTES) ?></strong> (not yet claimed).</p>
+    <?php endif; ?>
 
     <?php if ($errors): ?>
       <div class="error">
@@ -237,6 +299,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 
     <form method="post" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
+      <input type="hidden" name="target_person_id" value="<?= $targetPersonId ?>">
 
       <label>Type</label>
       <div class="radio-row">
@@ -287,9 +350,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         <label><input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>> Public — my whole connected family</label>
       </div>
 
+      <?php if ($taggablePeople): ?>
+        <label>Tag people in this memory <span style="text-transform:none;font-weight:400;">(optional — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
+        <div class="tag-picker">
+          <?php foreach ($taggablePeople as $tp): ?>
+            <?php $tpId = (int) $tp['id']; ?>
+            <label>
+              <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds ?? [], true) ? 'checked' : '' ?>>
+              <?= htmlspecialchars(person_display_name($tp), ENT_QUOTES) ?>
+              <?= $tp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
+            </label>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+
       <button type="submit" class="btn-primary">Save entry</button>
     </form>
-    <p class="foot-link"><a href="/timeline.php">Back to my timeline</a></p>
+    <p class="foot-link"><a href="/timeline.php<?= $addingForSelf ? '' : '?person_id=' . $targetPersonId ?>">Back to <?= $addingForSelf ? 'my' : htmlspecialchars(person_display_name($targetPerson), ENT_QUOTES) . "'s" ?> timeline</a></p>
   </div>
   <script>
   (function () {

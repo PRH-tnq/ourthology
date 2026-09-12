@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
+require_once __DIR__ . '/includes/memory_tags.php';
 
 require_login();
 $me = current_user_with_person();
@@ -38,6 +39,18 @@ if (!$isOwner && !$sameGroup) {
     exit("You don't have access to this person's timeline.");
 }
 
+// Anyone in the family group may manage (add/edit/delete memories on, and
+// see every private entry on) an unclaimed person's timeline — the same
+// "unclaimed = shared" rule person_is_editable_by() already applies to
+// editing the person record itself (Phase 10) and to who may add a memory
+// for them (Phase 17) — extended here so the memories those same people
+// were allowed to add aren't then invisible to them, or to each other,
+// once saved. $isOwner itself stays narrow (literally your own claimed
+// record) since it also drives "My timeline" wording and the birth-date
+// prompt below, neither of which make sense for someone else's profile
+// even an unclaimed one.
+$canManage = $isOwner || person_is_editable_by($target, (int) $me['user_id']);
+
 $notice = null;
 $errors = [];
 
@@ -48,21 +61,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete_entry') {
         $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
         if ($entryId !== false) {
-            // Ownership check happens in the query itself, not just in the UI —
-            // this only matches (and only deletes) a row that both has this id
-            // AND belongs to me.
-            $stmt = $pdo->prepare('SELECT id FROM timeline_entries WHERE id = :id AND person_id = :pid');
-            $stmt->execute(['id' => $entryId, 'pid' => $myPersonId]);
-            if ($stmt->fetch() ?: null) {
+            // Ownership check happens in the query itself, not just in the
+            // UI: an entry can be deleted by the person it belongs to, or by
+            // anyone who can manage its owner's profile because that owner
+            // is unclaimed (same person_is_editable_by() rule $canManage
+            // above uses) — never by whoever merely happens to be viewing
+            // this particular target's timeline right now, which is why the
+            // entry's OWN owning person is re-fetched and re-checked here
+            // rather than trusting $canManage from above.
+            $stmt = $pdo->prepare(
+                'SELECT te.id, p.claimed_by_user_id, p.family_group_id
+                 FROM timeline_entries te JOIN persons p ON p.id = te.person_id
+                 WHERE te.id = :id'
+            );
+            $stmt->execute(['id' => $entryId]);
+            $row = $stmt->fetch() ?: null;
+            $allowed = $row !== null
+                && (int) $row['family_group_id'] === $myGroup
+                && person_is_editable_by($row, (int) $me['user_id']);
+            if ($allowed) {
                 $mediaStmt = $pdo->prepare('SELECT file_path FROM media WHERE timeline_entry_id = :eid');
                 $mediaStmt->execute(['eid' => $entryId]);
                 foreach ($mediaStmt->fetchAll() as $m) {
                     delete_media_file($m['file_path']);
                 }
+                // timeline_entries -> memory_tags has ON DELETE CASCADE, so
+                // deleting the entry also clears anyone else's tag on it.
                 $pdo->prepare('DELETE FROM timeline_entries WHERE id = :id')->execute(['id' => $entryId]);
                 $notice = 'Entry deleted.';
             } else {
                 $errors[] = "That entry doesn't exist or isn't yours to delete.";
+            }
+        }
+    } elseif ($action === 'save_tag_note') {
+        // Anyone with an approved tag on a memory may write/edit their OWN
+        // note about it — never the memory's title/body/media, which stay
+        // the creator's alone to change (see edit_entry.php). The UPDATE's
+        // own WHERE clause is the entire permission check: it only ever
+        // touches a row that is both this memory and an APPROVED tag
+        // belonging to me, so there's nothing to separately verify first.
+        $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+        $note = trim((string) ($_POST['note'] ?? ''));
+        if ($entryId === false) {
+            $errors[] = 'Invalid request.';
+        } else {
+            $stmt = $pdo->prepare(
+                "UPDATE memory_tags SET note = :note
+                 WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'approved'"
+            );
+            $stmt->execute(['note' => $note !== '' ? $note : null, 'eid' => $entryId, 'pid' => $myPersonId]);
+            if ($stmt->rowCount() > 0) {
+                $notice = 'Note saved.';
+            } else {
+                $errors[] = "You don't have an approved tag on that memory.";
             }
         }
     } elseif ($action === 'set_born') {
@@ -91,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$entries = fetch_entries_for_person($pdo, (int) $target['id'], $isOwner);
+$entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage);
 $targetName = person_display_name($target);
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
@@ -115,6 +166,27 @@ foreach ($entries as $entry) {
         $kind = str_starts_with($mime, 'video/') ? 'video' : (str_starts_with($mime, 'image/') ? 'image' : 'file');
         $media[] = ['kind' => $kind, 'url' => '/media.php?id=' . (int) $m['id']];
     }
+
+    // Editable per ENTRY, not per page — a memory tagged onto my own
+    // timeline that someone else wrote stays theirs to edit/delete, even
+    // while I'm looking at it on my own "My timeline" page (only its owning
+    // person's own account holder, or anyone managing that person's
+    // still-unclaimed profile, may touch the memory itself; see
+    // edit_entry.php).
+    $entryCanEdit = (int) $entry['owner_family_group'] === $myGroup
+        && person_is_editable_by(['claimed_by_user_id' => $entry['owner_claimed_by']], (int) $me['user_id']);
+
+    $tags = [];
+    $myNote = null;
+    $iAmTagged = false;
+    foreach ($entry['tags'] as $t) {
+        $tags[] = ['name' => $t['name'], 'note' => (string) ($t['note'] ?? '')];
+        if ($t['person_id'] === $myPersonId) {
+            $iAmTagged = true;
+            $myNote = (string) ($t['note'] ?? '');
+        }
+    }
+
     $jsEntries[] = [
         'id'         => (string) $entry['id'],
         'date'       => $date,
@@ -123,6 +195,10 @@ foreach ($entries as $entry) {
         'visibility' => $entry['visibility'],
         'type'       => $entry['entry_type'] === 'diary' ? 'diary' : 'memory',
         'media'      => $media,
+        'canEdit'    => $entryCanEdit,
+        'tags'       => $tags,
+        'iAmTagged'  => $iAmTagged,
+        'myNote'     => $myNote,
     ];
 }
 
@@ -319,6 +395,21 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .viewer-thought-view:empty::before { content:"No thoughts written yet."; color:var(--ink-faint); font-style:italic; }
   .viewer-actions { display:flex; justify-content:space-between; align-items:center; padding:14px 24px; border-top:1px solid var(--line); }
 
+  /* Notes family members tagged on this memory have added — read-only for
+     everyone else, always shown when at least one exists (regardless of
+     whose timeline you're viewing it from, since the memory is the same
+     shared row wherever it appears); the current viewer's OWN note, when
+     they're one of the tagged people, gets an editable textarea instead. */
+  .viewer-tag-notes { display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--line-soft, var(--line)); padding-top:12px; }
+  .viewer-tag-notes[hidden] { display:none; }
+  .viewer-tag-note { font-size:13.5px; line-height:1.5; color:var(--ink-soft); }
+  .viewer-tag-note b { color:var(--ink); }
+  .viewer-my-note { border-top:1px solid var(--line-soft, var(--line)); padding-top:12px; }
+  .viewer-my-note[hidden] { display:none; }
+  .viewer-my-note label { display:block; font-size:11px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px; }
+  .viewer-my-note textarea { width:100%; min-height:56px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; font-family:inherit; color:var(--ink); resize:vertical; }
+  .viewer-my-note .btn-ghost { margin-top:6px; }
+
   @media (max-width: 760px) {
     .viewer-modal { width:100vw; height:100vh; max-height:none; border-radius:0; }
     .viewer-body { grid-template-columns:1fr; grid-template-rows:42vh 1fr; overflow-y:auto; }
@@ -340,7 +431,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <a href="/dashboard.php">Dashboard</a>
         <a href="/tree.php">My tree</a>
         <a href="/edit_person.php">Edit a person</a>
-        <?php if ($isOwner): ?><a href="/add_entry.php">+ Add a memory</a><?php endif; ?>
+        <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>">+ Add a memory</a><?php endif; ?>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
@@ -351,7 +442,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <h3 style="margin-bottom:2px;">
       <?= $isOwner ? 'My timeline' : htmlspecialchars($targetName, ENT_QUOTES) . "'s timeline" ?>
     </h3>
-    <?php if (!$isOwner): ?>
+    <?php if (!$canManage): ?>
       <p style="font-size:13px;color:var(--ink-faint);margin-top:0;">Showing public entries only.</p>
     <?php endif; ?>
 
@@ -449,6 +540,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <span id="viewerPillView"></span>
           </div>
           <p class="viewer-thought-view" id="viewerThoughtView"></p>
+
+          <div class="viewer-tag-notes" id="viewerTagNotes" hidden></div>
+
+          <form method="post" class="viewer-my-note" id="viewerMyNoteForm" hidden>
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="save_tag_note">
+            <input type="hidden" name="entry_id" id="viewerMyNoteEntryId" value="">
+            <label for="viewerMyNoteText">Your note on this memory <span style="text-transform:none;font-weight:400;">(shown to everyone who can see it)</span></label>
+            <textarea name="note" id="viewerMyNoteText" placeholder="Add what you remember about this…"></textarea>
+            <button type="submit" class="btn-ghost">Save note</button>
+          </form>
         </div>
       </div>
       <div class="viewer-actions">
@@ -471,6 +573,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
     var svgNS = "http://www.w3.org/2000/svg";
     var IS_OWNER = <?= $isOwner ? 'true' : 'false' ?>;
+    var CAN_MANAGE = <?= $canManage ? 'true' : 'false' ?>;
+    var ADD_ENTRY_QS = <?= json_encode($isOwner ? '' : '?person_id=' . (int) $target['id'], JSON_UNESCAPED_SLASHES) ?>;
     var BIRTH = new Date(<?= (int) $birthYear ?>, <?= (int) $birthMonth - 1 ?>, <?= (int) $birthDay ?>);
     var BUFFER_YEARS = 15;
     var YEAR_MS = 365.25 * 86400000;
@@ -870,7 +974,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var empty = document.createElement("div");
         empty.className = "empty-state";
         empty.style.flex = "1 0 auto";
-        empty.textContent = IS_OWNER
+        empty.textContent = CAN_MANAGE
           ? "Nothing in this range yet — add a memory above."
           : "No memories shared here in this range yet.";
         rail.appendChild(empty);
@@ -1160,12 +1264,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var suppressNextClick = false;
     svg.addEventListener("click", function (evt) {
       if (suppressNextClick) { suppressNextClick = false; return; }
-      if (!IS_OWNER) return;
+      if (!CAN_MANAGE) return;
       if (evt.target.closest(".node")) return;
       var range = getRange();
       var pos = clientToSvg(evt.clientX, evt.clientY);
       var f = posToFrac(pos.x, pos.y, range, state.layout);
-      window.location.href = "/add_entry.php?date=" + isoDate(fracToDate(f, range));
+      var dateParam = "date=" + isoDate(fracToDate(f, range));
+      window.location.href = "/add_entry.php?" + (ADD_ENTRY_QS ? ADD_ENTRY_QS.slice(1) + "&" + dateParam : dateParam);
     });
 
     // ---- drag-to-zoom on the river ----
@@ -1317,6 +1422,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerDeleteForm = document.getElementById("viewerDeleteForm");
     var viewerDeleteEntryId = document.getElementById("viewerDeleteEntryId");
     var viewerEditLink = document.getElementById("viewerEditLink");
+    var viewerTagNotes = document.getElementById("viewerTagNotes");
+    var viewerMyNoteForm = document.getElementById("viewerMyNoteForm");
+    var viewerMyNoteEntryId = document.getElementById("viewerMyNoteEntryId");
+    var viewerMyNoteText = document.getElementById("viewerMyNoteText");
 
     function viewerMediaViewHtml(mediaList) {
       var list = mediaList || [];
@@ -1344,7 +1453,32 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           ? '<span class="pill public"><svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="6"/></svg>Family</span>'
           : '<span class="pill private"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2c-2 1.6-3 3.2-3 5.8v1.1H6.3A1.3 1.3 0 0 0 5 10.2v6A1.3 1.3 0 0 0 6.3 17.5h7.4A1.3 1.3 0 0 0 15 16.2v-6a1.3 1.3 0 0 0-1.3-1.3H13V7.8c0-2.6-1-4.2-3-5.8Z"/></svg>Private</span>');
       viewerThoughtView.textContent = e.thought || "";
-      if (IS_OWNER) {
+
+      // Notes family members tagged on this memory have written, read-only
+      // — shown regardless of whose timeline it's being viewed from, since
+      // it's the same shared memory wherever it appears. Notes with no text
+      // yet are skipped here; mine gets its own editable box below instead
+      // of appearing twice.
+      var notesHtml = (e.tags || [])
+        .filter(function (t) { return t.note && t.note.trim() !== ""; })
+        .map(function (t) {
+          return '<p class="viewer-tag-note"><b>' + escapeHtml(t.name) + ':</b> ' + escapeHtml(t.note) + "</p>";
+        }).join("");
+      viewerTagNotes.innerHTML = notesHtml;
+      viewerTagNotes.hidden = notesHtml === "";
+
+      if (e.iAmTagged) {
+        viewerMyNoteForm.hidden = false;
+        viewerMyNoteEntryId.value = e.id;
+        viewerMyNoteText.value = e.myNote || "";
+      } else {
+        viewerMyNoteForm.hidden = true;
+      }
+
+      // Edit/Delete are per-MEMORY, not per-page: a memory shared onto my
+      // own timeline that someone else wrote (or that belongs to someone
+      // else's unclaimed profile I don't manage) stays theirs to change.
+      if (e.canEdit) {
         viewerDeleteForm.hidden = false;
         viewerDeleteEntryId.value = e.id;
         viewerEditLink.hidden = false;

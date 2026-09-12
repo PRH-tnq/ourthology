@@ -234,13 +234,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $pdo->beginTransaction();
 
-                // An unclaimed placeholder can't normally have timeline
-                // entries of their own (only a logged-in account can add
-                // one, for itself, via add_entry.php) but this is handled
-                // defensively in case that's ever no longer true — same
-                // file-then-row deletion order timeline.php's own delete
-                // action uses, so no media file is ever left orphaned on
-                // disk.
+                // An unclaimed placeholder can perfectly normally have
+                // timeline entries of their own now (Phase 17: anyone in the
+                // family group may add a memory for them, not just an
+                // account holder acting for themselves) — same file-then-row
+                // deletion order timeline.php's own delete action uses, so
+                // no media file is ever left orphaned on disk.
                 $mediaStmt = $pdo->prepare(
                     'SELECT m.file_path FROM media m
                      JOIN timeline_entries t ON t.id = m.timeline_entry_id
@@ -250,10 +249,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach ($mediaStmt->fetchAll() as $m) {
                     delete_media_file($m['file_path']);
                 }
-                // timeline_entries -> media has ON DELETE CASCADE, so
-                // deleting the entries is enough to also clear their media
-                // rows (the files themselves are already gone, just above).
+                // timeline_entries -> media AND timeline_entries ->
+                // memory_tags both have ON DELETE CASCADE, so deleting the
+                // entries also clears their media rows (the files
+                // themselves are already gone, just above) and any tags
+                // OTHER people had on this person's own memories. A tag
+                // THIS person holds on someone ELSE's memory isn't reached
+                // by that cascade (it hangs off the other entry, not one of
+                // this person's own) — deleted explicitly, next.
                 $pdo->prepare('DELETE FROM timeline_entries WHERE person_id = :pid')->execute(['pid' => $personId]);
+                $pdo->prepare('DELETE FROM memory_tags WHERE person_id = :pid')->execute(['pid' => $personId]);
                 $pdo->prepare('DELETE FROM claim_tokens WHERE person_id = :pid')->execute(['pid' => $personId]);
                 $pdo->prepare('DELETE FROM relationships WHERE parent_id = :pid OR child_id = :pid2')
                     ->execute(['pid' => $personId, 'pid2' => $personId]);
@@ -477,6 +482,13 @@ if ($postedProfile) {
     </form>
 
     <?php if ($person !== null): ?>
+
+      <p class="foot-link" style="margin:10px 0 0;text-align:left;">
+        <a href="/timeline.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;">View timeline</a>
+        <?php if ($canEdit): ?>
+          · <a href="/add_entry.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;">+ Add a memory<?= $personId === $myPersonId ? '' : ' for them' ?></a>
+        <?php endif; ?>
+      </p>
 
       <?php if ($isClaimedByOther): ?>
         <div class="locked-notice">

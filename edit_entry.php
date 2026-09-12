@@ -4,6 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/media.php';
+require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/memory_tags.php';
 
 require_login();
 $me = current_user_with_person();
@@ -14,11 +16,13 @@ if ($me === null) {
 }
 $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
+$myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
 
-// A memory/diary entry can only ever be edited by the person it belongs
-// to — same rule add_entry.php already enforces at creation (you can only
-// ever write entries for yourself, never for someone else in your family
-// group) — so ownership is checked once here, in the query itself, not
+// A memory/diary entry can be edited by the person it belongs to — or, for
+// an unclaimed person's entry, by anyone in the family group (the same
+// person_is_editable_by() rule add_entry.php already applies to who may
+// ADD one, and edit_person.php applies to editing the person's own
+// details) — so ownership is checked once here, in the query itself, not
 // just by hiding the "Edit" link in timeline.php's viewer.
 $entryId = filter_var($_GET['entry_id'] ?? $_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
 if ($entryId === false) {
@@ -26,14 +30,22 @@ if ($entryId === false) {
     exit('No such entry.');
 }
 
-function fetch_owned_entry(PDO $pdo, int $entryId, int $myPersonId): ?array
+function fetch_owned_entry(PDO $pdo, int $entryId, int $myUserId, int $myFamilyGroup): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT id, person_id, entry_type, title, body, occurred_on, visibility
-         FROM timeline_entries WHERE id = :id AND person_id = :pid'
+        'SELECT te.id, te.person_id, te.entry_type, te.title, te.body, te.occurred_on, te.visibility,
+                p.claimed_by_user_id, p.family_group_id
+         FROM timeline_entries te
+         JOIN persons p ON p.id = te.person_id
+         WHERE te.id = :id'
     );
-    $stmt->execute(['id' => $entryId, 'pid' => $myPersonId]);
-    return $stmt->fetch() ?: null;
+    $stmt->execute(['id' => $entryId]);
+    $row = $stmt->fetch() ?: null;
+    if ($row === null || (int) $row['family_group_id'] !== $myFamilyGroup
+        || !person_is_editable_by($row, $myUserId)) {
+        return null;
+    }
+    return $row;
 }
 
 /** All media rows for an entry, in the order they were attached. */
@@ -47,11 +59,28 @@ function fetch_entry_media(PDO $pdo, int $entryId): array
     return $stmt->fetchAll();
 }
 
-$entry = fetch_owned_entry($pdo, $entryId, $myPersonId);
+$entry = fetch_owned_entry($pdo, $entryId, (int) $me['user_id'], $myGroup);
 if ($entry === null) {
     http_response_code(404);
     exit("That entry doesn't exist or isn't yours to edit.");
 }
+$entryOwnerPersonId = (int) $entry['person_id'];
+$editingSomeoneElse = $entryOwnerPersonId !== $myPersonId;
+
+// Everyone else in the family group, for the "tag people in this memory"
+// picker — same list add_entry.php offers, pre-checked with however this
+// entry is already tagged (at ANY status — pending or approved — so a
+// still-pending tag doesn't look untagged just because nobody's approved
+// it yet; resubmitting the same checked set leaves an existing tag's
+// status/note alone, see sync_memory_tags()).
+$familyGraph = fetch_family_graph($pdo, $myGroup);
+$familyPersonsById = [];
+foreach ($familyGraph['persons'] as $p) {
+    $familyPersonsById[(int) $p['id']] = $p;
+}
+$taggablePeople = taggable_people($familyGraph['persons'], $entryOwnerPersonId);
+$currentTagIds = array_map(fn ($t) => (int) $t['person_id'], fetch_tags_for_entry($pdo, $entryId));
+
 $existingMedia = fetch_entry_media($pdo, $entryId);
 $existingMediaById = [];
 foreach ($existingMedia as $m) {
@@ -95,6 +124,15 @@ if ($posted) {
     ));
     $keptExistingIds = array_values(array_intersect($submittedKeptIds, array_keys($existingMediaById)));
     $removedExistingIds = array_values(array_diff(array_keys($existingMediaById), $keptExistingIds));
+
+    // Same tampering guard add_entry.php uses: only someone actually
+    // taggable on this entry (anyone else in the family group) survives.
+    $submittedTagIds = array_map('intval', array_filter(
+        (array) ($_POST['tag_person_ids'] ?? []),
+        fn ($v) => filter_var($v, FILTER_VALIDATE_INT) !== false
+    ));
+    $taggablePersonIds = array_map(fn ($p) => (int) $p['id'], $taggablePeople);
+    $tagPersonIds = array_values(array_intersect($submittedTagIds, $taggablePersonIds));
 
     if (!in_array($entryKind, ['memory', 'diary'], true)) {
         $errors[] = 'Choose a valid entry type.';
@@ -149,7 +187,7 @@ if ($posted) {
             // is caught (and, via store_uploaded_media_files()'s own
             // all-or-nothing cleanup, leaves nothing new written to disk)
             // before any existing file is actually deleted below.
-            $storedList = $hasNewFiles ? store_uploaded_media_files($rawMediaField, $myPersonId) : [];
+            $storedList = $hasNewFiles ? store_uploaded_media_files($rawMediaField, $entryOwnerPersonId) : [];
 
             if ($entryKind === 'diary') {
                 $dbEntryType = 'diary';
@@ -189,8 +227,10 @@ if ($posted) {
                 'occurred' => $occurredOnValue,
                 'vis'      => $visibility,
                 'id'       => $entryId,
-                'pid'      => $myPersonId,
+                'pid'      => $entryOwnerPersonId,
             ]);
+
+            sync_memory_tags($pdo, $entryId, $tagPersonIds, $familyPersonsById, (int) $me['user_id']);
 
             if ($removedExistingIds) {
                 foreach ($removedExistingIds as $rid) {
@@ -219,7 +259,7 @@ if ($posted) {
             }
 
             $pdo->commit();
-            header('Location: /timeline.php');
+            header('Location: /timeline.php' . ($editingSomeoneElse ? '?person_id=' . $entryOwnerPersonId : ''));
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();
@@ -239,6 +279,7 @@ if ($posted) {
     $displayMediaIds = $keptExistingIds;
 } else {
     // Fresh GET: prefill everything from the stored entry, nothing removed yet.
+    $tagPersonIds = $currentTagIds;
     $entryKind = $entry['entry_type'] === 'diary' ? 'diary' : 'memory';
     $title = (string) ($entry['title'] ?? '');
     $body = (string) ($entry['body'] ?? '');
@@ -321,12 +362,20 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   .pick-remove:hover { background:var(--accent); }
   .media-picker-note { display:block; font-size:12px; color:var(--ink-faint); margin-top:6px; }
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
+  .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
+  .for-banner strong { color:var(--ink); }
+  .tag-picker { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; }
+  .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
 </style>
 </head>
 <body>
   <div class="card" style="max-width:460px;">
     <p class="wordmark">ourthology<span class="tld">.com</span></p>
     <p class="subtitle">an anthology of us.</p>
+
+    <?php if ($editingSomeoneElse): ?>
+      <p class="for-banner">Editing a memory belonging to <strong><?= htmlspecialchars(person_display_name($familyPersonsById[$entryOwnerPersonId] ?? []), ENT_QUOTES) ?></strong> (not yet claimed).</p>
+    <?php endif; ?>
 
     <?php if ($errors): ?>
       <div class="error">
@@ -390,9 +439,23 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         <label><input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>> Public — my whole connected family</label>
       </div>
 
+      <?php if ($taggablePeople): ?>
+        <label>Tag people in this memory <span style="text-transform:none;font-weight:400;">(optional — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
+        <div class="tag-picker">
+          <?php foreach ($taggablePeople as $tp): ?>
+            <?php $tpId = (int) $tp['id']; ?>
+            <label>
+              <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds, true) ? 'checked' : '' ?>>
+              <?= htmlspecialchars(person_display_name($tp), ENT_QUOTES) ?>
+              <?= $tp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
+            </label>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+
       <button type="submit" class="btn-primary">Save changes</button>
     </form>
-    <p class="foot-link"><a href="/timeline.php">Cancel</a></p>
+    <p class="foot-link"><a href="/timeline.php<?= $editingSomeoneElse ? '?person_id=' . $entryOwnerPersonId : '' ?>">Cancel</a></p>
   </div>
   <script>
   (function () {

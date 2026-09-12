@@ -65,6 +65,30 @@ function ourthology_initials(array $p): string
     return $out;
 }
 
+/** Splits a full display name onto up to two tree-node lines instead of
+ *  truncating it: names at or under the threshold stay on one line
+ *  unchanged; a longer one splits at its LAST space (so "Christopher
+ *  Alexander Worthington" -> "Christopher Alexander" / "Worthington"),
+ *  which in practice puts the surname alone on its own line. A name with
+ *  no space at all (nothing to split on) is left on one line however
+ *  long — better an unusually wide single line than a line broken
+ *  mid-word. Threshold tuned empirically against TREE_NODE_W/screenshots,
+ *  not derived from it. */
+function ourthology_name_lines(string $name, int $threshold = 20): array
+{
+    if (mb_strlen($name) <= $threshold) {
+        return [$name];
+    }
+    $lastSpace = mb_strrpos($name, ' ');
+    if ($lastSpace === false) {
+        return [$name];
+    }
+    return [
+        mb_substr($name, 0, $lastSpace),
+        mb_substr($name, $lastSpace + 1),
+    ];
+}
+
 /** "b. 1965" / "d. 2020" / "1965 – 2020" / "" — year-only, same compact
  *  convention the prototype's formatLifespan() uses (full dates would
  *  crowd a node this small). */
@@ -129,11 +153,13 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
   }
   body { align-items: flex-start; }
-  .wide { max-width: 900px; }
+  .wide { max-width: min(95vw, 1700px); }
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
   .nav a.badge { background: var(--error-bg); border-color: var(--error-bg); color: var(--accent); font-weight:600; }
+  .nav .linklet-btn { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); background:#fff; cursor:pointer; font-family:inherit; }
+  .nav .linklet-btn:hover { color:var(--accent); border-color:var(--accent-glow); }
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -147,7 +173,8 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      view: a soft paper-toned well, no boxes around people (just stacked
      text, name over status), warm serif type, blood lines plain and thin,
      partner bonds picked out in accent. */
-  .tree-wrap { background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; }
+  .tree-wrap { background:var(--paper-2); border:1px solid var(--line); border-radius:24px; box-shadow:var(--shadow); overflow:auto; padding:10px; margin-top:10px; cursor:grab; touch-action:none; }
+  .tree-wrap.panning { cursor:grabbing; user-select:none; }
   .tree-wrap svg { display:block; margin:0 auto; }
   .tree-link { fill:none; stroke:var(--ink-soft); stroke-width:1.4; }
   .tree-bond line, .tree-bond path { fill:none; stroke:var(--accent); stroke-width:1.8; }
@@ -164,6 +191,20 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tree-node.you:hover .tn-name { fill:var(--accent); }
   .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
   .tree-key strong { color:var(--ink); }
+
+  /* Print: a family tree is wide, so print it landscape and let the full
+     diagram scale to the page rather than printing whatever's currently
+     scrolled into view — override the on-screen overflow:auto/fixed pixel
+     box with overflow:visible + a fluid SVG. Page chrome that isn't part
+     of the diagram itself (nav bar, invite-link flash, the unclaimed list)
+     is hidden; the heading and the key legend stay since they give useful
+     context on a printed page. */
+  @media print {
+    @page { size: landscape; margin: 10mm; }
+    .nav, .flash, .flash-label, #unclaimedSection { display:none !important; }
+    .tree-wrap { overflow:visible; border:none; box-shadow:none; background:transparent; padding:0; cursor:default; }
+    .tree-wrap svg { width:100% !important; height:auto !important; }
+  }
 </style>
 </head>
 <body>
@@ -179,6 +220,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
         <a href="/edit_person.php">Edit a person</a>
         <a href="/link_existing.php">Link to existing account</a>
         <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
+        <button type="button" id="printTreeBtn" class="linklet-btn" onclick="window.print()">Print tree</button>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
@@ -187,7 +229,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     </div>
 
     <?php if ($flashLink): ?>
-      <p style="margin-top:16px;font-weight:600;">Invite link for <?= htmlspecialchars(person_display_name($personsById[$flashFor] ?? []), ENT_QUOTES) ?>:</p>
+      <p class="flash-label" style="margin-top:16px;font-weight:600;">Invite link for <?= htmlspecialchars(person_display_name($personsById[$flashFor] ?? []), ENT_QUOTES) ?>:</p>
       <p class="flash"><?= htmlspecialchars($flashLink, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
@@ -297,7 +339,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               // clears the text, however long the name actually is.
               $leftHalfW = ($leftId === $myPersonId ? TREE_ME_W : TREE_NODE_W) / 2;
               $rightHalfW = ($rightId === $myPersonId ? TREE_ME_W : TREE_NODE_W) / 2;
-              $bondClearance = 6;
+              $bondClearance = 10;
               $bx1 = $left['x'] + $leftHalfW + $bondClearance;
               $by1 = $left['y'];
               $bx2 = $right['x'] - $rightHalfW - $bondClearance;
@@ -336,7 +378,9 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               if ($isYou) {
                   $lines[] = ['cls' => 'tn-name', 'text' => 'You'];
               } else {
-                  $lines[] = ['cls' => 'tn-name', 'text' => mb_strimwidth(person_display_name($person), 0, 15, '…')];
+                  foreach (ourthology_name_lines(person_display_name($person)) as $nameLine) {
+                      $lines[] = ['cls' => 'tn-name', 'text' => $nameLine];
+                  }
                   $lines[] = ['cls' => 'tn-tag', 'text' => $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed'];
               }
               if ($datesText !== '') {
@@ -364,22 +408,94 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     <?php endif; ?>
 
     <?php if ($unclaimed): ?>
-      <h3 style="margin:24px 0 4px;">Not yet claimed (<?= count($unclaimed) ?>)</h3>
-      <ul class="plain">
-        <?php foreach ($unclaimed as $p): ?>
-          <li>
-            <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
-            <form method="post" style="display:inline;">
-              <?= csrf_field() ?>
-              <input type="hidden" name="action" value="get_link">
-              <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
-              <button type="submit" class="linklet">get invite link</button>
-            </form>
-            · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
-          </li>
-        <?php endforeach; ?>
-      </ul>
+      <div id="unclaimedSection">
+        <h3 style="margin:24px 0 4px;">Not yet claimed (<?= count($unclaimed) ?>)</h3>
+        <ul class="plain">
+          <?php foreach ($unclaimed as $p): ?>
+            <li>
+              <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
+              <form method="post" style="display:inline;">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="get_link">
+                <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
+                <button type="submit" class="linklet">get invite link</button>
+              </form>
+              · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      </div>
     <?php endif; ?>
   </div>
+  <script>
+    // Click-and-drag (and touch-drag) panning on empty tree-diagram space.
+    // Pointer Events cover mouse and touch in one set of handlers. A drag
+    // only STARTS when the pointer goes down outside a person node (so a
+    // node's own click-to-navigate is never hijacked at the source), and a
+    // small movement threshold — matching the drag-to-zoom threshold
+    // already used on timeline.php's river view — distinguishes a genuine
+    // click from a real drag so a plain click still navigates normally.
+    (function () {
+      var wrap = document.querySelector('.tree-wrap');
+      if (!wrap) return;
+      var DRAG_THRESHOLD = 6;
+      var drag = null;
+      var suppressNextClick = false;
+
+      function isOnNode(target) {
+        return !!(target && target.closest && target.closest('.tree-node'));
+      }
+
+      wrap.addEventListener('pointerdown', function (evt) {
+        if (evt.button !== undefined && evt.button !== 0) return;
+        if (isOnNode(evt.target)) return;
+        drag = {
+          pointerId: evt.pointerId,
+          startX: evt.clientX,
+          startY: evt.clientY,
+          startScrollLeft: wrap.scrollLeft,
+          startScrollTop: wrap.scrollTop,
+          dragging: false
+        };
+      });
+
+      wrap.addEventListener('pointermove', function (evt) {
+        if (!drag || drag.pointerId !== evt.pointerId) return;
+        var dx = evt.clientX - drag.startX;
+        var dy = evt.clientY - drag.startY;
+        if (!drag.dragging) {
+          if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+          drag.dragging = true;
+          wrap.classList.add('panning');
+          try { wrap.setPointerCapture(evt.pointerId); } catch (e) {}
+        }
+        wrap.scrollLeft = drag.startScrollLeft - dx;
+        wrap.scrollTop = drag.startScrollTop - dy;
+        evt.preventDefault();
+      });
+
+      function endDrag(evt) {
+        if (!drag || (evt && evt.pointerId !== undefined && evt.pointerId !== drag.pointerId)) return;
+        if (drag.dragging) {
+          wrap.classList.remove('panning');
+          suppressNextClick = true;
+          try { wrap.releasePointerCapture(drag.pointerId); } catch (e) {}
+        }
+        drag = null;
+      }
+      wrap.addEventListener('pointerup', endDrag);
+      wrap.addEventListener('pointercancel', endDrag);
+
+      // Defensive net: if a real drag just ended (wasDragging), swallow the
+      // click so the node it happened to end over doesn't navigate.
+      wrap.addEventListener('click', function (evt) {
+        if (suppressNextClick) {
+          suppressNextClick = false;
+          evt.preventDefault();
+          evt.stopPropagation();
+        }
+      }, true);
+    })();
+  </script>
 </body>
 </html>

@@ -22,16 +22,18 @@ declare(strict_types=1);
  * new (the prototype's was built around a different, single-user model).
  */
 
-const TREE_NODE_W = 118;
+const TREE_NODE_W = 140;
 const TREE_NODE_H = 62;
-const TREE_ME_W = 96;
+const TREE_ME_W = 108;
 const TREE_ME_H = 50;
-// Widened from the first pass (150/120) after screenshots showed a pair of
-// long (truncated-at-18-char) names sitting close enough to visually touch,
-// especially for the tighter spouse gap — these give real names room to
-// breathe on both sides without losing the "spouses read as a pair" effect.
-const TREE_NODE_GAP = 172;   // horizontal distance between ordinary adjacent people
-const TREE_SPOUSE_GAP = 142; // tighter — keeps a partner visually paired
+// Widened again (from 118/96 and gaps 172/142) once truncation was removed
+// entirely (tree.php now renders each person's full display name, wrapping
+// onto a second line only past ourthology_name_lines()'s own threshold) —
+// screenshots at this size show full names, including the two-line-wrapped
+// long ones, clearing both their neighbors and the spousal-bond lines. See
+// tree.php's ourthology_name_lines() for the wrap threshold.
+const TREE_NODE_GAP = 205;   // horizontal distance between ordinary adjacent people
+const TREE_SPOUSE_GAP = 165; // tighter — keeps a partner visually paired
 const TREE_TIER_GAP = 148;   // vertical distance between generations
 const TREE_TOP_PAD = 60;
 const TREE_ROW_LABEL_W = 150; // left margin reserved for "PARENTS" / "3× GREAT-GRANDPARENTS" etc.

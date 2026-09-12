@@ -154,7 +154,54 @@ CREATE TABLE media (
     REFERENCES timeline_entries(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------------------------------------------------------------
+-- memory_tags: someone tagged on another person's timeline entry ("this
+-- memory is about you too"). The memory stays ONE shared timeline_entries
+-- row — tagging never copies it — approving a tag just makes that same
+-- row also show up on the tagged person's own timeline and marks their
+-- tag approved.
+--
+-- Tagging a person already claimed by another user creates a
+-- status='pending' row that person must approve on pending.php before
+-- the memory appears for them — mirroring relationships/partnerships
+-- exactly, including "decline = DELETE the row outright, no trace kept"
+-- (so this enum only ever needs 'pending'/'approved', never 'declined').
+-- Tagging an unclaimed person auto-approves immediately: nobody is
+-- logged in as them to ask, matching the "unclaimed = open to the whole
+-- family" rule already used elsewhere (person_is_editable_by()).
+--
+-- note is the tagged person's own short text about the memory, entered
+-- once they've approved (or immediately, for an auto-approved unclaimed
+-- tag) — shown alongside the memory on every profile it's referenced
+-- from. It is theirs alone to write/edit; the memory's creator can't
+-- touch it, and it never becomes editable by anyone else.
+-- ---------------------------------------------------------------------
+CREATE TABLE memory_tags (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  timeline_entry_id   INT UNSIGNED NOT NULL,
+  person_id           INT UNSIGNED NOT NULL,
+  status              ENUM('pending','approved') NOT NULL DEFAULT 'pending',
+  note                TEXT NULL,
+  created_by_user_id  INT UNSIGNED NOT NULL,
+  approving_user_id   INT UNSIGNED NULL,
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_at         DATETIME NULL,
+  UNIQUE KEY uniq_entry_person (timeline_entry_id, person_id),
+  -- Cascades on the entry side (deleting a memory deletes its tags with
+  -- it, same precedent as timeline_entries -> media above); deliberately
+  -- NOT cascaded on the person side — edit_person.php's delete_person
+  -- action deletes a departing person's own memory_tags rows itself,
+  -- inside the same transaction as its other explicit cleanup deletes.
+  CONSTRAINT fk_tag_entry FOREIGN KEY (timeline_entry_id)
+    REFERENCES timeline_entries(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tag_person FOREIGN KEY (person_id) REFERENCES persons(id),
+  CONSTRAINT fk_tag_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_tag_approving FOREIGN KEY (approving_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE INDEX idx_persons_family_group ON persons(family_group_id);
 CREATE INDEX idx_entries_person_visibility ON timeline_entries(person_id, visibility);
 CREATE INDEX idx_rel_status ON relationships(status);
 CREATE INDEX idx_part_status ON partnerships(status);
+CREATE INDEX idx_tags_status ON memory_tags(status);
+CREATE INDEX idx_tags_person ON memory_tags(person_id, status);

@@ -23,7 +23,7 @@ if ($mediaId === false) {
 }
 
 $media = fetch_media_for_view($pdo, (int) $mediaId);
-if ($media === null || !can_view_media($media, $myPersonId, $myGroup)) {
+if ($media === null || !can_view_media($media, $myPersonId, $myGroup, $pdo)) {
     // Same response whether it doesn't exist or you're just not allowed to
     // see it — no reason to let someone tell the two apart.
     http_response_code(404);
