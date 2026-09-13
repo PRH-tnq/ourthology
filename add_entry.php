@@ -40,15 +40,23 @@ if ($targetPerson === null || (int) $targetPerson['family_group_id'] !== $myGrou
 $targetPersonId = (int) $targetPerson['id'];
 $addingForSelf = $targetPersonId === $myPersonId;
 
-// Everyone else in the family group, for the "tag people in this memory"
-// picker below — never includes the target themselves (they're already
-// the memory's owner, tagging them would be meaningless).
+// Who the "tag people in this memory" picker below offers — bounded to
+// anyone up to a grandparent or grandchild's generational distance from
+// the memory's owner (Phase 24), not the whole family group: a memory
+// about the target person is much more likely to actually involve someone
+// close in the tree, and an unbounded list gets unwieldy fast in a larger
+// family. Never includes the target themselves (they're already the
+// memory's owner, tagging them would be meaningless) — see
+// graph_people_within_generations() in includes/graph.php. This same
+// bounded list is also what the submitted tag ids are validated against
+// below, so the generational limit is enforced server-side, not just hidden
+// in the UI.
 $familyGraph = fetch_family_graph($pdo, $myGroup);
 $familyPersonsById = [];
 foreach ($familyGraph['persons'] as $p) {
     $familyPersonsById[(int) $p['id']] = $p;
 }
-$taggablePeople = taggable_people($familyGraph['persons'], $targetPersonId);
+$taggablePeople = graph_people_within_generations($familyGraph, $targetPersonId);
 
 $errors = [];
 $entryKind = 'memory'; // 'memory' or 'diary' — the only two choices shown to the user
@@ -277,13 +285,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
   .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
   .for-banner strong { color:var(--ink); }
-  .tag-picker { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; }
+  .tag-picker { display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; }
   .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
   .tag-picker-empty { font-size:13px; color:var(--ink-faint); margin:0; }
+
+  /* Three-column layout (Phase 24): media/documents on the left, the
+     memory's own words and date in the middle, tagging + the public/
+     private decision on the right — mirrors edit_person.php's own
+     .edit-columns pattern (Phase 22) so the two pop-up-style editors in
+     this app share one visual language. Collapses to a single column
+     (media, then words/date, then tagging/visibility, in that reading
+     order) on a narrow screen. */
+  .entry-columns { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0 28px; margin-top:8px; align-items:start; }
+  .entry-col + .entry-col { border-left:1px solid var(--line); padding-left:28px; }
+  @media (max-width: 860px) {
+    .entry-columns { display:block; }
+    .entry-col + .entry-col { border-left:none; padding-left:0; margin-top:26px; padding-top:20px; border-top:1px solid var(--line); }
+  }
+
+  /* Visibility as two pill "decision buttons" rather than plain radio
+     dots — the request called for this to read as a deliberate choice,
+     not just another form field. Still a pair of native radio inputs
+     underneath (label wraps input), so keyboard/assistive-tech behavior
+     is unchanged. */
+  .visibility-toggle { display:flex; gap:8px; margin-top:8px; }
+  .visibility-toggle label { flex:1 1 0; display:flex; align-items:center; justify-content:center; text-align:center; gap:6px; margin:0; padding:10px 8px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:13.5px; font-weight:600; text-transform:none; letter-spacing:normal; color:var(--ink-soft); cursor:pointer; transition:border-color .15s ease, background .15s ease, color .15s ease; }
+  .visibility-toggle label:hover { border-color:var(--accent); }
+  .visibility-toggle input { position:absolute; opacity:0; width:0; height:0; }
+  .visibility-toggle input:checked + span { color:inherit; }
+  .visibility-toggle label:has(input:checked), .visibility-toggle label.is-checked { border-color:var(--accent); background:var(--accent-bg); color:var(--ink); }
+  .visibility-toggle .vis-caption { display:block; font-size:11px; font-weight:400; color:var(--ink-faint); margin-top:1px; }
 </style>
 </head>
 <body>
-  <div class="card" style="max-width:460px;">
+  <div class="card" style="max-width:980px;">
     <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
       <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
         <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
@@ -322,64 +357,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         <label><input type="radio" name="entry_type" value="diary" <?= $entryKind === 'diary' ? 'checked' : '' ?>> Diary entry</label>
       </div>
 
-      <label for="title">Title <span style="text-transform:none;font-weight:400;">(optional)</span></label>
-      <input type="text" id="title" name="title" value="<?= htmlspecialchars($title, ENT_QUOTES) ?>" maxlength="255">
-
-      <label for="body">Words <span style="text-transform:none;font-weight:400;">(required for a diary entry; for a memory, add words and/or attach files)</span></label>
-      <textarea id="body" name="body" rows="5"><?= htmlspecialchars($body, ENT_QUOTES) ?></textarea>
-
-      <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 10 files max)</span></label>
-      <div class="photo-drop media-picker" id="photoDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
-        <div class="media-picker-empty" id="photoDropEmpty">
-          <div class="thumb">
-            <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
+      <div class="entry-columns">
+        <div class="entry-col">
+          <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 10 files max)</span></label>
+          <div class="photo-drop media-picker" id="photoDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
+            <div class="media-picker-empty" id="photoDropEmpty">
+              <div class="thumb">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
+              </div>
+              <div class="copy"><b>Click to attach</b> or drop files here<span class="paste-hint">You can also paste from your clipboard, and add more than one</span></div>
+            </div>
+            <div class="media-picker-grid" id="photoGrid" hidden></div>
+            <input type="file" id="photoInput" name="media[]" multiple hidden
+              accept="image/*,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
           </div>
-          <div class="copy"><b>Click to attach</b> or drop files here<span class="paste-hint">You can also paste from your clipboard, and add more than one</span></div>
+          <span class="media-picker-note">JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
+          <p class="media-picker-error" id="mediaError"></p>
         </div>
-        <div class="media-picker-grid" id="photoGrid" hidden></div>
-        <input type="file" id="photoInput" name="media[]" multiple hidden
-          accept="image/*,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
-      </div>
-      <span class="media-picker-note">JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
-      <p class="media-picker-error" id="mediaError"></p>
 
-      <label>Date it happened <span style="text-transform:none;font-weight:400;">(optional — fill in all three, or leave all three blank)</span></label>
-      <div class="row-3">
-        <div class="date-slot">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="occurred_day" placeholder="DD" value="<?= htmlspecialchars($occurredDay, ENT_QUOTES) ?>">
-          <span>Day</span>
-        </div>
-        <div class="date-slot">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="occurred_month" placeholder="MM" value="<?= htmlspecialchars($occurredMonth, ENT_QUOTES) ?>">
-          <span>Month</span>
-        </div>
-        <div class="date-slot">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" name="occurred_year" placeholder="YYYY" value="<?= htmlspecialchars($occurredYear, ENT_QUOTES) ?>">
-          <span>Year</span>
-        </div>
-      </div>
+        <div class="entry-col">
+          <label for="title">Title <span style="text-transform:none;font-weight:400;">(optional)</span></label>
+          <input type="text" id="title" name="title" value="<?= htmlspecialchars($title, ENT_QUOTES) ?>" maxlength="255">
 
-      <label>Visibility</label>
-      <div class="radio-row">
-        <label><input type="radio" name="visibility" value="private" <?= $visibility === 'private' ? 'checked' : '' ?>> Private — only me (for now)</label>
-        <label><input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>> Public — my whole connected family</label>
-      </div>
+          <label for="body" style="margin-top:14px;">Words <span style="text-transform:none;font-weight:400;">(required for a diary entry; for a memory, add words and/or attach files)</span></label>
+          <textarea id="body" name="body" rows="6"><?= htmlspecialchars($body, ENT_QUOTES) ?></textarea>
 
-      <?php if ($taggablePeople): ?>
-        <label>Tag people in this memory <span style="text-transform:none;font-weight:400;">(optional — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
-        <div class="tag-picker">
-          <?php foreach ($taggablePeople as $tp): ?>
-            <?php $tpId = (int) $tp['id']; ?>
+          <label style="margin-top:14px;">Date it happened <span style="text-transform:none;font-weight:400;">(optional — fill in all three, or leave all three blank)</span></label>
+          <div class="row-3">
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="occurred_day" placeholder="DD" value="<?= htmlspecialchars($occurredDay, ENT_QUOTES) ?>">
+              <span>Day</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="occurred_month" placeholder="MM" value="<?= htmlspecialchars($occurredMonth, ENT_QUOTES) ?>">
+              <span>Month</span>
+            </div>
+            <div class="date-slot">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" name="occurred_year" placeholder="YYYY" value="<?= htmlspecialchars($occurredYear, ENT_QUOTES) ?>">
+              <span>Year</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="entry-col">
+          <label>Visibility</label>
+          <div class="visibility-toggle">
             <label>
-              <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds ?? [], true) ? 'checked' : '' ?>>
-              <?= htmlspecialchars(person_display_name($tp), ENT_QUOTES) ?>
-              <?= $tp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
+              <input type="radio" name="visibility" value="private" <?= $visibility === 'private' ? 'checked' : '' ?>>
+              <span>Private<span class="vis-caption">Only me, for now</span></span>
             </label>
-          <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
+            <label>
+              <input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>>
+              <span>Public<span class="vis-caption">My whole connected family</span></span>
+            </label>
+          </div>
 
-      <button type="submit" class="btn-primary">Save entry</button>
+          <?php if ($taggablePeople): ?>
+            <label style="margin-top:14px;">Tag people in this memory <span style="text-transform:none;font-weight:400;">(anyone up to a grandparent or grandchild's distance in the tree — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
+            <div class="tag-picker">
+              <?php foreach ($taggablePeople as $tp): ?>
+                <?php $tpId = (int) $tp['id']; ?>
+                <label>
+                  <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds ?? [], true) ? 'checked' : '' ?>>
+                  <?= htmlspecialchars(person_display_name($tp), ENT_QUOTES) ?>
+                  <?= $tp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
+                </label>
+              <?php endforeach; ?>
+            </div>
+          <?php else: ?>
+            <p class="tag-picker-empty" style="margin-top:14px;">Nobody close enough in the tree yet to tag.</p>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary" style="margin-top:22px;">Save entry</button>
     </form>
     <p class="foot-link"><a href="/timeline.php<?= $addingForSelf ? '' : '?person_id=' . $targetPersonId ?>">Back to <?= $addingForSelf ? 'my' : htmlspecialchars(person_display_name($targetPerson), ENT_QUOTES) . "'s" ?> timeline</a></p>
   </div>
@@ -509,6 +560,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     });
 
     render();
+  })();
+
+  // Visibility "decision buttons" — CSS :has() already highlights the
+  // checked one in any browser that supports it; this is just a fallback
+  // for one that doesn't, toggling the same look with a plain class.
+  (function () {
+    var labels = document.querySelectorAll('.visibility-toggle label');
+    function sync() {
+      labels.forEach(function (l) {
+        var input = l.querySelector('input');
+        l.classList.toggle('is-checked', !!(input && input.checked));
+      });
+    }
+    labels.forEach(function (l) {
+      l.querySelector('input').addEventListener('change', sync);
+    });
+    sync();
   })();
   </script>
 </body>

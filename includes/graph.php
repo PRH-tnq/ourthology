@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/tree_layout.php';
 
 /**
  * Merge two family groups into one (keeps the lower id, no-op if already
@@ -216,6 +217,33 @@ function graph_aunts_uncles_of(array $maps, int $personId): array
         }
     }
     return array_keys($out);
+}
+
+/**
+ * Everyone in the family group within a bounded generational distance of
+ * $anchorId — Phase 24's "tag anyone in the tree up to grandparent and
+ * grandchild" rule on add_entry.php. Reuses tree_layout.php's own
+ * tree_compute_tiers() BFS unchanged: a parent edge is -1 tier, a child
+ * edge is +1 tier, a partnership keeps the same tier — the exact same
+ * definition the tree diagram itself uses for its GRANDPARENTS/
+ * GRANDCHILDREN row labels, so "up to grandparent and grandchild" here
+ * means precisely what those two labels mean on the tree (also reaching
+ * anyone at the same or an adjacent tier connected only via a partner —
+ * e.g. an aunt/uncle's spouse, or a grandchild's other parent). Default
+ * bounds are tier -2..+2 inclusive; $anchorId itself is always excluded.
+ */
+function graph_people_within_generations(array $graph, int $anchorId, int $minTier = -2, int $maxTier = 2): array
+{
+    $maps = graph_build_maps($graph);
+    $tiers = tree_compute_tiers($graph['persons'], $maps['childrenOf'], $maps['parentsOf'], $maps['partnersOf'], $anchorId);
+    return array_values(array_filter($graph['persons'], function (array $p) use ($tiers, $anchorId, $minTier, $maxTier): bool {
+        $pid = (int) $p['id'];
+        if ($pid === $anchorId) {
+            return false;
+        }
+        $t = $tiers[$pid] ?? 0;
+        return $t >= $minTier && $t <= $maxTier;
+    }));
 }
 
 /**
