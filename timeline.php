@@ -278,10 +278,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      sit alongside the nav buttons rather than stranded on its own on the
      far right. */
   .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-  .header-avatar, .header-avatar-placeholder { width:56px; height:56px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
-  .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:22px; color:var(--ink-faint); }
+  /* Phil asked for this bigger — sized to roughly 2/3 of the header's own
+     free vertical space (measured: ~116px from the top of .page-head down
+     to the bottom of .nav on a real render, so ~78px here), rather than a
+     number picked by eye. */
+  .header-avatar, .header-avatar-placeholder { width:78px; height:78px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
+  .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:31px; color:var(--ink-faint); }
   @media (max-width: 620px) {
-    .header-avatar, .header-avatar-placeholder { width:44px; height:44px; font-size:18px; }
+    .header-avatar, .header-avatar-placeholder { width:61px; height:61px; font-size:25px; }
     /* The vertical divider before "Signed in as" only makes sense when it
        sits on the same line as the nav buttons — once it wraps to its own
        line on a narrow screen, a lone leading bar with nothing beside it
