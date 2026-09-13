@@ -475,8 +475,20 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .viewer-empty-media svg { width:44px; height:44px; }
   .viewer-media-single { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
   .viewer-media-single a { display:contents; }
-  .viewer-media-grid { width:100%; height:100%; display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); grid-auto-rows:minmax(120px,1fr); gap:10px; padding:14px; overflow-y:auto; align-content:start; }
-  .viewer-media-grid-tile { position:relative; border-radius:10px; overflow:hidden; background:var(--paper); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; transition:border-color .15s ease; }
+  /* Phase 32: a real grid instead of "however many 140px-min columns fit" —
+     that auto-fill rule packed every item into a single stretched-tall row
+     (4 photos rendered as 4 skinny full-height strips) or left a lopsided
+     leftover row (6 as 4-then-2, 9 as 4-then-4-then-1) with a big empty gap
+     on the right. --cols (set inline per-render from the actual media
+     count — see viewerMediaViewHtml() below) instead picks a column count
+     that keeps the grid roughly square: 1 stays the single-media view
+     below, 2 is 2×1, 4 is 2×2, 6 is 3×2, 9 is 3×3, and anything else lands
+     as close to that as a whole column count allows. Tiles are square
+     (aspect-ratio) and the grid is only as tall as it needs to be — not
+     stretched to fill the pane — so a light row centers in the space
+     instead of every tile being stretched edge-to-edge. */
+  .viewer-media-grid { width:100%; max-height:100%; display:grid; grid-template-columns:repeat(var(--cols, 2), 1fr); gap:10px; padding:14px; overflow-y:auto; align-content:center; justify-content:center; }
+  .viewer-media-grid-tile { position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; background:var(--paper); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; transition:border-color .15s ease; }
   .viewer-media-grid-tile:hover { border-color:var(--accent); }
   .viewer-media-grid-tile img { width:100%; height:100%; object-fit:cover; }
   .viewer-media .media-tile { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--ink-faint); }
@@ -1588,7 +1600,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       if (list.length === 1) {
         return '<div class="viewer-media-single">' + viewerLargeMediaHtml(list[0]) + '</div>';
       }
-      return '<div class="viewer-media-grid">' + list.map(function (m) {
+      // Square-ish grid: ceil(sqrt(count)) columns, so 2 items is 2x1, 4 is
+      // 2x2, 6 is 3x2, 9 is 3x3 — a whole-number column count nearest to a
+      // square for any other count in between (e.g. 5 or 7 lands as 3
+      // columns too, just with a shorter last row).
+      var cols = Math.max(2, Math.ceil(Math.sqrt(list.length)));
+      return '<div class="viewer-media-grid" style="--cols:' + cols + '">' + list.map(function (m) {
         return '<a class="viewer-media-grid-tile" href="' + m.url + '" target="_blank" rel="noopener" title="Open full size">' + mediaTileHtml(m) + '</a>';
       }).join("") + '</div>';
     }
