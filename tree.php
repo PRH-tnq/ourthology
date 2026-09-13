@@ -153,6 +153,12 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 <style>
   :root {
     --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
+    /* A muted, cool slate-blue for unclaimed people's names on the tree —
+       deliberately not red (that's reserved for "you" and for interactive
+       accents elsewhere), distinct enough from --ink to read as a clear
+       second state at a glance, but desaturated enough to sit comfortably
+       next to the app's warm paper/ink palette rather than clashing with it. */
+    --unclaimed: #3F5E6E;
   }
   body { align-items: flex-start; }
   .wide { max-width: min(95vw, 1700px); }
@@ -187,12 +193,20 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tree-node .tn-tag { font-family:"Newsreader",Georgia,serif; font-size:10px; text-transform:uppercase; letter-spacing:.05em; text-anchor:middle; fill:var(--ink-soft); }
   .tree-node .tn-dates { font-family:"Newsreader",Georgia,serif; font-size:10px; text-anchor:middle; fill:var(--ink-faint); }
   .tree-node .tn-dates-tagged { font-weight:600; fill:var(--ink-soft); }
-  .tree-node.unclaimed .tn-name { fill:var(--ink-soft); }
+  .tree-node.unclaimed .tn-name { fill:var(--unclaimed); }
   .tree-node:hover .tn-name { fill:var(--accent); }
   .tree-node.you .tn-name { fill:var(--accent); font-size:17px; text-decoration:underline; text-decoration-color:var(--accent-glow); text-underline-offset:4px; }
   .tree-node.you:hover .tn-name { fill:var(--accent); }
-  .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin-top:8px; }
+
+  .tree-legend { margin-top:10px; }
+  .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin:0; }
   .tree-key strong { color:var(--ink); }
+  .tree-swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; position:relative; top:-1px; }
+  .tree-swatch-you { background:var(--accent); }
+  .tree-swatch-claimed { background:var(--ink); }
+  .tree-swatch-unclaimed { background:var(--unclaimed); }
+  .tree-help-box { margin-top:8px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 14px; font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); }
+  .tree-help-box strong { color:var(--ink); }
 
   /* Print: a family tree is wide, so print it landscape and let the full
      diagram scale to the page rather than printing whatever's currently
@@ -404,7 +418,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               $lineGap = 13;
               $lineStartY = -($lineGap * (count($lines) - 1)) / 2;
             ?>
-            <a href="/timeline.php?person_id=<?= $pid ?>">
+            <a href="/timeline.php?person_id=<?= $pid ?>" data-person-id="<?= $pid ?>" data-unclaimed="<?= ($isYou || $person['claimed_by_user_id']) ? '0' : '1' ?>">
               <g class="tree-node<?= $isYou ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] ?>, <?= $pos['y'] ?>)">
                 <rect class="tn-hit" x="<?= -$hitW / 2 ?>" y="<?= -$hitH / 2 ?>" width="<?= $hitW ?>" height="<?= $hitH ?>"></rect>
                 <?php foreach ($lines as $li => $line): ?>
@@ -415,11 +429,20 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <?php endforeach; ?>
         </svg>
       </div>
-      <p class="tree-key">
-        <strong>You</strong> are underlined in red · plain name = claimed account · <em>Unclaimed</em> label = not yet claimed<br>
-        Click anyone to see their timeline. Scroll if the tree is wider than the screen.
-        <?php if ($hasAnyStepTag): ?><br><strong>S-</strong> followed by initials = a step relationship, tagged with that step-parent's own initials<?php endif; ?>
-      </p>
+      <div class="tree-legend">
+        <p class="tree-key">
+          <span class="tree-swatch tree-swatch-you"></span><strong>You</strong> — underlined in red
+          &nbsp;·&nbsp; <span class="tree-swatch tree-swatch-claimed"></span>Claimed account
+          &nbsp;·&nbsp; <span class="tree-swatch tree-swatch-unclaimed"></span>Not yet claimed
+          <?php if ($hasAnyStepTag): ?>
+            &nbsp;·&nbsp; <strong>S-</strong> + initials = a step relationship, tagged with that step-parent's own initials
+          <?php endif; ?>
+          <br>Scroll or drag if the tree is wider than the screen.
+        </p>
+        <div class="tree-help-box">
+          <strong>Click</strong> a name to open their timeline. <strong>Double-click</strong> an unclaimed name to edit their profile.
+        </div>
+      </div>
     <?php endif; ?>
 
     <?php if ($unclaimed): ?>
@@ -510,6 +533,39 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           evt.stopPropagation();
         }
       }, true);
+    })();
+
+    // Single click on a name opens their timeline (the plain <a href> below
+    // already does this natively — nothing extra needed there). An
+    // UNCLAIMED name additionally supports a double-click to jump straight
+    // to editing their profile instead. A browser fires a real "click" for
+    // both the first and second click of a double-click, and by default
+    // that first click's own <a href> navigation would fire immediately —
+    // before a "dblclick" could ever be detected — so for unclaimed nodes
+    // only, the default navigation is suppressed and replaced with a short
+    // wait-and-see: no second click within the window means it was a single
+    // click (go to the timeline, exactly like every other node), a second
+    // click within the window means it was a double-click (go to
+    // edit_person.php instead). Claimed/"you" nodes are untouched — they
+    // keep navigating on the very first click, with no artificial delay.
+    (function () {
+      var DBLCLICK_WINDOW = 300;
+      document.querySelectorAll('.tree-wrap a[data-unclaimed="1"]').forEach(function (a) {
+        var pendingTimer = null;
+        a.addEventListener('click', function (evt) {
+          evt.preventDefault();
+          if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            pendingTimer = null;
+            window.location.href = '/edit_person.php?person_id=' + a.dataset.personId;
+          } else {
+            pendingTimer = setTimeout(function () {
+              pendingTimer = null;
+              window.location.href = a.href;
+            }, DBLCLICK_WINDOW);
+          }
+        });
+      });
     })();
   </script>
 </body>
