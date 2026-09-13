@@ -277,15 +277,24 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      profile picture sits there instead, and "Signed in as" moves down to
      sit alongside the nav buttons rather than stranded on its own on the
      far right. */
-  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
-  /* Phil asked for this bigger — sized to roughly 2/3 of the header's own
-     free vertical space (measured: ~116px from the top of .page-head down
-     to the bottom of .nav on a real render, so ~78px here), rather than a
-     number picked by eye. */
-  .header-avatar, .header-avatar-placeholder { width:78px; height:78px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
-  .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:31px; color:var(--ink-faint); }
+  /* flex-wrap:wrap costs nothing at normal widths (there's always room for
+     the brand block and the avatar side by side there, so it never
+     actually wraps) but matters once the avatar is this big on a narrow
+     phone — see the mobile override below for what a wrapped line does. */
+  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  /* Phil asked for this bigger, then bigger again — now double the second
+     size (156px desktop, up from an initial 78px), which pushes the nav
+     row down further below it; that's the expected trade-off of a header
+     photo this size and not a bug. */
+  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
+  .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:62px; color:var(--ink-faint); }
   @media (max-width: 620px) {
-    .header-avatar, .header-avatar-placeholder { width:61px; height:61px; font-size:25px; }
+    .header-avatar, .header-avatar-placeholder { width:122px; height:122px; font-size:49px; }
+    /* At this size the photo no longer fits beside the wordmark on a real
+       phone width (confirmed by measuring, not by eye — it ran off the
+       card's right edge before this) — margin-left:auto drops it onto its
+       own line, still pinned to the right rather than sliding to center. */
+    .header-avatar, .header-avatar-placeholder { margin-left:auto; margin-top:4px; }
     /* The vertical divider before "Signed in as" only makes sense when it
        sits on the same line as the nav buttons — once it wraps to its own
        line on a narrow screen, a lone leading bar with nothing beside it
