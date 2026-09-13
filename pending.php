@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
+require_once __DIR__ . '/includes/entries.php'; // fetch_entry_media() — the memory preview below (Phase 32)
 
 require_login();
 $me = current_user_with_person();
@@ -119,6 +120,22 @@ $outgoingTags = fetch_outgoing_memory_tags_for_user($pdo, $myUserId);
 $incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags);
 $outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags);
 
+// Phase 32: a memory-tag request is a judgment call ("does this actually
+// belong on my timeline too?"), so both lists below get the tagged
+// memory's own media attached — same shape as fetch_entries_for_person()
+// uses, just per-entry rather than batched, since there are normally only
+// a handful of these at once. can_view_media() (includes/media.php) was
+// widened alongside this so /media.php?id=... actually serves these
+// images to a reviewer whose tag is still pending, not just once approved.
+foreach ($pendingTags as &$t) {
+    $t['media'] = fetch_entry_media($pdo, (int) $t['entry_id']);
+}
+unset($t);
+foreach ($outgoingTags as &$t) {
+    $t['media'] = fetch_entry_media($pdo, (int) $t['entry_id']);
+}
+unset($t);
+
 /** "Diary entry from 3 May 2024" / "the memory titled…" / a short snippet of the body — whatever names a memory best when there's no title. */
 function ourthology_memory_label(array $row): string
 {
@@ -131,6 +148,48 @@ function ourthology_memory_label(array $row): string
         return '"' . mb_strimwidth($body, 0, 60, '…') . '"';
     }
     return 'a memory with no title';
+}
+
+/**
+ * The full memory preview shown under a tag request's summary line — the
+ * complete body text (not the 60-character label snippet above) plus a
+ * thumbnail for every attached file, so whoever is asked to approve or
+ * decline can actually see what they're being asked about instead of
+ * judging a memory blind. Images link to the full-size original; other
+ * file types (video, pdf, doc, txt — see MEDIA_ALLOWED in
+ * includes/media.php) show as a small labelled icon tile that opens the
+ * file directly, since there's no useful inline preview for those here.
+ */
+function ourthology_pending_memory_preview_html(array $row): string
+{
+    $html = '';
+    $body = trim((string) ($row['body'] ?? ''));
+    if ($body !== '') {
+        $html .= '<p style="margin:0 0 10px;font-size:13.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink);">'
+            . nl2br(htmlspecialchars($body, ENT_QUOTES)) . '</p>';
+    }
+    $media = $row['media'] ?? [];
+    if ($media) {
+        $html .= '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;">';
+        foreach ($media as $m) {
+            $url = '/media.php?id=' . (int) $m['id'];
+            $isImage = str_starts_with((string) $m['mime_type'], 'image/');
+            if ($isImage) {
+                $html .= '<a href="' . htmlspecialchars($url, ENT_QUOTES) . '" target="_blank" rel="noopener" '
+                    . 'style="display:block;width:72px;height:72px;border-radius:6px;overflow:hidden;border:1px solid var(--line);flex:none;">'
+                    . '<img src="' . htmlspecialchars($url . '&thumb=1', ENT_QUOTES) . '" alt="" loading="lazy" '
+                    . 'style="width:100%;height:100%;object-fit:cover;display:block;"></a>';
+            } else {
+                $kind = str_starts_with((string) $m['mime_type'], 'video/') ? 'Video' : 'File';
+                $html .= '<a href="' . htmlspecialchars($url, ENT_QUOTES) . '" target="_blank" rel="noopener" '
+                    . 'style="display:flex;align-items:center;justify-content:center;text-align:center;width:72px;height:72px;'
+                    . 'border-radius:6px;border:1px solid var(--line);background:var(--paper);flex:none;font-size:11px;'
+                    . 'color:var(--ink-faint);padding:4px;box-sizing:border-box;">' . htmlspecialchars($kind, ENT_QUOTES) . '</a>';
+            }
+        }
+        $html .= '</div>';
+    }
+    return $html;
 }
 ?>
 <!doctype html>
@@ -224,6 +283,7 @@ function ourthology_memory_label(array $row): string
           <strong><?= htmlspecialchars($t['owner_first'] . ' ' . $t['owner_surname'], ENT_QUOTES) ?></strong>'s memory
           <?= htmlspecialchars(ourthology_memory_label($t), ENT_QUOTES) ?>. Approving adds it to your own timeline too.
         </p>
+        <?= ourthology_pending_memory_preview_html($t) ?>
         <form method="post">
           <?= csrf_field() ?>
           <input type="hidden" name="kind" value="memory_tag">
@@ -285,6 +345,7 @@ function ourthology_memory_label(array $row): string
           <?= htmlspecialchars(ourthology_memory_label($t), ENT_QUOTES) ?> —
           waiting on <strong><?= htmlspecialchars($t['approving_email'], ENT_QUOTES) ?></strong> to approve.
         </p>
+        <?= ourthology_pending_memory_preview_html($t) ?>
         <form method="post" style="display:inline;" onsubmit="return confirm('Withdraw this tag?');">
           <?= csrf_field() ?>
           <input type="hidden" name="kind" value="memory_tag">

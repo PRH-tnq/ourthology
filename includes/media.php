@@ -473,7 +473,16 @@ function can_view_media(array $media, int $viewerPersonId, int $viewerFamilyGrou
     // entry, so its media must be reachable for them too, not just the
     // entry's text.
     require_once __DIR__ . '/memory_tags.php';
-    return person_has_approved_tag($pdo, (int) $media['entry_id'], $viewerPersonId);
+    if (person_has_approved_tag($pdo, (int) $media['entry_id'], $viewerPersonId)) {
+        return true;
+    }
+    // Phase 32: a tag still awaiting the viewer's own approval also grants
+    // access — pending.php shows them the memory's text and media so they
+    // can actually judge what they're being asked to approve, rather than
+    // asking them to decide blind. This is narrower than the approved case
+    // above: it only ever matches the specific person the tag is pending
+    // on, never anyone else in the family group.
+    return person_has_pending_tag_awaiting_approval($pdo, (int) $media['entry_id'], $viewerPersonId);
 }
 
 /** True if $personId has an approved tag on $timelineEntryId — the gate that lets a tagged person view an otherwise-private memory (and, via can_view_media() above, its attached media) wherever it's shared. */
@@ -481,6 +490,16 @@ function person_has_approved_tag(PDO $pdo, int $timelineEntryId, int $personId):
 {
     $stmt = $pdo->prepare(
         "SELECT 1 FROM memory_tags WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'approved'"
+    );
+    $stmt->execute(['eid' => $timelineEntryId, 'pid' => $personId]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/** True if $personId has a still-pending tag on $timelineEntryId — the narrower gate (see can_view_media() above) that lets a reviewer preview a memory's media before they've decided whether to approve the tag. */
+function person_has_pending_tag_awaiting_approval(PDO $pdo, int $timelineEntryId, int $personId): bool
+{
+    $stmt = $pdo->prepare(
+        "SELECT 1 FROM memory_tags WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'pending'"
     );
     $stmt->execute(['eid' => $timelineEntryId, 'pid' => $personId]);
     return (bool) $stmt->fetchColumn();

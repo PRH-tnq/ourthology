@@ -139,7 +139,7 @@ function fetch_pending_memory_tags_for_user(PDO $pdo, int $userId): array
 function fetch_outgoing_memory_tags_for_user(PDO $pdo, int $userId): array
 {
     $stmt = $pdo->prepare(
-        "SELECT mt.id, mt.created_at, te.title, te.body, te.occurred_on,
+        "SELECT mt.id, mt.created_at, te.id AS entry_id, te.title, te.body, te.occurred_on,
                 op.first_name AS owner_first, op.surname AS owner_surname,
                 tp.first_name AS tagged_first, tp.surname AS tagged_surname,
                 au.email AS approving_email
