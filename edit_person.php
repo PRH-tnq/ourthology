@@ -497,15 +497,26 @@ if ($postedProfile) {
   .add-partner-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:10px; }
   .add-partner-row select { min-width:180px; }
 
-  /* Three-column layout: personal details on the left, relationships/
-     partners in the middle, photo + other actions (view timeline, add a
-     memory, attach elsewhere, delete) on the right — collapses to one
-     column on a narrow screen or a narrow pop-up. */
-  .edit-columns { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0 28px; margin-top:8px; align-items:start; }
-  .edit-col + .edit-col { border-left:1px solid var(--line); padding-left:28px; }
+  /* Three-column layout, Phase 26: personal details, relationships/
+     partners, and photo + other actions (view timeline, add a memory,
+     attach elsewhere, delete) used to be three hard-assigned columns —
+     but "Relationships" plus "Partners" together are often much longer
+     than "Profile" or "Photo & more", so that column ended up far taller
+     than its neighbours for anyone with more than a couple of
+     relationships. Native CSS multi-column layout fixes this: each
+     section below is its own break-avoid block, and the browser balances
+     those blocks across 3 columns by their actual rendered height rather
+     than by which hard-coded column they were assigned to — so the split
+     adapts automatically to how much each person actually has recorded,
+     instead of "Relationships" always being column 2 no matter how long
+     it runs. column-rule draws the same kind of vertical divider the old
+     per-column border did. Collapses to one column on a narrow screen or
+     a narrow pop-up. */
+  .edit-columns { columns: 3; column-gap: 28px; column-rule: 1px solid var(--line); margin-top:8px; }
+  .edit-block { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; margin: 0 0 22px; }
+  .edit-block:last-child { margin-bottom: 0; }
   @media (max-width: 820px) {
-    .edit-columns { display:block; }
-    .edit-col + .edit-col { border-left:none; padding-left:0; margin-top:28px; padding-top:20px; border-top:1px solid var(--line); }
+    .edit-columns { columns: 1; column-rule: none; }
   }
 
   .popup-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 18px; }
@@ -593,7 +604,7 @@ if ($postedProfile) {
       <?php endif; ?>
 
       <div class="edit-columns">
-      <div class="edit-col">
+      <div class="edit-block">
       <h3 style="margin:4px 0 4px;">Profile</h3>
       <?php if ($canEdit): ?>
         <form method="post" style="margin-top:8px;">
@@ -654,9 +665,9 @@ if ($postedProfile) {
           <?php if (!empty($person['died'])): ?> · died <?= htmlspecialchars(date('j M Y', strtotime((string) $person['died'])), ENT_QUOTES) ?><?php endif; ?>
         </p>
       <?php endif; ?>
-
       </div>
-      <div class="edit-col">
+
+      <div class="edit-block">
       <h3 style="margin:4px 0 4px;">Relationships</h3>
       <?php if (!$rels): ?>
         <p style="font-size:14px;color:var(--ink-faint);">Not connected to any parent or child yet.</p>
@@ -708,8 +719,10 @@ if ($postedProfile) {
           </div>
         <?php endif; ?>
       <?php endforeach; ?>
+      </div>
 
       <?php if ($canEdit && $relationshipCandidates): ?>
+      <div class="edit-block">
         <form method="post" class="add-partner-row">
           <?= csrf_field() ?>
           <input type="hidden" name="person_id" value="<?= $personId ?>">
@@ -717,6 +730,7 @@ if ($postedProfile) {
           <div>
             <label for="rel_other_person_id">Add a relationship</label>
             <select id="rel_other_person_id" name="other_person_id">
+              <option value="">Choose a person…</option>
               <?php foreach ($relationshipCandidates as $c): ?>
                 <option value="<?= (int) $c['id'] ?>"><?= htmlspecialchars(person_display_name($c), ENT_QUOTES) ?></option>
               <?php endforeach; ?>
@@ -725,13 +739,15 @@ if ($postedProfile) {
           <div>
             <label for="direction">Who they are</label>
             <select id="direction" name="direction">
-              <option value="parent">Parent of <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></option>
-              <option value="child">Child of <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></option>
+              <option value="">Choose…</option>
+              <option value="parent">Parent of this person</option>
+              <option value="child">Child of this person</option>
             </select>
           </div>
           <div>
             <label for="rel_kind">As</label>
             <select id="rel_kind" name="relation_kind">
+              <option value="">Choose…</option>
               <option value="genetic">Genetic</option>
               <option value="step">Step</option>
               <option value="adoptive">Adoptive</option>
@@ -740,9 +756,11 @@ if ($postedProfile) {
           <button type="submit" class="btn-small">Add</button>
         </form>
         <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Use this to connect an existing person as a direct parent or child — for example, adding your spouse as a second parent of someone currently only linked to you. For anything further out (grandparent, sibling, cousin, etc.), use "Attach as a relative of someone else" below instead.</p>
+      </div>
       <?php endif; ?>
 
-      <h3 style="margin:24px 0 4px;">Partners</h3>
+      <div class="edit-block">
+      <h3 style="margin:4px 0 4px;">Partners</h3>
       <?php if (!$parts): ?>
         <p style="font-size:14px;color:var(--ink-faint);">No partner recorded yet.</p>
       <?php endif; ?>
@@ -777,8 +795,10 @@ if ($postedProfile) {
           </div>
         <?php endif; ?>
       <?php endforeach; ?>
+      </div>
 
       <?php if ($canEdit && $partnerCandidates): ?>
+      <div class="edit-block">
         <form method="post" class="add-partner-row">
           <?= csrf_field() ?>
           <input type="hidden" name="person_id" value="<?= $personId ?>">
@@ -786,6 +806,7 @@ if ($postedProfile) {
           <div>
             <label for="other_person_id">Add a partner</label>
             <select id="other_person_id" name="other_person_id">
+              <option value="">Choose a person…</option>
               <?php foreach ($partnerCandidates as $c): ?>
                 <option value="<?= (int) $c['id'] ?>"><?= htmlspecialchars(person_display_name($c), ENT_QUOTES) ?></option>
               <?php endforeach; ?>
@@ -794,6 +815,7 @@ if ($postedProfile) {
           <div>
             <label for="kind">As</label>
             <select id="kind" name="kind">
+              <option value="">Choose…</option>
               <option value="married">Married</option>
               <option value="partner">Partner</option>
             </select>
@@ -801,10 +823,10 @@ if ($postedProfile) {
           <button type="submit" class="btn-small">Add</button>
         </form>
         <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Works for two people who don't have their own accounts yet too — this is how to show two placeholder relatives as a couple.</p>
+      </div>
       <?php endif; ?>
 
-      </div>
-      <div class="edit-col">
+      <div class="edit-block">
       <h3 style="margin:4px 0 4px;">Photo &amp; more</h3>
 
       <div class="avatar-box">
@@ -831,7 +853,9 @@ if ($postedProfile) {
           <?php endif; ?>
         <?php endif; ?>
       </div>
+      </div>
 
+      <div class="edit-block">
       <p class="foot-link" style="margin:16px 0 0;text-align:left;">
         <a href="/timeline.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;"<?= $popup ? ' target="_top"' : '' ?>>View timeline</a>
         <?php if ($canEdit): ?>
@@ -845,9 +869,11 @@ if ($postedProfile) {
       </p>
       <p style="font-size:12px;color:var(--ink-faint);margin-top:-8px;">Use this after removing a wrong relationship, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
       <?php endif; ?>
+      </div>
 
       <?php if (empty($person['claimed_by_user_id']) && $memoryCount === 0): ?>
-        <h3 style="margin:24px 0 4px;color:var(--error);">Delete this person</h3>
+      <div class="edit-block">
+        <h3 style="margin:4px 0 4px;color:var(--error);">Delete this person</h3>
         <p style="font-size:13px;color:var(--ink-faint);">Only possible while they're still unclaimed and have no memories on their timeline. Removes <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> completely, along with every relationship and partnership recorded for them.</p>
         <?php if (!$confirmDelete): ?>
           <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_delete=1<?= $popupQS ?>" class="btn-danger">Delete this person</a>
@@ -868,12 +894,14 @@ if ($postedProfile) {
             </div>
           </div>
         <?php endif; ?>
+      </div>
       <?php elseif (empty($person['claimed_by_user_id']) && $memoryCount > 0): ?>
-        <h3 style="margin:24px 0 4px;">Delete this person</h3>
+      <div class="edit-block">
+        <h3 style="margin:4px 0 4px;">Delete this person</h3>
         <p style="font-size:13px;color:var(--ink-faint);">Not available — <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has <?= $memoryCount ?> <?= $memoryCount === 1 ? 'memory' : 'memories' ?> on their timeline. <a href="/timeline.php?person_id=<?= $personId ?>"<?= $popup ? ' target="_top"' : '' ?>>Delete those first</a> if this person really needs to go.</p>
+      </div>
       <?php endif; ?>
 
-      </div>
       </div>
 
     <?php endif; ?>
