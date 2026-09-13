@@ -36,7 +36,7 @@ function person_display_name(array $p): string
 function fetch_family_graph(PDO $pdo, int $familyGroupId): array
 {
     $persons = $pdo->prepare(
-        'SELECT id, first_name, middle_name, surname, born, died, claimed_by_user_id
+        'SELECT id, first_name, middle_name, surname, born, died, claimed_by_user_id, avatar_path
          FROM persons WHERE family_group_id = :gid ORDER BY id'
     );
     $persons->execute(['gid' => $familyGroupId]);

@@ -208,6 +208,16 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tree-help-box { margin-top:8px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:10px 14px; font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); }
   .tree-help-box strong { color:var(--ink); }
 
+  /* Double-click-to-edit pop-up: a fixed backdrop with a floating box
+     hosting edit_person.php's own "?popup=1" rendering in an iframe — the
+     page inside decides its own layout, this just frames it and supplies
+     the close control. */
+  .edit-popup-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.55); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .edit-popup-box { position:relative; width:min(96vw, 1020px); height:min(92vh, 820px); background:var(--paper); border-radius:16px; overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); }
+  .edit-popup-box iframe { width:100%; height:100%; border:none; display:block; }
+  .edit-popup-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
+  .edit-popup-close:hover { background:var(--paper-2); }
+
   /* Print: a family tree is wide, so print it landscape and let the full
      diagram scale to the page rather than printing whatever's currently
      scrolled into view — override the on-screen overflow:auto/fixed pixel
@@ -418,7 +428,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               $lineGap = 13;
               $lineStartY = -($lineGap * (count($lines) - 1)) / 2;
             ?>
-            <a href="/timeline.php?person_id=<?= $pid ?>" data-person-id="<?= $pid ?>" data-unclaimed="<?= ($isYou || $person['claimed_by_user_id']) ? '0' : '1' ?>">
+            <a href="/timeline.php?person_id=<?= $pid ?>" data-person-id="<?= $pid ?>" data-dblclick-edit="<?= ($isYou || !$person['claimed_by_user_id']) ? '1' : '0' ?>">
               <g class="tree-node<?= $isYou ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] ?>, <?= $pos['y'] ?>)">
                 <rect class="tn-hit" x="<?= -$hitW / 2 ?>" y="<?= -$hitH / 2 ?>" width="<?= $hitW ?>" height="<?= $hitH ?>"></rect>
                 <?php foreach ($lines as $li => $line): ?>
@@ -440,7 +450,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <br>Scroll or drag if the tree is wider than the screen.
         </p>
         <div class="tree-help-box">
-          <strong>Click</strong> a name to open their timeline. <strong>Double-click</strong> an unclaimed name to edit their profile.
+          <strong>Click</strong> a name to open their timeline. <strong>Double-click</strong> your own name, or anyone not yet claimed, to edit their profile.
         </div>
       </div>
     <?php endif; ?>
@@ -536,28 +546,31 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     })();
 
     // Single click on a name opens their timeline (the plain <a href> below
-    // already does this natively — nothing extra needed there). An
-    // UNCLAIMED name additionally supports a double-click to jump straight
-    // to editing their profile instead. A browser fires a real "click" for
-    // both the first and second click of a double-click, and by default
-    // that first click's own <a href> navigation would fire immediately —
-    // before a "dblclick" could ever be detected — so for unclaimed nodes
-    // only, the default navigation is suppressed and replaced with a short
-    // wait-and-see: no second click within the window means it was a single
-    // click (go to the timeline, exactly like every other node), a second
-    // click within the window means it was a double-click (go to
-    // edit_person.php instead). Claimed/"you" nodes are untouched — they
-    // keep navigating on the very first click, with no artificial delay.
+    // already does this natively — nothing extra needed there). A name
+    // that's either UNCLAIMED or is the viewer's own "You" node additionally
+    // supports a double-click to open that person's profile for editing, in
+    // a small pop-up box right over the tree rather than navigating away —
+    // there's no edit path for anyone else's already-claimed record, so
+    // those nodes get no such handler at all. A browser fires a real
+    // "click" for both the first and second click of a double-click, and by
+    // default that first click's own <a href> navigation would fire
+    // immediately — before a "dblclick" could ever be detected — so for
+    // these nodes the default navigation is suppressed and replaced with a
+    // short wait-and-see: no second click within the window means it was a
+    // single click (go to the timeline, exactly like every other node), a
+    // second click within the window means it was a double-click (open the
+    // edit pop-up instead). Every other node is untouched — it keeps
+    // navigating on the very first click, with no artificial delay.
     (function () {
       var DBLCLICK_WINDOW = 300;
-      document.querySelectorAll('.tree-wrap a[data-unclaimed="1"]').forEach(function (a) {
+      document.querySelectorAll('.tree-wrap a[data-dblclick-edit="1"]').forEach(function (a) {
         var pendingTimer = null;
         a.addEventListener('click', function (evt) {
           evt.preventDefault();
           if (pendingTimer) {
             clearTimeout(pendingTimer);
             pendingTimer = null;
-            window.location.href = '/edit_person.php?person_id=' + a.dataset.personId;
+            openEditPopup(a.dataset.personId);
           } else {
             pendingTimer = setTimeout(function () {
               pendingTimer = null;
@@ -566,6 +579,45 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           }
         });
       });
+
+      function onEscape(evt) {
+        if (evt.key === 'Escape') closeEditPopup();
+      }
+
+      function closeEditPopup() {
+        var existing = document.getElementById('editPopupOverlay');
+        if (existing) existing.remove();
+        document.removeEventListener('keydown', onEscape);
+      }
+
+      function openEditPopup(personId) {
+        closeEditPopup();
+        var overlay = document.createElement('div');
+        overlay.className = 'edit-popup-overlay';
+        overlay.id = 'editPopupOverlay';
+        overlay.addEventListener('click', function (evt) {
+          if (evt.target === overlay) closeEditPopup();
+        });
+
+        var box = document.createElement('div');
+        box.className = 'edit-popup-box';
+
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'edit-popup-close';
+        closeBtn.setAttribute('aria-label', 'Close');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', closeEditPopup);
+
+        var iframe = document.createElement('iframe');
+        iframe.src = '/edit_person.php?person_id=' + encodeURIComponent(personId) + '&popup=1';
+
+        box.appendChild(closeBtn);
+        box.appendChild(iframe);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.addEventListener('keydown', onEscape);
+      }
     })();
   </script>
 </body>

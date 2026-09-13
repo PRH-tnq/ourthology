@@ -15,6 +15,7 @@ CREATE TABLE persons (
   surname             VARCHAR(60)  NULL,
   born                DATE         NULL,
   died                DATE         NULL,
+  avatar_path         VARCHAR(255) NULL,
   claimed_by_user_id  INT UNSIGNED NULL,
   created_by_user_id  INT UNSIGNED NULL,
   -- All persons reachable from one another via confirmed relationships

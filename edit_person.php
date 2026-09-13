@@ -23,6 +23,15 @@ ourthology_start_session();
 $flashNotice = $_SESSION['flash_edit_notice'] ?? null;
 unset($_SESSION['flash_edit_notice']);
 
+// When opened from the tree diagram's double-click, this page renders
+// inside a small pop-up box (an iframe on tree.php) rather than as a
+// full page of its own — the nav/brand chrome is dropped and the "close"
+// affordance lives in the pop-up's own frame, not in here. Every redirect
+// and same-page link below carries this flag forward so a save/remove/add
+// action doesn't accidentally drop back out to the full-page layout.
+$popup = (($_GET['popup'] ?? $_POST['popup'] ?? '') === '1');
+$popupQS = $popup ? '&popup=1' : '';
+
 $personIdRaw = $_GET['person_id'] ?? $_POST['person_id'] ?? '';
 $personIdFilter = filter_var($personIdRaw, FILTER_VALIDATE_INT);
 $personId = ($personIdFilter !== false && person_in_group($pdo, (int) $personIdFilter, $myGroup)) ? (int) $personIdFilter : null;
@@ -106,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'id' => $personId,
             ]);
             $_SESSION['flash_edit_notice'] = 'Profile updated.';
-            header('Location: /edit_person.php?person_id=' . $personId);
+            header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
             exit;
         }
     } elseif ($action === 'update_kind') {
@@ -124,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE relationships SET relation_kind = :k WHERE id = :id")
                     ->execute(['k' => $kind, 'id' => (int) $relId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship type updated.';
-                header('Location: /edit_person.php?person_id=' . $personId);
+                header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
                 exit;
             }
         }
@@ -141,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $pdo->prepare('DELETE FROM relationships WHERE id = :id')->execute(['id' => (int) $relId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship removed. If this was recorded by mistake, use "Attach as a relative" below to add the correct one.';
-                header('Location: /edit_person.php?person_id=' . $personId);
+                header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
                 exit;
             }
         }
@@ -158,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $pdo->prepare('DELETE FROM partnerships WHERE id = :id')->execute(['id' => (int) $partId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship removed.';
-                header('Location: /edit_person.php?person_id=' . $personId);
+                header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
                 exit;
             }
         }
@@ -174,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 create_confirmed_partnership($pdo, $personId, (int) $otherId, $kind, $myUserId);
                 $_SESSION['flash_edit_notice'] = 'Partner added.';
-                header('Location: /edit_person.php?person_id=' . $personId);
+                header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
                 exit;
             } catch (RuntimeException $e) {
                 $errors[] = 'They are already recorded as partners.';
@@ -217,10 +226,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      VALUES (:p, :c, :kind, 'confirmed', :uid)"
                 )->execute(['p' => $parentId, 'c' => $childId, 'kind' => $kind, 'uid' => $myUserId]);
                 $_SESSION['flash_edit_notice'] = 'Relationship added.';
-                header('Location: /edit_person.php?person_id=' . $personId);
+                header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
                 exit;
             }
         }
+    } elseif ($action === 'upload_avatar') {
+        try {
+            $oldAvatar = $person['avatar_path'] ?? null;
+            $stored = store_uploaded_avatar($_FILES['avatar'] ?? [], $personId);
+            $pdo->prepare('UPDATE persons SET avatar_path = :p WHERE id = :id')
+                ->execute(['p' => $stored['file_path'], 'id' => $personId]);
+            // Old file is only removed once the new one is safely stored and
+            // recorded — never delete-then-upload, which would leave the
+            // person with no photo at all if the upload itself failed.
+            if ($oldAvatar) {
+                delete_media_file($oldAvatar);
+            }
+            $_SESSION['flash_edit_notice'] = 'Photo updated.';
+            header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
+            exit;
+        } catch (RuntimeException $e) {
+            $errors[] = $e->getMessage();
+        }
+    } elseif ($action === 'remove_avatar') {
+        if (!empty($person['avatar_path'])) {
+            delete_media_file($person['avatar_path']);
+            $pdo->prepare('UPDATE persons SET avatar_path = NULL WHERE id = :id')->execute(['id' => $personId]);
+        }
+        $_SESSION['flash_edit_notice'] = 'Photo removed.';
+        header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
+        exit;
     } elseif ($action === 'delete_person') {
         // A stricter gate than $canEdit: $canEdit is also true for your own
         // claimed record, but deleting yourself would orphan your own user
@@ -259,6 +294,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach ($mediaStmt->fetchAll() as $m) {
                     delete_media_file($m['file_path']);
                 }
+                if (!empty($person['avatar_path'])) {
+                    delete_media_file($person['avatar_path']);
+                }
                 // timeline_entries -> media AND timeline_entries ->
                 // memory_tags both have ON DELETE CASCADE, so deleting the
                 // entries also clears their media rows (the files
@@ -278,7 +316,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->commit();
                 $_SESSION['flash_edit_notice'] = person_display_name($person) . ' has been deleted, along with their relationships and partnerships.';
-                header('Location: /edit_person.php');
+                header('Location: /edit_person.php' . ($popup ? '?popup=1' : ''));
                 exit;
             } catch (PDOException $e) {
                 $pdo->rollBack();
@@ -458,38 +496,63 @@ if ($postedProfile) {
   .date-slot span { display:block; font-size:11px; color:var(--ink-faint); text-align:center; margin-top:4px; }
   .add-partner-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:10px; }
   .add-partner-row select { min-width:180px; }
+
+  /* Three-column layout: personal details on the left, relationships/
+     partners in the middle, photo + other actions (view timeline, add a
+     memory, attach elsewhere, delete) on the right — collapses to one
+     column on a narrow screen or a narrow pop-up. */
+  .edit-columns { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0 28px; margin-top:8px; align-items:start; }
+  .edit-col + .edit-col { border-left:1px solid var(--line); padding-left:28px; }
+  @media (max-width: 820px) {
+    .edit-columns { display:block; }
+    .edit-col + .edit-col { border-left:none; padding-left:0; margin-top:28px; padding-top:20px; border-top:1px solid var(--line); }
+  }
+
+  .popup-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:4px 0 18px; }
+  .popup-header h2 { margin:0; font-size:19px; }
+
+  .avatar-box { display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:8px; padding:16px; background:var(--paper-2); border-radius:14px; }
+  .avatar-img, .avatar-placeholder { width:120px; height:120px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); }
+  .avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:36px; color:var(--ink-faint); }
+  .avatar-box form { display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; }
+  .avatar-box input[type="file"] { font-size:12px; max-width:100%; }
+  .avatar-box .btn-small { margin-top:2px; }
 </style>
 </head>
 <body>
-  <div class="card" style="max-width:560px;">
-    <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
-      <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
-        <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
-        <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
-        <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
-        <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1" stroke-linecap="round"/>
-        <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.2" stroke-linecap="round"/>
-        <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
-        <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
-      </svg>
-      <div class="brand-text" style="display:flex;flex-direction:column;">
-        <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
-        <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+  <div class="card" style="max-width:<?= $person !== null ? '980px' : '560px' ?>;">
+    <?php if ($popup): ?>
+      <div class="popup-header">
+        <h2><?= $person !== null ? htmlspecialchars(person_display_name($person), ENT_QUOTES) : 'Edit person' ?></h2>
       </div>
-    </div>
+    <?php else: ?>
+      <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
+        <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
+          <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
+          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
+          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
+          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1" stroke-linecap="round"/>
+          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-text" style="display:flex;flex-direction:column;">
+          <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
+          <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+        </div>
+      </div>
 
-    <div class="nav">
-      <div class="nav-links">
-        <a href="/timeline.php">My timeline</a>
-        <a href="/tree.php">My tree</a>
-        <a href="/add_relative.php">+ Add a relative</a>
-        <a href="/edit_person.php?person_id=<?= $myPersonId ?>">Edit my own profile</a>
+      <div class="nav">
+        <div class="nav-links">
+          <a href="/timeline.php">My timeline</a>
+          <a href="/tree.php">My tree</a>
+        </div>
+        <div class="whoami">
+          Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
+          <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+        </div>
       </div>
-      <div class="whoami">
-        Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
-        <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
-      </div>
-    </div>
+    <?php endif; ?>
 
     <?php if ($flashNotice): ?>
       <div class="notice"><?= htmlspecialchars($flashNotice, ENT_QUOTES) ?></div>
@@ -508,6 +571,7 @@ if ($postedProfile) {
     </p>
 
     <form method="get" style="margin-top:12px;">
+      <?php if ($popup): ?><input type="hidden" name="popup" value="1"><?php endif; ?>
       <label for="person_id">Person</label>
       <select id="person_id" name="person_id" onchange="this.form.submit()">
         <option value="">Choose someone…</option>
@@ -522,20 +586,15 @@ if ($postedProfile) {
 
     <?php if ($person !== null): ?>
 
-      <p class="foot-link" style="margin:10px 0 0;text-align:left;">
-        <a href="/timeline.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;">View timeline</a>
-        <?php if ($canEdit): ?>
-          · <a href="/add_entry.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;">+ Add a memory<?= $personId === $myPersonId ? '' : ' for them' ?></a>
-        <?php endif; ?>
-      </p>
-
       <?php if ($isClaimedByOther): ?>
         <div class="locked-notice">
           <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has claimed their own record, so only they can edit their profile, dates, and relationships. You can still see what's on record below.
         </div>
       <?php endif; ?>
 
-      <h3 style="margin:24px 0 4px;">Profile</h3>
+      <div class="edit-columns">
+      <div class="edit-col">
+      <h3 style="margin:4px 0 4px;">Profile</h3>
       <?php if ($canEdit): ?>
         <form method="post" style="margin-top:8px;">
           <?= csrf_field() ?>
@@ -596,7 +655,9 @@ if ($postedProfile) {
         </p>
       <?php endif; ?>
 
-      <h3 style="margin:24px 0 4px;">Relationships</h3>
+      </div>
+      <div class="edit-col">
+      <h3 style="margin:4px 0 4px;">Relationships</h3>
       <?php if (!$rels): ?>
         <p style="font-size:14px;color:var(--ink-faint);">Not connected to any parent or child yet.</p>
       <?php endif; ?>
@@ -627,7 +688,7 @@ if ($postedProfile) {
               </select>
               <button type="submit" name="submitBtn" class="btn-small">Save</button>
             </form>
-            <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_rel=<?= (int) $r['id'] ?>" class="btn-danger">Remove</a>
+            <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_rel=<?= (int) $r['id'] ?><?= $popupQS ?>" class="btn-danger">Remove</a>
           </div>
           <?php endif; ?>
         </div>
@@ -642,7 +703,7 @@ if ($postedProfile) {
                 <input type="hidden" name="relationship_id" value="<?= (int) $r['id'] ?>">
                 <button type="submit" class="btn-danger">Yes, remove it</button>
               </form>
-              <a href="/edit_person.php?person_id=<?= $personId ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
+              <a href="/edit_person.php?person_id=<?= $personId ?><?= $popupQS ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
             </div>
           </div>
         <?php endif; ?>
@@ -696,7 +757,7 @@ if ($postedProfile) {
           <div class="rel-desc"><strong><?= htmlspecialchars($otherName, ENT_QUOTES) ?></strong> is their <?= $p['kind'] === 'partner' ? 'partner' : 'spouse' ?></div>
           <?php if ($canEdit): ?>
           <div class="rel-actions">
-            <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_part=<?= (int) $p['id'] ?>" class="btn-danger">Remove</a>
+            <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_part=<?= (int) $p['id'] ?><?= $popupQS ?>" class="btn-danger">Remove</a>
           </div>
           <?php endif; ?>
         </div>
@@ -711,7 +772,7 @@ if ($postedProfile) {
                 <input type="hidden" name="partnership_id" value="<?= (int) $p['id'] ?>">
                 <button type="submit" class="btn-danger">Yes, remove it</button>
               </form>
-              <a href="/edit_person.php?person_id=<?= $personId ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
+              <a href="/edit_person.php?person_id=<?= $personId ?><?= $popupQS ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
             </div>
           </div>
         <?php endif; ?>
@@ -742,18 +803,54 @@ if ($postedProfile) {
         <p style="font-size:12px;color:var(--ink-faint);margin-top:6px;">Works for two people who don't have their own accounts yet too — this is how to show two placeholder relatives as a couple.</p>
       <?php endif; ?>
 
-      <?php if ($canEdit): ?>
-      <p class="foot-link" style="margin-top:20px;">
-        <a href="/add_relative.php?existing_person_id=<?= $personId ?>">Attach <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> as a relative of someone else</a>
+      </div>
+      <div class="edit-col">
+      <h3 style="margin:4px 0 4px;">Photo &amp; more</h3>
+
+      <div class="avatar-box">
+        <?php if (!empty($person['avatar_path'])): ?>
+          <img class="avatar-img" src="/avatar.php?person_id=<?= $personId ?>&v=<?= urlencode((string) $person['avatar_path']) ?>" alt="<?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?>">
+        <?php else: ?>
+          <div class="avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr(person_display_name($person), 0, 1) ?: '?', ENT_QUOTES) ?></div>
+        <?php endif; ?>
+        <?php if ($canEdit): ?>
+          <form method="post" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="person_id" value="<?= $personId ?>">
+            <input type="hidden" name="action" value="upload_avatar">
+            <input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required>
+            <button type="submit" class="btn-small"><?= !empty($person['avatar_path']) ? 'Change photo' : 'Add a photo' ?></button>
+          </form>
+          <?php if (!empty($person['avatar_path'])): ?>
+            <form method="post">
+              <?= csrf_field() ?>
+              <input type="hidden" name="person_id" value="<?= $personId ?>">
+              <input type="hidden" name="action" value="remove_avatar">
+              <button type="submit" class="btn-small">Remove photo</button>
+            </form>
+          <?php endif; ?>
+        <?php endif; ?>
+      </div>
+
+      <p class="foot-link" style="margin:16px 0 0;text-align:left;">
+        <a href="/timeline.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;"<?= $popup ? ' target="_top"' : '' ?>>View timeline</a>
+        <?php if ($canEdit): ?>
+          · <a href="/add_entry.php<?= $personId === $myPersonId ? '' : '?person_id=' . $personId ?>" style="text-decoration:underline;"<?= $popup ? ' target="_top"' : '' ?>>+ Add a memory<?= $personId === $myPersonId ? '' : ' for them' ?></a>
+        <?php endif; ?>
       </p>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:-12px;">Use this after removing a wrong relationship above, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
+
+      <?php if ($canEdit): ?>
+      <p class="foot-link" style="margin-top:16px;">
+        <a href="/add_relative.php?existing_person_id=<?= $personId ?>"<?= $popup ? ' target="_top"' : '' ?>>Attach <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> as a relative of someone else</a>
+      </p>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:-8px;">Use this after removing a wrong relationship, to record the correct one — grandparent, sibling, cousin, and the rest are all available, not just parent/child.</p>
       <?php endif; ?>
 
       <?php if (empty($person['claimed_by_user_id']) && $memoryCount === 0): ?>
-        <h3 style="margin:28px 0 4px;color:var(--error);">Delete this person</h3>
+        <h3 style="margin:24px 0 4px;color:var(--error);">Delete this person</h3>
         <p style="font-size:13px;color:var(--ink-faint);">Only possible while they're still unclaimed and have no memories on their timeline. Removes <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> completely, along with every relationship and partnership recorded for them.</p>
         <?php if (!$confirmDelete): ?>
-          <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_delete=1" class="btn-danger">Delete this person</a>
+          <a href="/edit_person.php?person_id=<?= $personId ?>&confirm_delete=1<?= $popupQS ?>" class="btn-danger">Delete this person</a>
         <?php else: ?>
           <div class="confirm-box">
             Delete <strong><?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?></strong> completely —
@@ -767,18 +864,23 @@ if ($postedProfile) {
                 <input type="hidden" name="action" value="delete_person">
                 <button type="submit" class="btn-danger">Yes, delete them</button>
               </form>
-              <a href="/edit_person.php?person_id=<?= $personId ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
+              <a href="/edit_person.php?person_id=<?= $personId ?><?= $popupQS ?>" class="btn-small" style="text-decoration:none;display:inline-block;">Cancel</a>
             </div>
           </div>
         <?php endif; ?>
       <?php elseif (empty($person['claimed_by_user_id']) && $memoryCount > 0): ?>
-        <h3 style="margin:28px 0 4px;">Delete this person</h3>
-        <p style="font-size:13px;color:var(--ink-faint);">Not available — <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has <?= $memoryCount ?> <?= $memoryCount === 1 ? 'memory' : 'memories' ?> on their timeline. <a href="/timeline.php?person_id=<?= $personId ?>">Delete those first</a> if this person really needs to go.</p>
+        <h3 style="margin:24px 0 4px;">Delete this person</h3>
+        <p style="font-size:13px;color:var(--ink-faint);">Not available — <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> has <?= $memoryCount ?> <?= $memoryCount === 1 ? 'memory' : 'memories' ?> on their timeline. <a href="/timeline.php?person_id=<?= $personId ?>"<?= $popup ? ' target="_top"' : '' ?>>Delete those first</a> if this person really needs to go.</p>
       <?php endif; ?>
+
+      </div>
+      </div>
 
     <?php endif; ?>
 
+    <?php if (!$popup): ?>
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
+    <?php endif; ?>
   </div>
 </body>
 </html>

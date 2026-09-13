@@ -185,6 +185,80 @@ function store_uploaded_media_files(array $filesField, int $personId): array
     return $stored;
 }
 
+// A profile photo, not a full-resolution upload — kept deliberately small
+// and image-only (no video/document types, unlike a timeline memory's
+// attachments), stored separately from a person's timeline media under
+// its own avatars/ subfolder of the same private-media/ tree so the two
+// never collide and a person's photo isn't tied to any one timeline entry.
+const AVATAR_MAX_BYTES = 8 * 1024 * 1024; // 8MB
+const AVATAR_ALLOWED = [
+    'jpg'  => ['image/jpeg'],
+    'jpeg' => ['image/jpeg'],
+    'png'  => ['image/png'],
+    'gif'  => ['image/gif'],
+    'webp' => ['image/webp'],
+];
+
+/**
+ * Validates and stores an uploaded profile photo for a person. Returns
+ * ['file_path' => 'avatars/<person_id>/<random>.<ext>', 'mime_type' => ...]
+ * or throws RuntimeException with a user-facing message. Mirrors
+ * store_uploaded_media() above (real-content sniffing via finfo, never the
+ * client-supplied name/type) but with its own, smaller size limit and an
+ * images-only extension list, and its own avatars/ subfolder so a photo
+ * never collides with — or gets swept up by — code that walks a person's
+ * timeline media.
+ */
+function store_uploaded_avatar(array $file, int $personId): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException(match ($file['error'] ?? null) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'That photo is too large for this server to accept.',
+            UPLOAD_ERR_NO_FILE => 'Choose a photo to upload.',
+            default => 'Upload failed — please try again.',
+        });
+    }
+    if (!is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Upload failed — please try again.');
+    }
+    if ($file['size'] > AVATAR_MAX_BYTES) {
+        throw new RuntimeException('That photo is larger than the 8MB limit.');
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $detectedMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+
+    $extension = null;
+    foreach (AVATAR_ALLOWED as $ext => $mimes) {
+        if (in_array($detectedMime, $mimes, true)) {
+            $extension = $ext;
+            break;
+        }
+    }
+    if ($extension === null) {
+        throw new RuntimeException('Profile photos must be a JPEG, PNG, GIF, or WEBP image.');
+    }
+
+    $dir = ourthology_media_dir() . '/avatars/' . $personId;
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+
+    $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+    $destination = $dir . '/' . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+    chmod($destination, 0640);
+
+    return [
+        'file_path' => 'avatars/' . $personId . '/' . $filename,
+        'mime_type' => $detectedMime,
+    ];
+}
+
 /** Delete a media row's underlying file from disk (call before/alongside deleting the DB row). */
 function delete_media_file(string $relativePath): void
 {
