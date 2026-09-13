@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
+require_once __DIR__ . '/includes/tour_steps.php';
 
 require_login();
 $me = current_user_with_person();
@@ -151,13 +152,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// The onboarding tour only ever makes sense on your OWN landing page (its
-// steps point at "your" timeline, "your" tree, "+ Add a memory" for
-// yourself) — never while looking at someone else's, claimed or not.
-// Computed after the POST handling above (not before) so that dismissing
-// it via the dismiss_tour action takes effect immediately, on this same
-// request, rather than needing one more page load.
-$showTour = $isOwner && empty($me['tour_completed_at']);
+// Phase 28: the onboarding tour now spans both timeline.php and tree.php
+// (Phil's own training script walks through both), so it only ever
+// AUTO-STARTS here — the tour's own "your" wording only makes sense on
+// your own landing page — but the tour UI itself, the step data, and the
+// "take the tour again" replay button are rendered unconditionally below,
+// since a returning owner can replay it any time. Computed after the POST
+// handling above (not before) so that dismissing it via the dismiss_tour
+// action takes effect immediately, on this same request, rather than
+// needing one more page load.
+$autostartTour = $isOwner && empty($me['tour_completed_at']);
+$tourSteps = ourthology_tour_steps();
+$tourStepsJson = json_encode($tourSteps, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+$tourStepsJsonSafe = str_replace('</', '<\/', (string) $tourStepsJson);
 
 $entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage);
 $targetName = person_display_name($target);
@@ -304,6 +311,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
+  /* Phase 28: the "Take the tour" replay button — same red-pill treatment
+     tree.php's own "Print tree" button already uses for a stand-out action
+     among plain nav links, kept here so it's not just a plain-looking pill. */
+  .nav .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
+  .nav .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -513,6 +525,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       <div class="nav-links">
         <a href="/tree.php" id="tourMyTree">My tree</a>
         <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
+        <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
         <span class="whoami">
           Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
           <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
@@ -1602,8 +1615,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   })();
   </script>
 
-  <?php if ($showTour): ?>
-  <div class="tour-scrim open" id="tourScrim">
+  <!-- Phase 28: the tour's markup is now always present (not just on a
+       fresh account's first visit) so the "Take the tour" button can
+       replay it any time — see includes/tour_steps.php for the step
+       content and the matching engine script on tree.php, which the tour
+       now moves onto partway through. -->
+  <div class="tour-scrim" id="tourScrim">
     <div class="tour-highlight" id="tourHighlight" hidden></div>
     <div class="tour-tooltip" id="tourTooltip">
       <h4 id="tourTitle"></h4>
@@ -1616,23 +1633,26 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     </div>
   </div>
   <input type="hidden" id="tourCsrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
+  <script id="tourStepsData" type="application/json"><?= $tourStepsJsonSafe ?></script>
+  <script>
+  window.OURTHOLOGY_AUTOSTART_TOUR = <?= $autostartTour ? 'true' : 'false' ?>;
+  </script>
   <script>
   (function () {
     "use strict";
-    // A short, four-step first-login walkthrough — shown once (server-side
-    // flag, see users.tour_completed_at / the dismiss_tour action above),
-    // never again after Skip or the last step's "Get started". Each step
-    // either points at a real element already on this page (via a CSS
-    // spotlight box that tracks its actual position — so it stays correct
-    // even if the page is resized mid-tour) or, for the welcome step, is
-    // simply centered with nothing highlighted.
-    var STEPS = [
-      { title: "Welcome to ourthology", body: "A quick tour of what you can do here — four short steps.", target: null },
-      { title: "Your life timeline", body: "Every memory you add appears here, plotted across your life. Switch between River, Rings, or Spiral, and zoom into a decade or a single year.", target: "#arcWrap" },
-      { title: "Add a memory", body: "A photo, a video, a document, or just a few words — with a date, so it takes its place on your timeline.", target: "#tourAddMemory" },
-      { title: "Your family tree", body: "See everyone you're connected to, add relatives, and click anyone to see their own timeline too.", target: "#tourMyTree" }
-    ];
-    var step = 0;
+    // Phase 28: the walkthrough now spans two pages (timeline.php and
+    // tree.php — Phil's own training script covers both), so its state has
+    // to survive a real page navigation. sessionStorage carries the
+    // in-progress step across that; TOUR_PAGE says which page's steps this
+    // copy of the engine is allowed to show. Every step still points at a
+    // real element via a spotlight box that tracks its live position (or,
+    // for a couple of steps, is centered with nothing highlighted) —
+    // unchanged from the original single-page version.
+    var TOUR_PAGE = "timeline";
+    var TOUR_URLS = { timeline: "/timeline.php", tree: "/tree.php" };
+    var TOUR_STEPS = JSON.parse(document.getElementById("tourStepsData").textContent);
+
+    var step = -1;
     var scrim = document.getElementById("tourScrim");
     var highlight = document.getElementById("tourHighlight");
     var tooltip = document.getElementById("tourTooltip");
@@ -1641,13 +1661,27 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var stepLabel = document.getElementById("tourStepLabel");
     var nextBtn = document.getElementById("tourNextBtn");
     var skipBtn = document.getElementById("tourSkipBtn");
+    var replayBtn = document.getElementById("tourReplayBtn");
+
+    function saveState(i) {
+      try {
+        sessionStorage.setItem("ourthologyTourStep", String(i));
+        sessionStorage.setItem("ourthologyTourActive", "1");
+      } catch (e) { /* private browsing etc — the tour just won't survive a page change */ }
+    }
+    function clearState() {
+      try {
+        sessionStorage.removeItem("ourthologyTourStep");
+        sessionStorage.removeItem("ourthologyTourActive");
+      } catch (e) {}
+    }
 
     function place() {
-      var s = STEPS[step];
+      var s = TOUR_STEPS[step];
       titleEl.textContent = s.title;
       bodyEl.textContent = s.body;
-      stepLabel.textContent = (step + 1) + " of " + STEPS.length;
-      nextBtn.textContent = (step === STEPS.length - 1) ? "Get started" : "Next";
+      stepLabel.textContent = (step + 1) + " of " + TOUR_STEPS.length;
+      nextBtn.textContent = (step === TOUR_STEPS.length - 1) ? "Done" : "Next";
 
       var target = s.target ? document.querySelector(s.target) : null;
       if (!target) {
@@ -1656,6 +1690,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         return;
       }
       tooltip.classList.remove("tour-centered");
+      if (typeof target.scrollIntoView === "function") {
+        // "auto" (instant), not "smooth" — a smooth scroll is still
+        // animating when the getBoundingClientRect() below runs, so the
+        // highlight and tooltip would be positioned from the target's
+        // pre-scroll spot. That's invisible for a target already on
+        // screen, but for one further down the page (like the memory
+        // cards) it placed the tooltip and its Next button off-screen
+        // entirely. Instant scroll reflows synchronously, so the very
+        // next measurement is the real, post-scroll position.
+        target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      }
       var r = target.getBoundingClientRect();
       var pad = 8;
       highlight.hidden = false;
@@ -1672,28 +1717,62 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       tooltip.style.left = left + "px";
     }
 
-    function finish() {
+    function open_() {
+      scrim.classList.add("open");
+      place();
+    }
+
+    function finishTour() {
+      clearState();
       scrim.classList.remove("open");
-      scrim.remove();
       var fd = new FormData();
       fd.append("action", "dismiss_tour");
       fd.append("csrf_token", document.getElementById("tourCsrf").value);
-      // Best-effort: the overlay is already gone either way, so a network
-      // hiccup here just means the tour might show once more on a future
-      // visit rather than breaking anything on this one.
-      fetch(window.location.pathname + window.location.search, { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
+      // Best-effort, and always fired (replay or first run alike) — it just
+      // records "this account doesn't need the automatic first-run tour
+      // any more," which stays true either way. A network hiccup here only
+      // means the automatic tour could show once more on a future login.
+      fetch("/timeline.php", { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
     }
 
-    nextBtn.addEventListener("click", function () {
-      if (step === STEPS.length - 1) { finish(); return; }
-      step++;
-      place();
-    });
-    skipBtn.addEventListener("click", finish);
-    window.addEventListener("resize", place);
-    place();
+    function goToStep(i) {
+      if (i >= TOUR_STEPS.length) { finishTour(); return; }
+      var s = TOUR_STEPS[i];
+      if (s.page !== TOUR_PAGE) {
+        // The next step lives on the other page — hand off via
+        // sessionStorage and navigate there for real; that page's own copy
+        // of this same engine picks the tour back up on load (see the
+        // resume check below).
+        saveState(i);
+        window.location.href = TOUR_URLS[s.page];
+        return;
+      }
+      step = i;
+      saveState(i);
+      open_();
+    }
+
+    nextBtn.addEventListener("click", function () { goToStep(step + 1); });
+    skipBtn.addEventListener("click", finishTour);
+    window.addEventListener("resize", function () { if (step >= 0) place(); });
+    if (replayBtn) {
+      replayBtn.addEventListener("click", function () { goToStep(0); });
+    }
+
+    var resumeActive = false;
+    try { resumeActive = sessionStorage.getItem("ourthologyTourActive") === "1"; } catch (e) {}
+    if (resumeActive) {
+      var savedStep = 0;
+      try { savedStep = parseInt(sessionStorage.getItem("ourthologyTourStep") || "0", 10); } catch (e) {}
+      if (TOUR_STEPS[savedStep] && TOUR_STEPS[savedStep].page === TOUR_PAGE) {
+        step = savedStep;
+        saveState(step);
+        open_();
+      }
+    } else if (window.OURTHOLOGY_AUTOSTART_TOUR) {
+      goToStep(0);
+    }
   })();
   </script>
-  <?php endif; ?>
 </body>
 </html>
