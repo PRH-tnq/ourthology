@@ -14,7 +14,7 @@ $claim = null;
 
 if ($token !== '') {
     $stmt = $pdo->prepare(
-        "SELECT ct.person_id, ct.expires_at, ct.used_at, p.first_name, p.surname, p.claimed_by_user_id,
+        "SELECT ct.person_id, ct.expires_at, ct.used_at, p.first_name, p.surname, p.claimed_by_user_id, p.died,
                 cu.first_name AS added_by_first, cu.surname AS added_by_surname
          FROM claim_tokens ct
          JOIN persons p ON p.id = ct.person_id
@@ -30,6 +30,12 @@ if ($claim === null) {
     $errors[] = 'This invite link is invalid.';
 } elseif ($claim['used_at'] !== null || $claim['claimed_by_user_id'] !== null) {
     $errors[] = 'This record has already been claimed.';
+} elseif (!empty($claim['died'])) {
+    // Phase 30: a death date can be added to a person's record any time
+    // after their invite link was generated — even a still-valid,
+    // unexpired link must stop working the moment that happens, since a
+    // profile recorded as deceased is never claimable, by anyone.
+    $errors[] = "This record can't be claimed — it's recorded as belonging to someone who has passed away.";
 } elseif (strtotime($claim['expires_at']) < time()) {
     $errors[] = 'This invite link has expired — ask whoever added you for a fresh one.';
 }
@@ -58,12 +64,23 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Re-check under the transaction that nobody claimed it in the meantime.
-            $lock = $pdo->prepare('SELECT used_at FROM claim_tokens WHERE token = :token FOR UPDATE');
+            // Re-check under the transaction that nobody claimed it — or
+            // recorded a death for this person — in the meantime. Locking
+            // the persons row too (not just claim_tokens) closes the gap
+            // where someone adds a date of death in the moments between
+            // this page loading and this form being submitted.
+            $lock = $pdo->prepare(
+                'SELECT ct.used_at, p.died
+                 FROM claim_tokens ct JOIN persons p ON p.id = ct.person_id
+                 WHERE ct.token = :token FOR UPDATE'
+            );
             $lock->execute(['token' => $token]);
             $row = $lock->fetch();
             if (!$row || $row['used_at'] !== null) {
                 throw new RuntimeException('already_used');
+            }
+            if (!empty($row['died'])) {
+                throw new RuntimeException('deceased');
             }
 
             $stmt = $pdo->prepare('INSERT INTO users (email, password_hash, person_id) VALUES (:email, :hash, :pid)');
@@ -87,7 +104,9 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();
-            $errors[] = 'This record has already been claimed.';
+            $errors[] = $e->getMessage() === 'deceased'
+                ? "This record can't be claimed — it's recorded as belonging to someone who has passed away."
+                : 'This record has already been claimed.';
         } catch (PDOException $e) {
             $pdo->rollBack();
             if ($e->getCode() === '23000') {

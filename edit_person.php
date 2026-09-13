@@ -114,6 +114,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'd'  => $diedValue,
                 'id' => $personId,
             ]);
+            // Phase 30: a date of death means nobody can claim this profile
+            // (claim.php itself enforces that, whatever tokens exist), but
+            // there's no reason to leave a still-valid invite link sitting
+            // around for someone to notice and wonder about — clear it out
+            // the moment the death date is what caused it to stop working.
+            // Only relevant for a still-unclaimed person; a claimed one's
+            // own record can't be re-claimed anyway, so there'd be nothing
+            // to clean up.
+            if ($diedValue !== null && empty($person['claimed_by_user_id'])) {
+                $pdo->prepare('DELETE FROM claim_tokens WHERE person_id = :pid')->execute(['pid' => $personId]);
+            }
             $_SESSION['flash_edit_notice'] = 'Profile updated.';
             header('Location: /edit_person.php?person_id=' . $personId . $popupQS);
             exit;

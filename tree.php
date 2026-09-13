@@ -24,9 +24,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_l
     csrf_check();
     $personId = filter_var($_POST['person_id'] ?? '', FILTER_VALIDATE_INT);
     if ($personId !== false && person_in_group($pdo, (int) $personId, $myGroup)) {
-        $token = create_claim_token($pdo, (int) $personId, (int) $me['user_id']);
-        $_SESSION['flash_claim_link'] = claim_link_url($token);
-        $_SESSION['flash_claim_for'] = (int) $personId;
+        // Phase 30: no invite link for someone recorded as deceased — an
+        // unclaimed profile with a date of death is never meant to be
+        // claimed by anyone, so there's nothing to hand out a link for.
+        // This mirrors the same check claim.php makes on any link that
+        // was already generated before a death date was added, so this is
+        // really just about not generating a NEW dead-end one — the
+        // control is also hidden below, this is the same rule enforced
+        // server-side rather than trusted from the UI alone.
+        $linkPerson = person_row($pdo, (int) $personId);
+        if ($linkPerson !== null && empty($linkPerson['claimed_by_user_id']) && empty($linkPerson['died'])) {
+            $token = create_claim_token($pdo, (int) $personId, (int) $me['user_id']);
+            $_SESSION['flash_claim_link'] = claim_link_url($token);
+            $_SESSION['flash_claim_for'] = (int) $personId;
+        }
     }
     header('Location: /tree.php');
     exit;
@@ -200,7 +211,6 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tree-node { cursor:pointer; }
   .tree-node .tn-hit { fill:transparent; stroke:none; }
   .tree-node .tn-name { font-family:"Fraunces",Georgia,serif; font-weight:700; font-size:14px; text-anchor:middle; fill:var(--ink); transition:fill .15s ease; }
-  .tree-node .tn-tag { font-family:"Newsreader",Georgia,serif; font-size:10px; text-transform:uppercase; letter-spacing:.05em; text-anchor:middle; fill:var(--ink-soft); }
   .tree-node .tn-dates { font-family:"Newsreader",Georgia,serif; font-size:10px; text-anchor:middle; fill:var(--ink-faint); }
   .tree-node .tn-dates-tagged { font-weight:600; fill:var(--ink-soft); }
   .tree-node.unclaimed .tn-name { fill:var(--unclaimed); }
@@ -464,7 +474,10 @@ $hasAnyStepTag = !empty($stepTagsByChild);
                   foreach (ourthology_name_lines(person_display_name($person)) as $nameLine) {
                       $lines[] = ['cls' => 'tn-name', 'text' => $nameLine];
                   }
-                  $lines[] = ['cls' => 'tn-tag', 'text' => $person['claimed_by_user_id'] ? 'Claimed' : 'Unclaimed'];
+                  // Phase 30: the "Claimed"/"Unclaimed" text line was dropped —
+                  // the name's own colour (see .tree-node.unclaimed .tn-name
+                  // and the legend) already carries that distinction, so this
+                  // was saying the same thing twice.
               }
               if ($datesText !== '') {
                   $lines[] = ['cls' => $stepPrefix !== '' ? 'tn-dates tn-dates-tagged' : 'tn-dates', 'text' => $datesText];
@@ -522,12 +535,21 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <?php foreach ($unclaimed as $p): ?>
             <li>
               <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
-              <form method="post" style="display:inline;">
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="get_link">
-                <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
-                <button type="submit" class="linklet">get invite link</button>
-              </form>
+              <?php if (!empty($p['died'])): ?>
+                <?php
+                  // Phase 30: recorded as deceased — nobody can claim this
+                  // profile (see claim.php and the get_link handler above),
+                  // so there's no invite link to offer here either.
+                ?>
+                <span style="color:var(--ink-faint);font-size:12.5px;">— can't be claimed (recorded as deceased)</span>
+              <?php else: ?>
+                <form method="post" style="display:inline;">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="action" value="get_link">
+                  <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
+                  <button type="submit" class="linklet">get invite link</button>
+                </form>
+              <?php endif; ?>
               · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
             </li>
           <?php endforeach; ?>
