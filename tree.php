@@ -574,7 +574,14 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           } else {
             pendingTimer = setTimeout(function () {
               pendingTimer = null;
-              window.location.href = a.href;
+              // a.href is an SVGAnimatedString on an SVG <a> element, not a
+              // plain string like it is on an ordinary HTML anchor — using
+              // it directly here stringified to the literal text
+              // "[object SVGAnimatedString]" and sent the browser to
+              // ourthology.com/[object%20SVGAnimatedString] (a 404).
+              // getAttribute() reads the raw attribute value regardless of
+              // namespace, which is what's actually needed here.
+              window.location.href = a.getAttribute('href');
             }, DBLCLICK_WINDOW);
           }
         });
