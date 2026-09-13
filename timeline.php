@@ -316,6 +316,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     .page-head .brand { order:1; }
     .header-avatar, .header-avatar-placeholder { order:2; float:none; width:122px; height:122px; font-size:49px; margin:4px 0 10px auto; }
     .page-head .nav { order:3; }
+    .page-head .page-head-heading { order:4; }
     /* The vertical divider before "Signed in as" only makes sense when it
        sits on the same line as the nav buttons — once it wraps to its own
        line on a narrow screen, a lone leading bar with nothing beside it
@@ -555,14 +556,25 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           </span>
         </div>
       </div>
-    </div>
 
-    <h3 style="margin-bottom:2px;">
-      <?= $isOwner ? 'My timeline' : htmlspecialchars($targetName, ENT_QUOTES) . "'s timeline" ?>
-    </h3>
-    <?php if (!$canManage): ?>
-      <p style="font-size:13px;color:var(--ink-faint);margin-top:0;">Showing public entries only.</p>
-    <?php endif; ?>
+      <?php
+        // Phase 29: the heading lives inside .page-head now too (still
+        // wrapping beside the floated avatar, same as .brand and .nav
+        // above it) — brand+nav alone left a noticeable blank strip below
+        // the nav row and above "My timeline", since neither reached
+        // anywhere near the avatar's own height. Pulling the heading up
+        // here closes most of that gap with content that was going to
+        // render right there anyway, rather than leaving it as whitespace.
+      ?>
+      <div class="page-head-heading">
+        <h3 style="margin-bottom:2px;">
+          <?= $isOwner ? 'My timeline' : htmlspecialchars($targetName, ENT_QUOTES) . "'s timeline" ?>
+        </h3>
+        <?php if (!$canManage): ?>
+          <p style="font-size:13px;color:var(--ink-faint);margin-top:0;">Showing public entries only.</p>
+        <?php endif; ?>
+      </div>
+    </div>
 
     <?php if ($notice): ?><p style="color:var(--accent);font-weight:600;"><?= htmlspecialchars($notice, ENT_QUOTES) ?></p><?php endif; ?>
     <?php if ($errors): ?>
