@@ -222,17 +222,21 @@ function graph_aunts_uncles_of(array $maps, int $personId): array
 /**
  * Everyone in the family group within a bounded generational distance of
  * $anchorId — Phase 24's "tag anyone in the tree up to grandparent and
- * grandchild" rule on add_entry.php. Reuses tree_layout.php's own
- * tree_compute_tiers() BFS unchanged: a parent edge is -1 tier, a child
- * edge is +1 tier, a partnership keeps the same tier — the exact same
- * definition the tree diagram itself uses for its GRANDPARENTS/
- * GRANDCHILDREN row labels, so "up to grandparent and grandchild" here
- * means precisely what those two labels mean on the tree (also reaching
- * anyone at the same or an adjacent tier connected only via a partner —
- * e.g. an aunt/uncle's spouse, or a grandchild's other parent). Default
- * bounds are tier -2..+2 inclusive; $anchorId itself is always excluded.
+ * grandchild" rule on add_entry.php (widened, Phase 31, so the younger
+ * side reaches down to a 2× great-grandchild). Reuses tree_layout.php's
+ * own tree_compute_tiers() BFS unchanged: a parent edge is -1 tier, a
+ * child edge is +1 tier, a partnership keeps the same tier — the exact
+ * same definition the tree diagram itself uses for its own row labels
+ * (tree_tier_label() — GRANDPARENTS/GRANDCHILDREN at tier ±2, then
+ * GREAT-GRANDPARENTS/GREAT-GRANDCHILDREN at ±3, "2× GREAT-..." at ±4, and
+ * so on), so a bound here means precisely what that same tier number
+ * means on the tree itself (also reaching anyone at the same or an
+ * adjacent tier connected only via a partner — e.g. an aunt/uncle's
+ * spouse, or a grandchild's other parent). Default bounds are tier
+ * -2..+4 inclusive (grandparent through 2× great-grandchild);
+ * $anchorId itself is always excluded.
  */
-function graph_people_within_generations(array $graph, int $anchorId, int $minTier = -2, int $maxTier = 2): array
+function graph_people_within_generations(array $graph, int $anchorId, int $minTier = -2, int $maxTier = 4): array
 {
     $maps = graph_build_maps($graph);
     $tiers = tree_compute_tiers($graph['persons'], $maps['childrenOf'], $maps['parentsOf'], $maps['partnersOf'], $anchorId);

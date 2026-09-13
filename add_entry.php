@@ -74,16 +74,16 @@ $targetIsSelf = $targetPersonId === $myPersonId;
 $targetName = person_display_name($targetPerson);
 
 // Who the "tag people in this memory" picker below offers — bounded to
-// anyone up to a grandparent or grandchild's generational distance from
-// the memory's owner (Phase 24), not the whole family group: a memory
-// about the target person is much more likely to actually involve someone
-// close in the tree, and an unbounded list gets unwieldy fast in a larger
-// family. Never includes the target themselves (they're already the
-// memory's owner, tagging them would be meaningless) — see
-// graph_people_within_generations() in includes/graph.php. This same
-// bounded list is also what the submitted tag ids are validated against
-// below, so the generational limit is enforced server-side, not just hidden
-// in the UI.
+// anyone up to a grandparent (older) or a 2× great-grandchild (younger)
+// generational distance from the memory's owner (Phase 24, widened in
+// Phase 31), not the whole family group: a memory about the target person
+// is much more likely to actually involve someone close in the tree, and
+// an unbounded list gets unwieldy fast in a larger family. Never includes
+// the target themselves (they're already the memory's owner, tagging them
+// would be meaningless) — see graph_people_within_generations() in
+// includes/graph.php. This same bounded list is also what the submitted
+// tag ids are validated against below, so the generational limit is
+// enforced server-side, not just hidden in the UI.
 $familyGraph = fetch_family_graph($pdo, $myGroup);
 $familyPersonsById = [];
 foreach ($familyGraph['persons'] as $p) {
@@ -604,7 +604,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
           </div>
 
           <?php if ($taggablePeople): ?>
-            <label style="margin-top:14px;">Tag people in this memory <span style="text-transform:none;font-weight:400;">(anyone up to a grandparent or grandchild's distance in the tree — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
+            <label style="margin-top:14px;">Tag people in this memory <span style="text-transform:none;font-weight:400;">(anyone from a grandparent down to a 2× great-grandchild's distance in the tree — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
             <div class="tag-picker">
               <?php foreach ($taggablePeople as $tp): ?>
                 <?php $tpId = (int) $tp['id']; ?>
