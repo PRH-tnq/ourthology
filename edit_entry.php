@@ -329,6 +329,10 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 <link rel="stylesheet" href="/styles.css?v=20">
 <style>
   :root { --accent-bg: #F1DCDC; }
+  /* Phase 25: same red-accent pop-up-dialog border as add_entry.php (its
+     sibling composer) and the tree's edit-person pop-up overlay, rather
+     than the plain --line border every other page's .card uses. */
+  .card { border:2px solid var(--accent); }
   textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); resize:vertical; }
   .radio-row { display:flex; gap:16px; margin-top:8px; font-size:14px; }
   .radio-row label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:6px; margin:0; }

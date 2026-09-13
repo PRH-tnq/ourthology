@@ -249,6 +249,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 <link rel="stylesheet" href="/styles.css?v=20">
 <style>
   :root { --accent-bg: #F1DCDC; }
+  /* Phase 25: this composer reads as a pop-up-style task dialog (its own
+     small, focused box for one action), so it gets the same red-accent
+     border treatment as the tree/timeline diagrams (Phase 19) and the
+     tree's own edit-person pop-up overlay — a bit more emphasis than the
+     plain --line border every other page's .card uses. */
+  .card { border:2px solid var(--accent); padding:26px 32px; }
   textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); resize:vertical; }
   .radio-row { display:flex; gap:16px; margin-top:8px; font-size:14px; }
   .radio-row label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:6px; margin:0; }
@@ -285,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
   .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
   .for-banner strong { color:var(--ink); }
-  .tag-picker { display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; }
+  .tag-picker { display:flex; flex-direction:column; gap:6px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; flex:1 1 auto; min-height:140px; max-height:220px; }
   .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
   .tag-picker-empty { font-size:13px; color:var(--ink-faint); margin:0; }
 
@@ -295,13 +301,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
      .edit-columns pattern (Phase 22) so the two pop-up-style editors in
      this app share one visual language. Collapses to a single column
      (media, then words/date, then tagging/visibility, in that reading
-     order) on a narrow screen. */
-  .entry-columns { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0 28px; margin-top:8px; align-items:start; }
+     order) on a narrow screen.
+
+     Phase 25: columns stretch to match the row's tallest column
+     (align-items:stretch, each .entry-col a vertical flex container)
+     rather than each just sitting at its own natural height — the
+     middle column's Words textarea and the right column's tag-picker
+     list are the two "growable" elements (flex:1 1 auto) that expand to
+     fill whatever height that leaves, so the middle and right columns
+     always end up filled to the same vertical extent as each other
+     (and as the tallest column overall) instead of leaving one shorter
+     than the other with blank space underneath. Both growable elements
+     still have their own min/max so a very short or very long family
+     doesn't collapse to nothing or blow the box out arbitrarily tall. */
+  .entry-columns { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0 28px; margin-top:8px; align-items:stretch; }
+  .entry-col { display:flex; flex-direction:column; }
   .entry-col + .entry-col { border-left:1px solid var(--line); padding-left:28px; }
   @media (max-width: 860px) {
     .entry-columns { display:block; }
     .entry-col + .entry-col { border-left:none; padding-left:0; margin-top:26px; padding-top:20px; border-top:1px solid var(--line); }
   }
+  #body { flex:1 1 auto; min-height:140px; }
 
   /* Visibility as two pill "decision buttons" rather than plain radio
      dots — the request called for this to read as a deliberate choice,
@@ -319,7 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 </head>
 <body>
   <div class="card" style="max-width:980px;">
-    <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
+    <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 16px;">
       <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
         <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
         <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
@@ -380,7 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
           <input type="text" id="title" name="title" value="<?= htmlspecialchars($title, ENT_QUOTES) ?>" maxlength="255">
 
           <label for="body" style="margin-top:14px;">Words <span style="text-transform:none;font-weight:400;">(required for a diary entry; for a memory, add words and/or attach files)</span></label>
-          <textarea id="body" name="body" rows="6"><?= htmlspecialchars($body, ENT_QUOTES) ?></textarea>
+          <textarea id="body" name="body" rows="4"><?= htmlspecialchars($body, ENT_QUOTES) ?></textarea>
 
           <label style="margin-top:14px;">Date it happened <span style="text-transform:none;font-weight:400;">(optional — fill in all three, or leave all three blank)</span></label>
           <div class="row-3">
@@ -425,7 +445,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
               <?php endforeach; ?>
             </div>
           <?php else: ?>
-            <p class="tag-picker-empty" style="margin-top:14px;">Nobody close enough in the tree yet to tag.</p>
+            <p class="tag-picker-empty" style="margin-top:14px;flex:1 1 auto;display:flex;align-items:center;">Nobody close enough in the tree yet to tag.</p>
           <?php endif; ?>
         </div>
       </div>
