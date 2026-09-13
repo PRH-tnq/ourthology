@@ -284,24 +284,38 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      profile picture sits there instead, and "Signed in as" moves down to
      sit alongside the nav buttons rather than stranded on its own on the
      far right. */
-  /* flex-wrap:wrap costs nothing at normal widths (there's always room for
-     the brand block and the avatar side by side there, so it never
-     actually wraps) but matters once the avatar is this big on a narrow
-     phone — see the mobile override below for what a wrapped line does. */
-  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  /* Phase 29: that big avatar used to be a flex sibling of .brand, with
+     .nav as a separate FULL-WIDTH row underneath — since .nav's own
+     content (My tree / + Add a memory / Signed in as) never needed
+     anywhere near the full card width, that left a large blank block to
+     the right of the nav row and below the avatar (Phil circled it in a
+     screenshot). Floating the avatar instead, with .brand and .nav kept
+     as ordinary flex boxes (each one already establishes its own layout
+     context, so its box narrows to avoid a float rather than spanning
+     full width), makes both of them wrap up snugly against the avatar's
+     left edge instead of sitting in their own full-width row beneath it —
+     the same "text wraps around an image" behaviour as a magazine layout.
+     .page-head::after clears the float so the rest of the page always
+     starts below both the avatar and the (now much shorter) nav block,
+     whichever is taller. */
+  .page-head { position:relative; }
+  .page-head::after { content:""; display:table; clear:both; }
   /* Phil asked for this bigger, then bigger again — now double the second
-     size (156px desktop, up from an initial 78px), which pushes the nav
-     row down further below it; that's the expected trade-off of a header
-     photo this size and not a bug. */
-  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
+     size (156px desktop, up from an initial 78px). */
+  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); float:right; margin:0 0 12px 18px; }
   .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:62px; color:var(--ink-faint); }
   @media (max-width: 620px) {
-    .header-avatar, .header-avatar-placeholder { width:122px; height:122px; font-size:49px; }
     /* At this size the photo no longer fits beside the wordmark on a real
        phone width (confirmed by measuring, not by eye — it ran off the
-       card's right edge before this) — margin-left:auto drops it onto its
-       own line, still pinned to the right rather than sliding to center. */
-    .header-avatar, .header-avatar-placeholder { margin-left:auto; margin-top:4px; }
+       card's right edge before this), so on a narrow phone the header
+       goes back to a plain stacked column instead of wrapping text around
+       the float — "order" puts the avatar back between the brand and the
+       nav regardless of where it sits in the markup (it has to come first
+       in the markup for the desktop float-wrap above to work). */
+    .page-head { display:flex; flex-direction:column; }
+    .page-head .brand { order:1; }
+    .header-avatar, .header-avatar-placeholder { order:2; float:none; width:122px; height:122px; font-size:49px; margin:4px 0 10px auto; }
+    .page-head .nav { order:3; }
     /* The vertical divider before "Signed in as" only makes sense when it
        sits on the same line as the nav buttons — once it wraps to its own
        line on a narrow screen, a lone leading bar with nothing beside it
@@ -309,7 +323,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     .whoami { margin-left:0; padding-left:0; border-left:none; padding-top:8px; border-top:1px solid var(--line); width:100%; }
   }
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 18px 0 4px; }
-  .nav-links { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  /* Phase 29: flex:1 so this fills .nav's own width (which now stops at
+     the floated avatar rather than the far edge of the card) — without
+     it, .whoami's margin-left:auto below had nothing to push against,
+     since .nav-links, being .nav's only child, was otherwise only ever as
+     wide as its own buttons, leaving a second blank gap between them and
+     the avatar. */
+  .nav-links { display:flex; flex:1 1 auto; gap:10px; flex-wrap:wrap; align-items:center; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
   /* Phase 28: the "Take the tour" replay button — same red-pill treatment
      tree.php's own "Print tree" button already uses for a stand-out action
@@ -498,6 +518,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <body>
   <div class="card wide">
     <div class="page-head">
+      <?php /* Phase 29: the avatar comes FIRST in the markup (even though
+              it renders top-right) because that's what lets it float and
+              have .brand and .nav wrap up against it — see the .page-head
+              comment in <style> above. */ ?>
+      <?php if (!empty($target['avatar_path'])): ?>
+        <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
+      <?php else: ?>
+        <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
+      <?php endif; ?>
+
       <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
         <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
           <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
@@ -514,22 +544,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         </div>
       </div>
 
-      <?php if (!empty($target['avatar_path'])): ?>
-        <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
-      <?php else: ?>
-        <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
-      <?php endif; ?>
-    </div>
-
-    <div class="nav">
-      <div class="nav-links">
-        <a href="/tree.php" id="tourMyTree">My tree</a>
-        <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
-        <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
-        <span class="whoami">
-          Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
-          <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
-        </span>
+      <div class="nav">
+        <div class="nav-links">
+          <a href="/tree.php" id="tourMyTree">My tree</a>
+          <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
+          <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
+          <span class="whoami">
+            Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
+            <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -1301,7 +1325,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
         if (e.media && e.media.length && e.media[0].kind === "image") {
           var img = document.createElementNS(svgNS, "image");
-          img.setAttributeNS("http://www.w3.org/1999/xlink", "href", e.media[0].url);
+          // Phase 29: this dot is 30x30px on screen, but without "&thumb=1"
+          // it was fetching and decoding the full original upload (often
+          // several MB straight off a phone camera) for every visible
+          // memory, every time the river re-renders — the same waste the
+          // memory-card rail below was already fixed for in Phase 27. On a
+          // timeline with many photos this was a real, measurable slowdown
+          // (worst on iPad, where memory and decode speed are tightest),
+          // and it's pure waste since the same small cached preview file
+          // is reused here too.
+          img.setAttributeNS("http://www.w3.org/1999/xlink", "href", e.media[0].url + "&thumb=1");
           img.setAttribute("x", "-15"); img.setAttribute("y", "-15");
           img.setAttribute("width", "30"); img.setAttribute("height", "30");
           img.setAttribute("clip-path", "url(#thumbClip)");

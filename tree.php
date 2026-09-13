@@ -208,6 +208,19 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tree-node.you .tn-name { fill:var(--accent); font-size:17px; text-decoration:underline; text-decoration-color:var(--accent-glow); text-underline-offset:4px; }
   .tree-node.you:hover .tn-name { fill:var(--accent); }
 
+  /* Phase 29: a direct one-tap "edit" affordance for touchscreens on the
+     nodes that support it (your own node, or an unclaimed one). Hidden on
+     a mouse/trackpad (pointer:fine) since those already get a real
+     double-click there with no delay involved — see the tap-handling
+     script below for why touch gets this instead of the same
+     wait-and-see double-tap detection. */
+  .tn-edit-affordance { display:none; }
+  @media (pointer: coarse) {
+    .tn-edit-affordance { display:block; }
+  }
+  .tn-edit-bg { fill:var(--card, #fff); stroke:var(--accent); stroke-width:1.5; }
+  .tn-edit-icon { fill:none; stroke:var(--accent); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+
   .tree-legend { margin-top:10px; }
   .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin:0; }
   .tree-key strong { color:var(--ink); }
@@ -458,13 +471,29 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               }
               $lineGap = 13;
               $lineStartY = -($lineGap * (count($lines) - 1)) / 2;
+              $isEditable = $isYou || !$person['claimed_by_user_id'];
             ?>
-            <a href="/timeline.php?person_id=<?= $pid ?>" data-person-id="<?= $pid ?>" data-dblclick-edit="<?= ($isYou || !$person['claimed_by_user_id']) ? '1' : '0' ?>">
+            <a href="/timeline.php?person_id=<?= $pid ?>" data-person-id="<?= $pid ?>" data-dblclick-edit="<?= $isEditable ? '1' : '0' ?>">
               <g class="tree-node<?= $isYou ? ' you' : '' ?><?= $person['claimed_by_user_id'] ? '' : ' unclaimed' ?>" transform="translate(<?= $pos['x'] ?>, <?= $pos['y'] ?>)">
                 <rect class="tn-hit" x="<?= -$hitW / 2 ?>" y="<?= -$hitH / 2 ?>" width="<?= $hitW ?>" height="<?= $hitH ?>"></rect>
                 <?php foreach ($lines as $li => $line): ?>
                   <text class="<?= $line['cls'] ?>" y="<?= $lineStartY + $li * $lineGap ?>"><?= htmlspecialchars($line['text'], ENT_QUOTES) ?></text>
                 <?php endforeach; ?>
+                <?php if ($isEditable): ?>
+                  <?php
+                    // Phase 29: a direct, one-tap way to reach the edit
+                    // pop-up on a touchscreen — CSS shows this only on a
+                    // coarse (touch) pointer; see the tap-handling script
+                    // for why touch skips the double-tap detection this
+                    // node's own <a> uses on a mouse.
+                    $editCx = $hitW / 2 - 11;
+                    $editCy = -$hitH / 2 + 11;
+                  ?>
+                  <g class="tn-edit-affordance" data-edit-affordance data-person-id="<?= $pid ?>" transform="translate(<?= $editCx ?>, <?= $editCy ?>)" aria-label="Edit">
+                    <circle class="tn-edit-bg" r="10"></circle>
+                    <path class="tn-edit-icon" d="M-3.4,3.4 L-1,4 L-0.4,1.6 L3.2,-2 L1.4,-3.8 L-2.2,-0.2 Z M2,-4.6 L4.6,-2"></path>
+                  </g>
+                <?php endif; ?>
               </g>
             </a>
           <?php endforeach; ?>
@@ -481,7 +510,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <br>Scroll or drag if the tree is wider than the screen.
         </p>
         <div class="tree-help-box">
-          <strong>Click</strong> a name to open their timeline. <strong>Double-click</strong> your own name, or anyone not yet claimed, to edit their profile.
+          <strong>Click</strong> a name to open their timeline. <strong>Double-click</strong> your own name, or anyone not yet claimed, to edit their profile — on a touchscreen, tap the small pencil on those instead.
         </div>
       </div>
     <?php endif; ?>
@@ -592,9 +621,24 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     // second click within the window means it was a double-click (open the
     // edit pop-up instead). Every other node is untouched — it keeps
     // navigating on the very first click, with no artificial delay.
+    //
+    // Phase 29: that wait-and-see is exactly the "single/double tap feels
+    // clunky" complaint on a touchscreen — every tap on your own node, or
+    // an unclaimed one, waited up to DBLCLICK_WINDOW before it actually
+    // went anywhere, because there's no reliable way to tell a plain tap
+    // from the first half of a double-tap without waiting for it. A mouse
+    // doesn't have that problem (a double-click is a deliberate, distinct
+    // gesture there), so only a coarse (touch) pointer skips the wait —
+    // its tap always navigates immediately, and the small pencil icon
+    // rendered on these nodes (only visible on a coarse pointer — see the
+    // CSS) opens the edit pop-up directly instead of relying on a second
+    // tap at all.
+    var isCoarsePointer = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+
     (function () {
       var DBLCLICK_WINDOW = 300;
       document.querySelectorAll('.tree-wrap a[data-dblclick-edit="1"]').forEach(function (a) {
+        if (isCoarsePointer) return;
         var pendingTimer = null;
         a.addEventListener('click', function (evt) {
           evt.preventDefault();
@@ -615,6 +659,20 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               window.location.href = a.getAttribute('href');
             }, DBLCLICK_WINDOW);
           }
+        });
+      });
+
+      // The touch-only pencil icon (see the CSS and the comment above) —
+      // one direct tap opens the same edit pop-up a mouse reaches via
+      // double-click. It sits inside the node's own <a>, so both
+      // preventDefault (stop that link's navigation) and stopPropagation
+      // (stop the click from also reaching the dblclick-detection handler
+      // above, on nodes where it's still active) are needed.
+      document.querySelectorAll('.tn-edit-affordance').forEach(function (icon) {
+        icon.addEventListener('click', function (evt) {
+          evt.preventDefault();
+          evt.stopPropagation();
+          openEditPopup(icon.dataset.personId);
         });
       });
 
