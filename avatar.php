@@ -40,14 +40,24 @@ if (!is_file($path)) {
     exit('Not found.');
 }
 
-$finfo = finfo_open(FILEINFO_MIME_TYPE);
-$mime = finfo_file($finfo, $path);
-finfo_close($finfo);
+// Phase 27: an avatar is never shown larger than a small circle anywhere
+// in the app, so it's always served as a resized, cached preview rather
+// than whatever resolution was actually uploaded — falling back to the
+// original file untouched if thumbnailing isn't possible for some reason.
+$servePath = $path;
+$mimeType = null;
+$thumbPath = ensure_media_thumbnail((string) $person['avatar_path'], AVATAR_THUMB_MAX_DIMENSION);
+if ($thumbPath !== null) {
+    $servePath = $thumbPath;
+    $mimeType = 'image/jpeg';
+} else {
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mimeType = finfo_file($finfo, $path);
+    finfo_close($finfo);
+}
 
-header('Content-Type: ' . $mime);
-header('Content-Length: ' . (string) filesize($path));
-header('Content-Disposition: inline');
-header('Cache-Control: private, max-age=0, must-revalidate');
-header('X-Content-Type-Options: nosniff');
-
-readfile($path);
+// Safe to cache long and "immutable" (see send_cacheable_file()'s own
+// comment in includes/media.php): a re-uploaded photo always gets a new
+// random filename AND the <img> tag's own ?v= cache-buster changes with
+// it (Phase 22/20), so this exact URL's bytes never change under it.
+send_cacheable_file($servePath, (string) $mimeType);

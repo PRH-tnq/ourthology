@@ -36,13 +36,27 @@ if (!is_file($path)) {
     exit('Not found.');
 }
 
-header('Content-Type: ' . $media['mime_type']);
-header('Content-Length: ' . (string) filesize($path));
-header('Content-Disposition: inline');
-// This content is access-controlled per request — never let a shared cache
-// (or the browser, across a later logout/login as someone else) serve it
-// to anyone but the person this specific request was authorized for.
-header('Cache-Control: private, max-age=0, must-revalidate');
-header('X-Content-Type-Options: nosniff');
+// Phase 27: ?thumb=1 (used by the timeline's memory-card rail and by the
+// media picker's "kept file" tiles) asks for a small, cached, re-encoded
+// preview instead of the original — the card was previously downloading
+// and decoding the full original upload (which can be several MB straight
+// off a phone camera) just to show a ~150px tile. Falls back to the
+// original file untouched if it isn't an image, or if generation fails
+// for any reason. The full-resolution original is still what the opened
+// memory viewer (and any non-image file) serves.
+$servePath = $path;
+$mimeType = (string) $media['mime_type'];
+if (isset($_GET['thumb'])) {
+    $thumbPath = ensure_media_thumbnail((string) $media['file_path'], MEDIA_THUMB_MAX_DIMENSION);
+    if ($thumbPath !== null) {
+        $servePath = $thumbPath;
+        $mimeType = 'image/jpeg';
+    }
+}
 
-readfile($path);
+// This content is access-controlled per request (the can_view_media()
+// check above) — `private` so no shared cache serves it to anyone but the
+// person this specific request was authorized for, but otherwise safe to
+// cache aggressively: a media row's file is immutable once created (see
+// send_cacheable_file()'s own comment in includes/media.php).
+send_cacheable_file($servePath, $mimeType);

@@ -216,7 +216,8 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   /* Phase 25: this overlay box is this app's one actual "pop-up" (the
      edit_person.php form rendered inside it, framed by this box) — gets
      the same red-accent border as the tree/timeline diagrams (Phase 19)
-     and the memory composer pop-ups (add_entry.php/edit_entry.php). */
+     and the memory composer pop-up (add_entry.php, which handles both
+     adding and — since Phase 27 — editing an existing memory). */
   .edit-popup-box { position:relative; width:min(96vw, 1020px); height:min(92vh, 820px); background:var(--paper); border:2px solid var(--accent); border-radius:16px; overflow:hidden; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); }
   .edit-popup-box iframe { width:100%; height:100%; border:none; display:block; }
   .edit-popup-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }

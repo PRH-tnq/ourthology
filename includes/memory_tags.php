@@ -41,8 +41,9 @@ function create_memory_tag(PDO $pdo, int $timelineEntryId, array $taggedPerson, 
 }
 
 /**
- * Reconcile an entry's tags with exactly $newPersonIds (edit_entry.php's
- * "who's tagged" checkbox list on save). Anyone dropped from the list has
+ * Reconcile an entry's tags with exactly $newPersonIds (add_entry.php's
+ * "who's tagged" checkbox list on save, when editing an existing memory).
+ * Anyone dropped from the list has
  * their tag row deleted outright — same as a decline, no trace kept,
  * including any note they'd already written. Anyone already tagged (at
  * any status) who's still in the list is left completely alone, so
@@ -74,12 +75,6 @@ function sync_memory_tags(PDO $pdo, int $timelineEntryId, array $newPersonIds, a
             create_memory_tag($pdo, $timelineEntryId, $personsById[$pid], $createdByUserId);
         }
     }
-}
-
-/** Everyone else in the family group who could be tagged on a memory belonging to $entryOwnerPersonId — excludes the owner themself (already on their own timeline by definition). */
-function taggable_people(array $familyGroupPersons, int $entryOwnerPersonId): array
-{
-    return array_values(array_filter($familyGroupPersons, fn ($p) => (int) $p['id'] !== $entryOwnerPersonId));
 }
 
 /**
@@ -114,7 +109,7 @@ function fetch_approved_tags_for_entries(PDO $pdo, array $entryIds): array
     return $out;
 }
 
-/** Every tag (any status) currently on an entry, plus person_id => status/note — what edit_entry.php pre-checks its tag picker from. */
+/** Every tag (any status) currently on an entry, plus person_id => status/note — what add_entry.php pre-checks its tag picker from when editing an existing memory. */
 function fetch_tags_for_entry(PDO $pdo, int $timelineEntryId): array
 {
     $stmt = $pdo->prepare('SELECT person_id, status, note FROM memory_tags WHERE timeline_entry_id = :eid');

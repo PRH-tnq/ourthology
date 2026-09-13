@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
+require_once __DIR__ . '/includes/entries.php';
 
 require_login();
 $me = current_user_with_person();
@@ -18,27 +19,59 @@ $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
 $myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
 
-// Whose timeline this memory is being added to — defaults to yourself, but
-// an unclaimed person's profile can be picked instead (a "+ Add a memory
-// for them" link from edit_person.php, or the ?person_id= on this page's
-// own URL) since nobody is logged in as an unclaimed person to write it
-// themselves. person_is_editable_by() is the exact same "unclaimed, or
-// your own claimed record" rule Phase 10 already uses for editing a
-// person's own details — reused here so who may ADD a memory for someone
-// and who may EDIT that person's record are always the same people.
-$targetPersonId = filter_var($_GET['person_id'] ?? $_POST['target_person_id'] ?? $myPersonId, FILTER_VALIDATE_INT);
-if ($targetPersonId === false) {
-    http_response_code(400);
-    exit('Bad request.');
+// Phase 27: this one page now handles BOTH composing a brand-new memory
+// and editing an existing one — previously two separate pages/pop-ups
+// (add_entry.php and edit_entry.php) with their own diverging layouts and
+// a fair amount of duplicated logic. An entry_id (as a GET param when the
+// pop-up is opened, or a hidden POST field when it's saved) switches this
+// into edit mode; its absence is exactly the old add_entry.php behaviour.
+// edit_entry.php itself is now just a redirect to here, so any old
+// bookmark/link keeps working. See architecture.md's Phase 27 write-up.
+$entryId = filter_var($_GET['entry_id'] ?? $_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+$isEditing = $entryId !== false;
+$entry = null;
+
+if ($isEditing) {
+    $entryId = (int) $entryId;
+    // Same person_is_editable_by() ownership rule this page already
+    // applies to who may ADD a memory for someone — re-checked inside
+    // fetch_owned_entry() itself, not just trusted from a stale link: a
+    // memory can be edited by the person it belongs to, or by anyone
+    // managing an unclaimed person's profile.
+    $entry = fetch_owned_entry($pdo, $entryId, (int) $me['user_id'], $myGroup);
+    if ($entry === null) {
+        http_response_code(404);
+        exit("That entry doesn't exist or isn't yours to edit.");
+    }
+    $targetPersonId = (int) $entry['person_id'];
+} else {
+    // Whose timeline this memory is being added to — defaults to yourself,
+    // but an unclaimed person's profile can be picked instead (a "+ Add a
+    // memory for them" link from edit_person.php, or the ?person_id= on
+    // this page's own URL) since nobody is logged in as an unclaimed
+    // person to write it themselves. person_is_editable_by() is the exact
+    // same "unclaimed, or your own claimed record" rule Phase 10 already
+    // uses for editing a person's own details — reused here so who may ADD
+    // a memory for someone and who may EDIT that person's record are
+    // always the same people.
+    $targetPersonId = filter_var($_GET['person_id'] ?? $_POST['target_person_id'] ?? $myPersonId, FILTER_VALIDATE_INT);
+    if ($targetPersonId === false) {
+        http_response_code(400);
+        exit('Bad request.');
+    }
 }
+
 $targetPerson = person_row($pdo, (int) $targetPersonId);
 if ($targetPerson === null || (int) $targetPerson['family_group_id'] !== $myGroup
     || !person_is_editable_by($targetPerson, (int) $me['user_id'])) {
     http_response_code(403);
-    exit("You don't have permission to add a memory for that person.");
+    exit($isEditing
+        ? "You don't have permission to edit that memory."
+        : "You don't have permission to add a memory for that person.");
 }
 $targetPersonId = (int) $targetPerson['id'];
-$addingForSelf = $targetPersonId === $myPersonId;
+$targetIsSelf = $targetPersonId === $myPersonId;
+$targetName = person_display_name($targetPerson);
 
 // Who the "tag people in this memory" picker below offers — bounded to
 // anyone up to a grandparent or grandchild's generational distance from
@@ -58,6 +91,30 @@ foreach ($familyGraph['persons'] as $p) {
 }
 $taggablePeople = graph_people_within_generations($familyGraph, $targetPersonId);
 
+$currentTagIds = [];
+if ($isEditing) {
+    $currentTagIds = array_map(fn ($t) => (int) $t['person_id'], fetch_tags_for_entry($pdo, $entryId));
+    // Editing must never silently untag someone just because they fall
+    // outside the grandparent/grandchild radius the picker OFFERS for a
+    // NEW tag — anyone already tagged, at any distance, still needs to
+    // appear here (and stay checked) so saving the form without touching
+    // them leaves their tag exactly as it was.
+    $taggableIds = array_map(fn ($p) => (int) $p['id'], $taggablePeople);
+    foreach ($currentTagIds as $tid) {
+        if (!in_array($tid, $taggableIds, true) && isset($familyPersonsById[$tid])) {
+            $taggablePeople[] = $familyPersonsById[$tid];
+        }
+    }
+}
+
+// Existing attachments, when editing — the "kept vs. removed" set the
+// media picker below manages alongside any newly-added files.
+$existingMedia = $isEditing ? fetch_entry_media($pdo, $entryId) : [];
+$existingMediaById = [];
+foreach ($existingMedia as $m) {
+    $existingMediaById[(int) $m['id']] = $m;
+}
+
 $errors = [];
 $entryKind = 'memory'; // 'memory' or 'diary' — the only two choices shown to the user
 $title = '';
@@ -66,16 +123,36 @@ $occurredDay = '';
 $occurredMonth = '';
 $occurredYear = '';
 $visibility = 'private';
+$tagPersonIds = [];
+$displayMediaIds = [];
 
-// Coming from the timeline diagram (clicking a date on the arc) pre-fills
-// the date slots, so "click the timeline to add a memory" still works even
-// though the actual composer is this separate page rather than an inline one.
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['date'])) {
-    $prefill = DateTime::createFromFormat('Y-m-d', (string) $_GET['date']);
-    if ($prefill !== false) {
-        $occurredDay = $prefill->format('d');
-        $occurredMonth = $prefill->format('m');
-        $occurredYear = $prefill->format('Y');
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    if ($isEditing) {
+        // Fresh GET on an existing entry: prefill everything from storage.
+        $entryKind = $entry['entry_type'] === 'diary' ? 'diary' : 'memory';
+        $title = (string) ($entry['title'] ?? '');
+        $body = (string) ($entry['body'] ?? '');
+        if (!empty($entry['occurred_on'])) {
+            [$oy, $om, $od] = array_map('intval', explode('-', (string) $entry['occurred_on']));
+            $occurredDay = sprintf('%02d', $od);
+            $occurredMonth = sprintf('%02d', $om);
+            $occurredYear = (string) $oy;
+        }
+        $visibility = $entry['visibility'];
+        $tagPersonIds = $currentTagIds;
+        $displayMediaIds = array_keys($existingMediaById);
+    } elseif (isset($_GET['date'])) {
+        // Coming from the timeline diagram (clicking a date on the arc)
+        // pre-fills the date slots — only meaningful for a brand-new
+        // memory, so "click the timeline to add a memory" still works even
+        // though the actual composer is this separate page rather than an
+        // inline one.
+        $prefill = DateTime::createFromFormat('Y-m-d', (string) $_GET['date']);
+        if ($prefill !== false) {
+            $occurredDay = $prefill->format('d');
+            $occurredMonth = $prefill->format('m');
+            $occurredYear = $prefill->format('Y');
+        }
     }
 }
 
@@ -127,17 +204,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 
     // name="media[]" (multiple) means $_FILES['media'] is PHP's nested
     // per-field-array form — normalize it once here so the rest of this
-    // page just deals with a plain list of selected files.
+    // page just deals with a plain list of newly-selected files.
     $rawMediaField = is_array($_FILES['media'] ?? null)
         ? $_FILES['media']
         : ['name' => [], 'type' => [], 'tmp_name' => [], 'error' => [], 'size' => []];
     $selectedFiles = normalize_multi_file_upload($rawMediaField);
-    $hasFile = count($selectedFiles) > 0;
+    $hasNewFiles = count($selectedFiles) > 0;
 
-    // Never trust the submitted tag list blindly — only ids that are
-    // actually someone else in this family group (never the target
-    // themselves) survive; anything else can only get here via a
-    // tampered form, so it's silently dropped rather than erroring.
+    // Never trust the submitted "kept" id list blindly — only ids that are
+    // actually this entry's own existing media rows can ever be "kept";
+    // anything else is silently dropped rather than erroring, since it can
+    // only get here via a tampered form.
+    $keptExistingIds = [];
+    $removedExistingIds = [];
+    if ($isEditing) {
+        $submittedKeptIds = array_map('intval', array_filter(
+            (array) ($_POST['existing_media_ids'] ?? []),
+            fn ($v) => filter_var($v, FILTER_VALIDATE_INT) !== false
+        ));
+        $keptExistingIds = array_values(array_intersect($submittedKeptIds, array_keys($existingMediaById)));
+        $removedExistingIds = array_values(array_diff(array_keys($existingMediaById), $keptExistingIds));
+        if (count($keptExistingIds) + count($selectedFiles) > MEDIA_MAX_FILES_PER_ENTRY) {
+            $errors[] = 'Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files to one entry.';
+        }
+    }
+    $hasAnyMedia = $hasNewFiles || count($keptExistingIds) > 0;
+
+    // Same tampering guard for tags: only someone actually taggable on this
+    // entry (anyone else in the family group, per the bounded/union list
+    // above) survives.
     $submittedTagIds = array_map('intval', array_filter(
         (array) ($_POST['tag_person_ids'] ?? []),
         fn ($v) => filter_var($v, FILTER_VALIDATE_INT) !== false
@@ -148,63 +243,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     if ($entryKind === 'diary' && $body === '') {
         $errors[] = 'Write something for a diary entry.';
     }
-    if ($entryKind === 'memory' && $body === '' && !$hasFile) {
-        $errors[] = 'Write something for a memory, or attach a photo, video, or document (or a mix).';
+    if ($entryKind === 'memory' && $body === '' && !$hasAnyMedia) {
+        $errors[] = $isEditing
+            ? 'Write something for a memory, or keep or attach a photo, video, or document.'
+            : 'Write something for a memory, or attach a photo, video, or document (or a mix).';
     }
 
     if (!$errors) {
         try {
             $pdo->beginTransaction();
 
-            // Upload every attached file (if any) BEFORE inserting the entry
-            // row, so that for a "memory" we can look at what was actually
-            // uploaded (their real, sniffed content types) and record it as
-            // a photo or video entry accordingly. A diary entry keeps its
-            // own type regardless of any attachment. store_uploaded_media_files()
-            // is all-or-nothing across the whole batch (see includes/media.php).
-            // Filed under the memory's OWNER (the target person), not
-            // necessarily whoever's actually clicking "save" — matters once
-            // someone else is adding this for an unclaimed person.
-            $storedList = $hasFile ? store_uploaded_media_files($rawMediaField, $targetPersonId) : [];
+            // Upload every newly-attached file BEFORE touching any row, so
+            // a bad file in the batch is caught (and, via
+            // store_uploaded_media_files()'s own all-or-nothing cleanup,
+            // leaves nothing new written to disk) before any existing file
+            // is actually deleted below, and before the entry itself is
+            // inserted/updated.
+            $storedList = $hasNewFiles ? store_uploaded_media_files($rawMediaField, $targetPersonId) : [];
 
             if ($entryKind === 'diary') {
                 $dbEntryType = 'diary';
-            } elseif ($storedList) {
+            } else {
+                // entry_type only ever distinguishes "diary" from everything
+                // else in practice (see Phase 4) — photo/video/note beyond
+                // that aren't read anywhere else, so a mixed final set (kept
+                // existing files plus any newly-added ones) just needs
+                // *some* sensible label, picked by priority (video, then
+                // photo, then note) rather than a new enum value, keeping
+                // this the same deliberately-unmigrated
+                // ENUM('note','photo','video','diary') column from Phase 4.
                 $hasVideo = false;
                 $hasPhoto = false;
+                foreach ($keptExistingIds as $kid) {
+                    $mime = $existingMediaById[$kid]['mime_type'];
+                    $hasVideo = $hasVideo || str_starts_with($mime, 'video/');
+                    $hasPhoto = $hasPhoto || str_starts_with($mime, 'image/');
+                }
                 foreach ($storedList as $s) {
                     $hasVideo = $hasVideo || str_starts_with($s['mime_type'], 'video/');
                     $hasPhoto = $hasPhoto || str_starts_with($s['mime_type'], 'image/');
                 }
-                // entry_type only ever distinguishes "diary" from everything
-                // else in practice (see Phase 4) — photo/video/note beyond
-                // that aren't read anywhere else, so a mixed or document-only
-                // attachment set just needs *some* sensible label, picked by
-                // priority (video, then photo, then note) rather than a new
-                // enum value, keeping this the same deliberately-unmigrated
-                // ENUM('note','photo','video','diary') column from Phase 4.
                 $dbEntryType = $hasVideo ? 'video' : ($hasPhoto ? 'photo' : 'note');
-            } else {
-                $dbEntryType = 'note';
             }
 
-            $stmt = $pdo->prepare(
-                'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
-                 VALUES (:pid, :type, :title, :body, :occurred, :vis, :uid)'
-            );
-            $stmt->execute([
-                'pid'      => $targetPersonId,
-                'type'     => $dbEntryType,
-                'title'    => $title !== '' ? $title : null,
-                'body'     => $body !== '' ? $body : null,
-                'occurred' => $occurredOnValue,
-                'vis'      => $visibility,
-                'uid'      => $me['user_id'],
-            ]);
-            $entryId = (int) $pdo->lastInsertId();
+            if ($isEditing) {
+                // Ownership re-checked in the WHERE clause itself, not just
+                // by having already loaded the row above — the same
+                // defensive pattern edit_person.php's mutating actions use.
+                $pdo->prepare(
+                    'UPDATE timeline_entries
+                     SET entry_type = :type, title = :title, body = :body,
+                         occurred_on = :occurred, visibility = :vis
+                     WHERE id = :id AND person_id = :pid'
+                )->execute([
+                    'type'     => $dbEntryType,
+                    'title'    => $title !== '' ? $title : null,
+                    'body'     => $body !== '' ? $body : null,
+                    'occurred' => $occurredOnValue,
+                    'vis'      => $visibility,
+                    'id'       => $entryId,
+                    'pid'      => $targetPersonId,
+                ]);
 
-            foreach ($tagPersonIds as $tagId) {
-                create_memory_tag($pdo, $entryId, $familyPersonsById[$tagId], (int) $me['user_id']);
+                sync_memory_tags($pdo, $entryId, $tagPersonIds, $familyPersonsById, (int) $me['user_id']);
+
+                if ($removedExistingIds) {
+                    foreach ($removedExistingIds as $rid) {
+                        delete_media_file($existingMediaById[$rid]['file_path']);
+                    }
+                    $placeholders = implode(',', array_fill(0, count($removedExistingIds), '?'));
+                    $pdo->prepare("DELETE FROM media WHERE timeline_entry_id = ? AND id IN ($placeholders)")
+                        ->execute(array_merge([$entryId], $removedExistingIds));
+                }
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
+                     VALUES (:pid, :type, :title, :body, :occurred, :vis, :uid)'
+                );
+                $stmt->execute([
+                    'pid'      => $targetPersonId,
+                    'type'     => $dbEntryType,
+                    'title'    => $title !== '' ? $title : null,
+                    'body'     => $body !== '' ? $body : null,
+                    'occurred' => $occurredOnValue,
+                    'vis'      => $visibility,
+                    'uid'      => $me['user_id'],
+                ]);
+                $entryId = (int) $pdo->lastInsertId();
+
+                foreach ($tagPersonIds as $tagId) {
+                    create_memory_tag($pdo, $entryId, $familyPersonsById[$tagId], (int) $me['user_id']);
+                }
             }
 
             if ($storedList) {
@@ -225,7 +354,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             }
 
             $pdo->commit();
-            header('Location: /timeline.php' . ($addingForSelf ? '' : '?person_id=' . $targetPersonId));
+            header('Location: /timeline.php' . ($targetIsSelf ? '' : '?person_id=' . $targetPersonId));
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();
@@ -236,7 +365,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             $errors[] = 'Something went wrong saving that entry. Please try again.';
         }
     }
+
+    // On a failed submission, the media grid re-renders with whatever was
+    // actually kept/removed in THIS attempt (new file selections can't be
+    // restored — browsers won't let a page set a file input's value for
+    // security reasons) rather than snapping back to the original set.
+    $displayMediaIds = $isEditing ? $keptExistingIds : [];
 }
+
+/** Extension (uppercased, no dot) parsed from a stored file_path — used as the tile badge for an existing document. */
+function ourthology_media_ext(string $filePath): string
+{
+    $m = [];
+    return preg_match('/\.([a-z0-9]+)$/i', $filePath, $m) ? strtoupper($m[1]) : 'FILE';
+}
+
+$existingForDisplay = [];
+foreach ($displayMediaIds as $id) {
+    if (!isset($existingMediaById[$id])) {
+        continue;
+    }
+    $m = $existingMediaById[$id];
+    $mime = (string) $m['mime_type'];
+    $kind = str_starts_with($mime, 'video/') ? 'video' : (str_starts_with($mime, 'image/') ? 'image' : 'document');
+    $existingForDisplay[] = [
+        'id'    => (int) $m['id'],
+        'kind'  => $kind,
+        'url'   => '/media.php?id=' . (int) $m['id'],
+        'badge' => ourthology_media_ext((string) $m['file_path']),
+    ];
+}
+$existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHES);
 ?>
 <!doctype html>
 <html lang="en">
@@ -245,7 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Add a memory — ourthology.com</title>
+<title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
 <link rel="stylesheet" href="/styles.css?v=20">
 <style>
   :root { --accent-bg: #F1DCDC; }
@@ -253,7 +412,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
      small, focused box for one action), so it gets the same red-accent
      border treatment as the tree/timeline diagrams (Phase 19) and the
      tree's own edit-person pop-up overlay — a bit more emphasis than the
-     plain --line border every other page's .card uses. */
+     plain --line border every other page's .card uses. Phase 27: this is
+     now also the EDIT form (see the top of this file) — previously
+     edit_entry.php had its own, separately-maintained copy of this whole
+     card/style block that had drifted out of sync (an older single-column
+     layout, a narrower max-width, no equal-height columns) — merged into
+     one so there's only one design to keep current. */
   .card { border:2px solid var(--accent); padding:26px 32px; }
   textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); resize:vertical; }
   .radio-row { display:flex; gap:16px; margin-top:8px; font-size:14px; }
@@ -264,7 +428,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 
   /* Multi-file attach widget — matching the prototype's own drag-and-drop
      "photo-drop" composer widget: an empty-state dropzone that turns into a
-     grid of small thumbnails/icons once one or more files are attached. */
+     grid of small thumbnails/icons once one or more files are attached.
+     When editing, the grid can start pre-populated with the entry's
+     existing files (see the "kept" array in the script below). */
   .photo-drop { border:2px dashed var(--line); border-radius:14px; padding:16px; cursor:pointer; background:var(--paper-2); transition:border-color .15s ease, background .15s ease; }
   .photo-drop:hover, .photo-drop.dragover { border-color:var(--accent); background:var(--accent-bg); }
   .media-picker-empty { display:flex; align-items:center; gap:13px; }
@@ -355,8 +521,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
       </div>
     </div>
 
-    <?php if (!$addingForSelf): ?>
-      <p class="for-banner">Adding a memory for <strong><?= htmlspecialchars(person_display_name($targetPerson), ENT_QUOTES) ?></strong> (not yet claimed).</p>
+    <?php if (!$targetIsSelf): ?>
+      <p class="for-banner"><?= $isEditing ? 'Editing a memory belonging to' : 'Adding a memory for' ?> <strong><?= htmlspecialchars($targetName, ENT_QUOTES) ?></strong> (not yet claimed).</p>
     <?php endif; ?>
 
     <?php if ($errors): ?>
@@ -369,7 +535,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 
     <form method="post" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
-      <input type="hidden" name="target_person_id" value="<?= $targetPersonId ?>">
+      <?php if ($isEditing): ?>
+        <input type="hidden" name="entry_id" value="<?= $entryId ?>">
+      <?php else: ?>
+        <input type="hidden" name="target_person_id" value="<?= $targetPersonId ?>">
+      <?php endif; ?>
+      <div id="keptMediaInputs"></div>
 
       <label>Type</label>
       <div class="radio-row">
@@ -381,7 +552,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         <div class="entry-col">
           <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 10 files max)</span></label>
           <div class="photo-drop media-picker" id="photoDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
-            <div class="media-picker-empty" id="photoDropEmpty">
+            <div class="media-picker-empty" id="photoDropEmpty" hidden>
               <div class="thumb">
                 <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
               </div>
@@ -438,7 +609,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
               <?php foreach ($taggablePeople as $tp): ?>
                 <?php $tpId = (int) $tp['id']; ?>
                 <label>
-                  <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds ?? [], true) ? 'checked' : '' ?>>
+                  <input type="checkbox" name="tag_person_ids[]" value="<?= $tpId ?>" <?= in_array($tpId, $tagPersonIds, true) ? 'checked' : '' ?>>
                   <?= htmlspecialchars(person_display_name($tp), ENT_QUOTES) ?>
                   <?= $tp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
                 </label>
@@ -450,9 +621,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         </div>
       </div>
 
-      <button type="submit" class="btn-primary" style="margin-top:22px;">Save entry</button>
+      <button type="submit" class="btn-primary" style="margin-top:22px;"><?= $isEditing ? 'Save changes' : 'Save entry' ?></button>
     </form>
-    <p class="foot-link"><a href="/timeline.php<?= $addingForSelf ? '' : '?person_id=' . $targetPersonId ?>">Back to <?= $addingForSelf ? 'my' : htmlspecialchars(person_display_name($targetPerson), ENT_QUOTES) . "'s" ?> timeline</a></p>
+    <p class="foot-link"><a href="/timeline.php<?= $targetIsSelf ? '' : '?person_id=' . $targetPersonId ?>"><?= $isEditing ? 'Cancel' : ('Back to ' . ($targetIsSelf ? 'my' : htmlspecialchars($targetName, ENT_QUOTES) . "'s") . ' timeline') ?></a></p>
   </div>
   <script>
   (function () {
@@ -463,6 +634,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     var grid = document.getElementById('photoGrid');
     var input = document.getElementById('photoInput');
     var errorEl = document.getElementById('mediaError');
+    var keptInputsContainer = document.getElementById('keptMediaInputs');
+
+    // Two backing lists merge into one visual grid: "kept" existing
+    // server-side files (each just an id + display info — no File object,
+    // since it's already stored; empty when adding a brand-new memory) and
+    // "pending" newly-picked files (real File objects, kept in sync with
+    // the real hidden <input> below via DataTransfer so a removed one is
+    // truly excluded on submit).
+    var kept = <?= $existingForDisplayJson ?>;
     var pending = []; // { file, kind, url }
 
     var VIDEO_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M8.3 7.6v4.8l4.4-2.4-4.4-2.4Z" fill="currentColor" stroke="none"/></svg>';
@@ -478,12 +658,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
       var m = /\.([a-z0-9]+)$/i.exec(name || '');
       return m ? m[1].toUpperCase() : 'FILE';
     }
-    function kindOf(file) {
+    function kindOfFile(file) {
       if (file.type.indexOf('image/') === 0) return 'image';
       if (file.type.indexOf('video/') === 0) return 'video';
       return 'document';
     }
-    function tileInnerHtml(item) {
+    function existingTileHtml(item) {
+      if (item.kind === 'image') return '<img src="' + item.url + '&thumb=1" alt="" loading="lazy" decoding="async">';
+      if (item.kind === 'video') return VIDEO_ICON + '<span class="media-tile-badge">Video</span>';
+      return DOC_ICON + '<span class="media-tile-badge">' + escapeHtml(item.badge) + '</span>';
+    }
+    function pendingTileHtml(item) {
       if (item.kind === 'image') return '<img src="' + item.url + '" alt="">';
       if (item.kind === 'video') return VIDEO_ICON + '<span class="media-tile-badge">Video</span>';
       return DOC_ICON + '<span class="media-tile-name">' + escapeHtml(item.file.name) + '</span><span class="media-tile-badge">' + escapeHtml(extLabel(item.file.name)) + '</span>';
@@ -497,8 +682,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
       pending.forEach(function (item) { dt.items.add(item.file); });
       input.files = dt.files;
     }
+    function syncKeptInputs() {
+      keptInputsContainer.innerHTML = kept.map(function (item) {
+        return '<input type="hidden" name="existing_media_ids[]" value="' + item.id + '">';
+      }).join('');
+    }
+    function totalCount() { return kept.length + pending.length; }
     function render() {
-      if (!pending.length) {
+      syncKeptInputs();
+      if (!totalCount()) {
         emptyState.hidden = false;
         grid.hidden = true;
         grid.innerHTML = '';
@@ -506,12 +698,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
       }
       emptyState.hidden = true;
       grid.hidden = false;
-      var tiles = pending.map(function (item, i) {
+      var tiles = kept.map(function (item, i) {
         var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
-        return '<div class="pick-tile' + cls + '" data-idx="' + i + '">' + tileInnerHtml(item) +
-          '<button type="button" class="pick-remove" data-idx="' + i + '" aria-label="Remove">×</button></div>';
+        return '<div class="pick-tile' + cls + '" data-existing-idx="' + i + '">' + existingTileHtml(item) +
+          '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button></div>';
       }).join('');
-      if (pending.length < MAX_FILES) {
+      tiles += pending.map(function (item, i) {
+        var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
+        return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + pendingTileHtml(item) +
+          '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">×</button></div>';
+      }).join('');
+      if (totalCount() < MAX_FILES) {
         tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + ADD_ICON + '</div>';
       }
       grid.innerHTML = tiles;
@@ -521,16 +718,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
       if (!incoming.length) return;
       showError('');
       for (var i = 0; i < incoming.length; i++) {
-        if (pending.length >= MAX_FILES) { showError('You can attach at most ' + MAX_FILES + ' files to one entry.'); break; }
+        if (totalCount() >= MAX_FILES) { showError('You can attach at most ' + MAX_FILES + ' files to one entry.'); break; }
         var f = incoming[i];
         if (f.size > MAX_BYTES) { showError('"' + f.name + '" is larger than 25MB and was skipped.'); continue; }
-        var kind = kindOf(f);
+        var kind = kindOfFile(f);
         pending.push({ file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null });
       }
       syncInput();
       render();
     }
-    function removeAt(idx) {
+    function removeExistingAt(idx) {
+      kept.splice(idx, 1);
+      render();
+    }
+    function removePendingAt(idx) {
       var item = pending[idx];
       if (item && item.url) URL.revokeObjectURL(item.url);
       pending.splice(idx, 1);
@@ -540,7 +741,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
 
     dropzone.addEventListener('click', function (e) {
       var removeBtn = e.target.closest('.pick-remove');
-      if (removeBtn) { e.stopPropagation(); removeAt(parseInt(removeBtn.getAttribute('data-idx'), 10)); return; }
+      if (removeBtn) {
+        e.stopPropagation();
+        if (removeBtn.hasAttribute('data-existing-idx')) {
+          removeExistingAt(parseInt(removeBtn.getAttribute('data-existing-idx'), 10));
+        } else {
+          removePendingAt(parseInt(removeBtn.getAttribute('data-pending-idx'), 10));
+        }
+        return;
+      }
       if (e.target.closest('.pick-tile') && !e.target.closest('.pick-tile--add')) return;
       input.click();
     });

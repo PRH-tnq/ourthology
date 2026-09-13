@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($action === 'save_tag_note') {
         // Anyone with an approved tag on a memory may write/edit their OWN
         // note about it — never the memory's title/body/media, which stay
-        // the creator's alone to change (see edit_entry.php). The UPDATE's
+        // the creator's alone to change (see add_entry.php's edit mode). The UPDATE's
         // own WHERE clause is the entire permission check: it only ever
         // touches a row that is both this memory and an APPROVED tag
         // belonging to me, so there's nothing to separately verify first.
@@ -189,7 +189,7 @@ foreach ($entries as $entry) {
     // while I'm looking at it on my own "My timeline" page (only its owning
     // person's own account holder, or anyone managing that person's
     // still-unclaimed profile, may touch the memory itself; see
-    // edit_entry.php).
+    // add_entry.php's edit mode).
     $entryCanEdit = (int) $entry['owner_family_group'] === $myGroup
         && person_is_editable_by(['claimed_by_user_id' => $entry['owner_claimed_by']], (int) $me['user_id']);
 
@@ -272,10 +272,26 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   }
   body { align-items: flex-start; }
   .wide { max-width: 1220px; }
-  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
-  .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
+  /* Phase 27: the brand row and the "who's signed in" strip both used to
+     leave the page's top-right corner empty — now the viewed person's
+     profile picture sits there instead, and "Signed in as" moves down to
+     sit alongside the nav buttons rather than stranded on its own on the
+     far right. */
+  .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+  .header-avatar, .header-avatar-placeholder { width:56px; height:56px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); flex:none; }
+  .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:22px; color:var(--ink-faint); }
+  @media (max-width: 620px) {
+    .header-avatar, .header-avatar-placeholder { width:44px; height:44px; font-size:18px; }
+    /* The vertical divider before "Signed in as" only makes sense when it
+       sits on the same line as the nav buttons — once it wraps to its own
+       line on a narrow screen, a lone leading bar with nothing beside it
+       looks like a stray mark, so it becomes a top divider instead. */
+    .whoami { margin-left:0; padding-left:0; border-left:none; padding-top:8px; border-top:1px solid var(--line); width:100%; }
+  }
+  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 18px 0 4px; }
+  .nav-links { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
-  .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); }
+  .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
   .whoami .linklet { font-size:12.5px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; font-family:inherit; }
@@ -456,30 +472,38 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 </head>
 <body>
   <div class="card wide">
-    <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
-      <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
-        <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
-        <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
-        <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
-        <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1" stroke-linecap="round"/>
-        <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.2" stroke-linecap="round"/>
-        <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
-        <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
-      </svg>
-      <div class="brand-text" style="display:flex;flex-direction:column;">
-        <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
-        <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+    <div class="page-head">
+      <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
+        <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
+          <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
+          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
+          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
+          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1" stroke-linecap="round"/>
+          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-text" style="display:flex;flex-direction:column;">
+          <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
+          <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+        </div>
       </div>
+
+      <?php if (!empty($target['avatar_path'])): ?>
+        <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
+      <?php else: ?>
+        <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
+      <?php endif; ?>
     </div>
 
     <div class="nav">
       <div class="nav-links">
         <a href="/tree.php" id="tourMyTree">My tree</a>
         <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
-      </div>
-      <div class="whoami">
-        Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
-        <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+        <span class="whoami">
+          Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
+          <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
+        </span>
       </div>
     </div>
 
@@ -1002,7 +1026,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     }
 
     function mediaTileHtml(m) {
-      if (m.kind === "image") return '<img src="' + m.url + '" alt="">';
+      // Phase 27: the small rail card only ever needs a preview-sized
+      // image, never the full original upload (which can be several MB
+      // straight off a phone camera) — &thumb=1 asks media.php for a
+      // cached, resized copy instead (see includes/media.php's
+      // ensure_media_thumbnail()). loading="lazy" also defers fetching
+      // any card that's scrolled out of view. The full-resolution image
+      // is still used in the opened-memory viewer below.
+      if (m.kind === "image") return '<img src="' + m.url + '&thumb=1" alt="" loading="lazy" decoding="async">';
       if (m.kind === "video") return '<div class="media-tile">' + VIDEO_ICON + '<span class="media-tile-badge">Video</span></div>';
       return '<div class="media-tile">' + DOC_ICON + '<span class="media-tile-badge">File</span></div>';
     }
@@ -1533,7 +1564,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerDeleteForm.hidden = false;
         viewerDeleteEntryId.value = e.id;
         viewerEditLink.hidden = false;
-        viewerEditLink.href = "/edit_entry.php?entry_id=" + encodeURIComponent(e.id);
+        // Phase 27: edit_entry.php was merged into add_entry.php (an
+        // entry_id switches it into edit mode) — linking straight there
+        // skips a pointless redirect hop edit_entry.php would otherwise add
+        // to every "Edit" click.
+        viewerEditLink.href = "/add_entry.php?entry_id=" + encodeURIComponent(e.id);
       } else {
         viewerDeleteForm.hidden = true;
         viewerEditLink.hidden = true;

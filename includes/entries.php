@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/memory_tags.php';
+require_once __DIR__ . '/graph.php'; // person_is_editable_by(), used by fetch_owned_entry() below
 
 /**
  * Timeline entries for one person, filtered by what the viewer is allowed
@@ -66,4 +67,43 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
     }
 
     return $entries;
+}
+
+/**
+ * One timeline entry, plus enough of its owning person to decide whether
+ * $myUserId may edit it — the same person_is_editable_by() rule
+ * add_entry.php uses for who may ADD a memory (a memory can be edited by
+ * the person it belongs to, or by anyone managing an unclaimed person's
+ * profile). Returns null if the entry doesn't exist, belongs to a
+ * different family group, or isn't editable by this user — one check,
+ * used by add_entry.php's edit mode (Phase 27; formerly edit_entry.php's
+ * own fetch_owned_entry()).
+ */
+function fetch_owned_entry(PDO $pdo, int $entryId, int $myUserId, int $myFamilyGroup): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT te.id, te.person_id, te.entry_type, te.title, te.body, te.occurred_on, te.visibility,
+                p.claimed_by_user_id, p.family_group_id
+         FROM timeline_entries te
+         JOIN persons p ON p.id = te.person_id
+         WHERE te.id = :id'
+    );
+    $stmt->execute(['id' => $entryId]);
+    $row = $stmt->fetch() ?: null;
+    if ($row === null || (int) $row['family_group_id'] !== $myFamilyGroup
+        || !person_is_editable_by($row, $myUserId)) {
+        return null;
+    }
+    return $row;
+}
+
+/** All media rows for an entry, in the order they were attached. */
+function fetch_entry_media(PDO $pdo, int $entryId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT id, file_path, mime_type, byte_size, width, height
+         FROM media WHERE timeline_entry_id = :eid ORDER BY id'
+    );
+    $stmt->execute(['eid' => $entryId]);
+    return $stmt->fetchAll();
 }
