@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php';
+require_once __DIR__ . '/includes/custom_audience.php';
 
 require_login();
 $me = current_user_with_person();
@@ -90,6 +91,14 @@ foreach ($familyGraph['persons'] as $p) {
     $familyPersonsById[(int) $p['id']] = $p;
 }
 $taggablePeople = graph_people_within_generations($familyGraph, $targetPersonId);
+
+// Phase 33: whether the "Custom" visibility option currently has anyone
+// on it — the list itself lives on edit_person.php's "Account Settings"
+// tab, keyed to $targetPersonId (whoever this memory belongs to), not to
+// the memory. Used below only to warn if it's empty; the actual gate on
+// who can see a Custom entry is enforced in includes/entries.php and
+// includes/media.php regardless of whether this warning was shown.
+$customAudienceEmpty = empty(fetch_custom_audience_ids($pdo, $targetPersonId));
 
 $currentTagIds = [];
 if ($isEditing) {
@@ -182,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     if (!in_array($entryKind, ['memory', 'diary'], true)) {
         $errors[] = 'Choose a valid entry type.';
     }
-    if (!in_array($visibility, ['private', 'public'], true)) {
+    if (!in_array($visibility, ['private', 'public', 'custom'], true)) {
         $errors[] = 'Choose a valid visibility.';
     }
 
@@ -601,7 +610,18 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
               <input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>>
               <span>Public<span class="vis-caption">My whole connected family</span></span>
             </label>
+            <label>
+              <input type="radio" name="visibility" value="custom" <?= $visibility === 'custom' ? 'checked' : '' ?>>
+              <span>Custom<span class="vis-caption">Just who you've chosen</span></span>
+            </label>
           </div>
+          <?php if ($customAudienceEmpty): ?>
+            <p id="customAudienceEmptyNotice" class="tag-picker-empty" style="margin-top:8px;" hidden>
+              Nobody's chosen for Custom yet — add people in
+              <a href="/edit_person.php?person_id=<?= $targetPersonId ?>&amp;tab=account">Account Settings</a>
+              first, or a memory set to Custom won't be visible to anyone but you.
+            </p>
+          <?php endif; ?>
 
           <?php if ($taggablePeople): ?>
             <label style="margin-top:14px;">Tag people in this memory <span style="text-transform:none;font-weight:400;">(anyone from a grandparent down to a 2× great-grandchild's distance in the tree — a claimed person must approve before it shows on their timeline; an unclaimed one is added right away)</span></label>
@@ -796,11 +816,18 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   // for one that doesn't, toggling the same look with a plain class.
   (function () {
     var labels = document.querySelectorAll('.visibility-toggle label');
+    var customNotice = document.getElementById('customAudienceEmptyNotice');
     function sync() {
+      var checkedInput = null;
       labels.forEach(function (l) {
         var input = l.querySelector('input');
-        l.classList.toggle('is-checked', !!(input && input.checked));
+        var isChecked = !!(input && input.checked);
+        l.classList.toggle('is-checked', isChecked);
+        if (isChecked) checkedInput = input;
       });
+      if (customNotice) {
+        customNotice.hidden = !(checkedInput && checkedInput.value === 'custom');
+      }
     }
     labels.forEach(function (l) {
       l.querySelector('input').addEventListener('change', sync);

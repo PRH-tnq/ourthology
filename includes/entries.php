@@ -4,14 +4,17 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/memory_tags.php';
 require_once __DIR__ . '/graph.php'; // person_is_editable_by(), used by fetch_owned_entry() below
+require_once __DIR__ . '/custom_audience.php'; // the 'custom' visibility clause below (Phase 33)
 
 /**
  * Timeline entries for one person, filtered by what the viewer is allowed
  * to see: the owner (or anyone who can manage an unclaimed profile — see
  * timeline.php's $canManage) sees everything, anyone else in the same
- * family group sees only visibility='public', and nobody else sees
- * anything (callers should reject the request entirely before calling
- * this in that case).
+ * family group sees visibility='public' plus any visibility='custom'
+ * entry whose OWNING person has put $viewerPersonId on their own
+ * custom_memory_audience list (Phase 33 — see includes/custom_audience.php),
+ * and nobody else sees anything (callers should reject the request
+ * entirely before calling this in that case).
  *
  * Besides $targetPersonId's own entries, this also pulls in any OTHER
  * person's memory that $targetPersonId has an APPROVED tag on (Phase 17)
@@ -23,15 +26,30 @@ require_once __DIR__ . '/graph.php'; // person_is_editable_by(), used by fetch_o
  * may edit it — that can differ from $targetPersonId's own claim status
  * once tagged-in entries are mixed in.
  */
-function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsOwner): array
+function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsOwner, int $viewerPersonId): array
 {
-    $visClause = $viewerIsOwner ? '' : " AND te.visibility = 'public'";
+    if ($viewerIsOwner) {
+        $visClause1 = '';
+        $visClause2 = '';
+        $params = ['pid1' => $targetPersonId, 'pid2' => $targetPersonId];
+    } else {
+        // Named per occurrence (viewer1/viewer2), not reused, matching this
+        // codebase's usual style for a value bound more than once in one
+        // query (see e.g. the relationships query in edit_person.php).
+        $visClause1 = " AND (te.visibility = 'public' OR (te.visibility = 'custom' AND EXISTS (
+            SELECT 1 FROM custom_memory_audience ca WHERE ca.person_id = te.person_id AND ca.member_person_id = :viewer1
+        )))";
+        $visClause2 = " AND (te.visibility = 'public' OR (te.visibility = 'custom' AND EXISTS (
+            SELECT 1 FROM custom_memory_audience ca WHERE ca.person_id = te.person_id AND ca.member_person_id = :viewer2
+        )))";
+        $params = ['pid1' => $targetPersonId, 'pid2' => $targetPersonId, 'viewer1' => $viewerPersonId, 'viewer2' => $viewerPersonId];
+    }
     $sql = "SELECT te.id, te.entry_type, te.title, te.body, te.occurred_on, te.visibility, te.created_at,
                    te.person_id AS owner_person_id, op.claimed_by_user_id AS owner_claimed_by,
                    op.family_group_id AS owner_family_group
             FROM timeline_entries te
             JOIN persons op ON op.id = te.person_id
-            WHERE te.person_id = :pid1 $visClause
+            WHERE te.person_id = :pid1 $visClause1
             UNION
             SELECT te.id, te.entry_type, te.title, te.body, te.occurred_on, te.visibility, te.created_at,
                    te.person_id AS owner_person_id, op.claimed_by_user_id AS owner_claimed_by,
@@ -39,11 +57,11 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
             FROM timeline_entries te
             JOIN persons op ON op.id = te.person_id
             JOIN memory_tags mt ON mt.timeline_entry_id = te.id
-            WHERE mt.person_id = :pid2 AND mt.status = 'approved' $visClause
+            WHERE mt.person_id = :pid2 AND mt.status = 'approved' $visClause2
             ORDER BY COALESCE(occurred_on, DATE(created_at)) DESC, id DESC";
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute(['pid1' => $targetPersonId, 'pid2' => $targetPersonId]);
+    $stmt->execute($params);
     $entries = $stmt->fetchAll();
 
     if (!$entries) {

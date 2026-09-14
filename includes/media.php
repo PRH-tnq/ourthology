@@ -467,6 +467,16 @@ function can_view_media(array $media, int $viewerPersonId, int $viewerFamilyGrou
     if ($media['visibility'] === 'public' && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId) {
         return true;
     }
+    // Phase 33: 'custom' is narrower than 'public' — same family group
+    // isn't enough on its own, the viewer also has to be on the entry's
+    // OWNING person's own custom_memory_audience list (edited on that
+    // person's edit_person.php "Account Settings" tab).
+    if ($media['visibility'] === 'custom' && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId) {
+        require_once __DIR__ . '/custom_audience.php';
+        if (person_in_custom_audience($pdo, (int) $media['owner_person_id'], $viewerPersonId)) {
+            return true;
+        }
+    }
     // A memory tagged-and-approved for the viewer shows on their own
     // timeline (Phase 17) even when it's marked private — the approval
     // itself is what grants them access, same as it would be their own

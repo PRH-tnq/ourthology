@@ -125,7 +125,12 @@ CREATE TABLE claim_tokens (
 -- timeline_entries: memories/diary entries, each owned by one person.
 -- visibility='public' means visible to the owner's whole family_group_id
 -- (per the "whole connected graph" decision); 'private' means visible
--- only to the owning user until the (not-yet-built) death trigger fires.
+-- only to the owning user until the (not-yet-built) death trigger fires;
+-- 'custom' (Phase 33) means visible only to whoever is on that SAME
+-- owning person's custom_memory_audience list below, wherever it's
+-- checked (fetch_entries_for_person() in includes/entries.php,
+-- can_view_media() in includes/media.php) — edited on edit_person.php's
+-- own "Account Settings" tab, not per memory.
 -- ---------------------------------------------------------------------
 CREATE TABLE timeline_entries (
   id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -134,7 +139,7 @@ CREATE TABLE timeline_entries (
   title               VARCHAR(255) NULL,
   body                TEXT NULL,
   occurred_on         DATE NULL,
-  visibility          ENUM('private','public') NOT NULL DEFAULT 'private',
+  visibility          ENUM('private','public','custom') NOT NULL DEFAULT 'private',
   created_by_user_id  INT UNSIGNED NOT NULL,
   created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -204,7 +209,30 @@ CREATE TABLE memory_tags (
   CONSTRAINT fk_tag_approving FOREIGN KEY (approving_user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------------------------------------------------------------
+-- custom_memory_audience (Phase 33): the audience list behind a memory's
+-- 'custom' visibility, above — one row per (person_id, member_person_id)
+-- pair. person_id is whoever the list belongs to (edited on their own
+-- edit_person.php "Account Settings" tab); member_person_id is one
+-- family member allowed to see person_id's memories whenever those are
+-- marked Custom. Never contains person_id itself as its own member (the
+-- owner can always see their own memories regardless of this list) —
+-- enforced both by chk_audience_distinct here and by
+-- set_custom_audience() in includes/custom_audience.php.
+-- ---------------------------------------------------------------------
+CREATE TABLE custom_memory_audience (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  person_id           INT UNSIGNED NOT NULL,
+  member_person_id    INT UNSIGNED NOT NULL,
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_audience_pair (person_id, member_person_id),
+  CONSTRAINT fk_audience_person FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE,
+  CONSTRAINT fk_audience_member FOREIGN KEY (member_person_id) REFERENCES persons(id) ON DELETE CASCADE,
+  CONSTRAINT chk_audience_distinct CHECK (person_id <> member_person_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE INDEX idx_persons_family_group ON persons(family_group_id);
+CREATE INDEX idx_audience_member ON custom_memory_audience(member_person_id);
 CREATE INDEX idx_entries_person_visibility ON timeline_entries(person_id, visibility);
 CREATE INDEX idx_rel_status ON relationships(status);
 CREATE INDEX idx_part_status ON partnerships(status);

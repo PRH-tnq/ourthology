@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/media.php';
+require_once __DIR__ . '/includes/custom_audience.php';
 
 require_login();
 $me = current_user_with_person();
@@ -31,6 +32,14 @@ unset($_SESSION['flash_edit_notice']);
 // action doesn't accidentally drop back out to the full-page layout.
 $popup = (($_GET['popup'] ?? $_POST['popup'] ?? '') === '1');
 $popupQS = $popup ? '&popup=1' : '';
+
+// Phase 33: which of the two tabs (Profile, Account Settings) is showing.
+// Every existing redirect below leaves this out, so a save/remove/add
+// action elsewhere on the Profile tab keeps landing back on it exactly
+// as before; only the new "Save Custom Memory Settings" action (below)
+// ever sends tab=account, so its own redirect lands back on Account
+// Settings instead of bouncing to Profile.
+$activeTab = (($_GET['tab'] ?? $_POST['tab'] ?? '') === 'account') ? 'account' : 'profile';
 
 $personIdRaw = $_GET['person_id'] ?? $_POST['person_id'] ?? '';
 $personIdFilter = filter_var($personIdRaw, FILTER_VALIDATE_INT);
@@ -335,6 +344,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'Something went wrong deleting that person. Please try again.';
             }
         }
+    } elseif ($action === 'update_custom_audience') {
+        // Phase 33: the "Custom Memory Settings" list on the Account
+        // Settings tab — whoever is checked here is the whole audience
+        // for any of THIS person's memories marked visibility='custom'
+        // (see add_entry.php's visibility picker and
+        // includes/custom_audience.php). Validated against the family
+        // group directly rather than trusting $graph, which isn't fetched
+        // until after this POST-handling block.
+        $chosenIds = array_map('intval', (array) ($_POST['audience_person_ids'] ?? []));
+        $validStmt = $pdo->prepare('SELECT id FROM persons WHERE family_group_id = :grp');
+        $validStmt->execute(['grp' => $myGroup]);
+        $validIds = array_map('intval', $validStmt->fetchAll(PDO::FETCH_COLUMN));
+        set_custom_audience($pdo, $personId, $chosenIds, $validIds);
+        $_SESSION['flash_edit_notice'] = 'Custom Memory Settings saved.';
+        header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
+        exit;
     }
 }
 
@@ -352,6 +377,18 @@ if ($personId !== null && isset($personsById[$personId])) {
     $person = $personsById[$personId];
     $canEdit = person_is_editable_by($person, $myUserId);
     $isClaimedByOther = !empty($person['claimed_by_user_id']) && !$canEdit;
+}
+
+// Phase 33: the Account Settings tab's "Custom Memory Settings" picker —
+// same generational bound (and the same reasoning: unbounded gets
+// unwieldy fast) as add_entry.php's own "tag people in this memory"
+// picker, anchored on the profile being edited rather than on whoever's
+// adding a memory, since it's THIS person's own memories the list gates.
+$customAudienceCandidates = [];
+$customAudienceSelectedIds = [];
+if ($person !== null) {
+    $customAudienceCandidates = graph_people_within_generations($graph, $personId);
+    $customAudienceSelectedIds = fetch_custom_audience_ids($pdo, $personId);
 }
 
 $rels = [];
@@ -539,6 +576,27 @@ if ($postedProfile) {
   .avatar-box form { display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; }
   .avatar-box input[type="file"] { font-size:12px; max-width:100%; }
   .avatar-box .btn-small { margin-top:2px; }
+
+  /* Phase 33: Profile / Account Settings tabs. Server-rendered from
+     $activeTab so the right panel shows immediately on load (including
+     right after the Account Settings save redirect) with no flash of the
+     wrong one before JS runs — the click handler below just toggles the
+     same classes/attribute without a page reload. */
+  .tabs-bar { display:flex; gap:4px; margin:18px 0 4px; border-bottom:1px solid var(--line); }
+  .tab-btn { font-size:14px; font-weight:600; padding:9px 16px; border:none; background:none; color:var(--ink-faint); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; font-family:inherit; }
+  .tab-btn:hover { color:var(--ink-soft); }
+  .tab-btn.is-active { color:var(--accent); border-bottom-color:var(--accent); }
+
+  /* The new tab's own 3-column form — deliberately a real fixed grid
+     (left/middle/right, each its own column) rather than the balanced
+     multi-column flow .edit-columns uses above, since "Custom Memory
+     Settings" is meant to sit specifically in the LEFT column, not
+     wherever a masonry layout happens to place it. */
+  .account-columns { display:grid; grid-template-columns:repeat(3, 1fr); gap:28px; margin-top:12px; }
+  .account-col { min-width:0; }
+  @media (max-width: 820px) {
+    .account-columns { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
@@ -614,6 +672,12 @@ if ($postedProfile) {
         </div>
       <?php endif; ?>
 
+      <div class="tabs-bar" role="tablist">
+        <button type="button" class="tab-btn <?= $activeTab === 'profile' ? 'is-active' : '' ?>" data-tab="profile">Profile</button>
+        <button type="button" class="tab-btn <?= $activeTab === 'account' ? 'is-active' : '' ?>" data-tab="account">Account Settings</button>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="profile" <?= $activeTab === 'profile' ? '' : 'hidden' ?>>
       <div class="edit-columns">
       <div class="edit-block">
       <h3 style="margin:4px 0 4px;">Profile</h3>
@@ -914,6 +978,46 @@ if ($postedProfile) {
       <?php endif; ?>
 
       </div>
+      </div>
+
+      <div class="tab-panel" data-tab-panel="account" <?= $activeTab === 'account' ? '' : 'hidden' ?>>
+      <div class="account-columns">
+        <div class="account-col">
+          <h3 style="margin:4px 0 4px;">Custom Memory Settings</h3>
+          <?php if ($canEdit): ?>
+            <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
+              Choose who can see <?= $personId === $myPersonId ? 'your' : htmlspecialchars(person_display_name($person), ENT_QUOTES) . "'s" ?>
+              memories whenever a memory's publication scope is set to Custom.
+            </p>
+            <form method="post">
+              <?= csrf_field() ?>
+              <input type="hidden" name="person_id" value="<?= $personId ?>">
+              <input type="hidden" name="action" value="update_custom_audience">
+              <input type="hidden" name="tab" value="account">
+              <?php if ($customAudienceCandidates): ?>
+                <div class="tag-picker">
+                  <?php foreach ($customAudienceCandidates as $cp): ?>
+                    <?php $cpId = (int) $cp['id']; ?>
+                    <label>
+                      <input type="checkbox" name="audience_person_ids[]" value="<?= $cpId ?>" <?= in_array($cpId, $customAudienceSelectedIds, true) ? 'checked' : '' ?>>
+                      <?= htmlspecialchars(person_display_name($cp), ENT_QUOTES) ?>
+                      <?= $cp['claimed_by_user_id'] ? '' : '<span style="color:var(--ink-faint);">(unclaimed)</span>' ?>
+                    </label>
+                  <?php endforeach; ?>
+                </div>
+              <?php else: ?>
+                <p class="tag-picker-empty">Nobody close enough in the tree yet to choose.</p>
+              <?php endif; ?>
+              <button type="submit" class="btn-primary" style="margin-top:12px;">Save Custom Memory Settings</button>
+            </form>
+          <?php else: ?>
+            <p class="locked-notice">Only <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> can change who sees their Custom memories.</p>
+          <?php endif; ?>
+        </div>
+        <div class="account-col"></div>
+        <div class="account-col"></div>
+      </div>
+      </div>
 
     <?php endif; ?>
 
@@ -921,5 +1025,18 @@ if ($postedProfile) {
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
     <?php endif; ?>
   </div>
+  <script>
+  (function () {
+    var btns = document.querySelectorAll('.tab-btn');
+    var panels = document.querySelectorAll('[data-tab-panel]');
+    btns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.getAttribute('data-tab');
+        btns.forEach(function (b) { b.classList.toggle('is-active', b === btn); });
+        panels.forEach(function (p) { p.hidden = (p.getAttribute('data-tab-panel') !== tab); });
+      });
+    });
+  })();
+  </script>
 </body>
 </html>

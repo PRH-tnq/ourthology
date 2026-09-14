@@ -166,7 +166,7 @@ $tourSteps = ourthology_tour_steps();
 $tourStepsJson = json_encode($tourSteps, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $tourStepsJsonSafe = str_replace('</', '<\/', (string) $tourStepsJson);
 
-$entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage);
+$entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage, $myPersonId);
 $targetName = person_display_name($target);
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
@@ -412,6 +412,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .node .ring { fill:var(--card); stroke-width:3; }
   .node.visibility-public .ring { stroke:var(--accent); }
   .node.visibility-private .ring { stroke:var(--accent-2); }
+  .node.visibility-custom .ring { stroke:var(--fam3); }
   .node .lock { fill:var(--accent-2); }
   .node.type-diary .ring { stroke-dasharray:3 2.4; }
   .node:hover .ring, .node.highlight .ring { stroke-width:4.5; }
@@ -441,6 +442,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .pill svg { width:11px; height:11px; }
   .pill.public { background:var(--accent-bg); color:var(--accent); }
   .pill.private { background:var(--accent-2-bg); color:var(--accent-2); }
+  .pill.custom { background:var(--fam3-bg); color:var(--fam3); }
   .pill.diary { background:var(--fam2-bg); color:var(--fam2); }
   .empty-state { text-align:center; padding:34px 20px; color:var(--ink-faint); font-size:14px; border:2px dashed var(--line); border-radius:16px; }
 
@@ -737,6 +739,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     ];
 
     var DIARY_PILL_HTML = '<span class="pill diary"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4.3c1.8-.9 3.6-.9 5.4 0v11c-1.8-.9-3.6-.9-5.4 0v-11ZM15.4 4.3c-1.8-.9-3.6-.9-5.4 0v11c1.8-.9 3.6-.9 5.4 0v-11Z" stroke-linejoin="round"/></svg>Diary</span>';
+    // Phase 33: shared by the memory-card rail and the viewer's detail
+    // panel — previously each had its own copy of the public/private
+    // ternary, which is exactly the kind of place a third value (Custom)
+    // is easy to add in one spot and forget in the other.
+    var VISIBILITY_PILL_HTML = {
+      public: '<span class="pill public"><svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="6"/></svg>Family</span>',
+      custom: '<span class="pill custom"><svg viewBox="0 0 20 20" fill="currentColor"><circle cx="7" cy="8" r="3"/><circle cx="14" cy="9" r="2.3"/><path d="M2 16.5c.5-3.3 2.4-5 5-5s4.5 1.7 5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Custom</span>',
+      private: '<span class="pill private"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2c-2 1.6-3 3.2-3 5.8v1.1H6.3A1.3 1.3 0 0 0 5 10.2v6A1.3 1.3 0 0 0 6.3 17.5h7.4A1.3 1.3 0 0 0 15 16.2v-6a1.3 1.3 0 0 0-1.3-1.3H13V7.8c0-2.6-1-4.2-3-5.8Z"/></svg>Private</span>'
+    };
+    function visibilityPillHtml(visibility) {
+      return VISIBILITY_PILL_HTML[visibility] || VISIBILITY_PILL_HTML.private;
+    }
     var VIDEO_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4.5" width="11" height="11" rx="1.5"/><path d="M13.5 8.2 17 6v8l-3.5-2.2" stroke-linejoin="round"/></svg>';
     var DOC_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 2.5h6.5L15 6v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke-linejoin="round"/><path d="M11 2.5V6h4" stroke-linejoin="round"/></svg>';
 
@@ -1158,9 +1172,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             '<div class="card-thought">' + escapeHtml(e.thought) + '</div>' +
             '<div class="card-foot">' +
               (e.type === "diary" ? DIARY_PILL_HTML : "") +
-              (e.visibility === "public"
-                ? '<span class="pill public"><svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="6"/></svg>Family</span>'
-                : '<span class="pill private"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2c-2 1.6-3 3.2-3 5.8v1.1H6.3A1.3 1.3 0 0 0 5 10.2v6A1.3 1.3 0 0 0 6.3 17.5h7.4A1.3 1.3 0 0 0 15 16.2v-6a1.3 1.3 0 0 0-1.3-1.3H13V7.8c0-2.6-1-4.2-3-5.8Z"/></svg>Private</span>') +
+              visibilityPillHtml(e.visibility) +
             '</div>' +
           '</div>';
         card.addEventListener("click", function () { openViewer(e.id); });
@@ -1367,7 +1379,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         } else {
           var dot2 = document.createElementNS(svgNS, "circle");
           dot2.setAttribute("r", "5");
-          dot2.setAttribute("fill", e.visibility === "public" ? "var(--accent)" : "var(--accent-2)");
+          dot2.setAttribute("fill", e.visibility === "public" ? "var(--accent)" : (e.visibility === "custom" ? "var(--fam3)" : "var(--accent-2)"));
           g.appendChild(dot2);
         }
 
@@ -1619,9 +1631,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       viewerHeaderTitle.textContent = e.type === "diary" ? "Diary entry" : "Memory";
       viewerPillView.innerHTML =
         (e.type === "diary" ? DIARY_PILL_HTML : "") +
-        (e.visibility === "public"
-          ? '<span class="pill public"><svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="6"/></svg>Family</span>'
-          : '<span class="pill private"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2c-2 1.6-3 3.2-3 5.8v1.1H6.3A1.3 1.3 0 0 0 5 10.2v6A1.3 1.3 0 0 0 6.3 17.5h7.4A1.3 1.3 0 0 0 15 16.2v-6a1.3 1.3 0 0 0-1.3-1.3H13V7.8c0-2.6-1-4.2-3-5.8Z"/></svg>Private</span>');
+        visibilityPillHtml(e.visibility);
       viewerThoughtView.textContent = e.thought || "";
 
       // Notes family members tagged on this memory have written, read-only
