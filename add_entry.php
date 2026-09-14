@@ -131,7 +131,7 @@ $body = '';
 $occurredDay = '';
 $occurredMonth = '';
 $occurredYear = '';
-$visibility = 'private';
+$visibility = 'public'; // Phase 33 follow-up: default visibility is now Public
 $tagPersonIds = [];
 $displayMediaIds = [];
 
@@ -186,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     $occurredDay   = trim((string) ($_POST['occurred_day'] ?? ''));
     $occurredMonth = trim((string) ($_POST['occurred_month'] ?? ''));
     $occurredYear  = trim((string) ($_POST['occurred_year'] ?? ''));
-    $visibility    = (string) ($_POST['visibility'] ?? 'private');
+    $visibility    = (string) ($_POST['visibility'] ?? 'public');
 
     if (!in_array($entryKind, ['memory', 'diary'], true)) {
         $errors[] = 'Choose a valid entry type.';
@@ -503,13 +503,23 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
      not just another form field. Still a pair of native radio inputs
      underneath (label wraps input), so keyboard/assistive-tech behavior
      is unchanged. */
-  .visibility-toggle { display:flex; gap:8px; margin-top:8px; }
+  .visibility-toggle { display:flex; gap:8px; margin-top:8px; position:relative; }
   .visibility-toggle label { flex:1 1 0; display:flex; align-items:center; justify-content:center; text-align:center; gap:6px; margin:0; padding:10px 8px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:13.5px; font-weight:600; text-transform:none; letter-spacing:normal; color:var(--ink-soft); cursor:pointer; transition:border-color .15s ease, background .15s ease, color .15s ease; }
   .visibility-toggle label:hover { border-color:var(--accent); }
   .visibility-toggle input { position:absolute; opacity:0; width:0; height:0; }
   .visibility-toggle input:checked + span { color:inherit; }
   .visibility-toggle label:has(input:checked), .visibility-toggle label.is-checked { border-color:var(--accent); background:var(--accent-bg); color:var(--ink); }
   .visibility-toggle .vis-caption { display:block; font-size:11px; font-weight:400; color:var(--ink-faint); margin-top:1px; }
+
+  /* Phase 33 follow-up: a small semi-transparent hint bubble explaining
+     what "Custom" actually does, shown on hover or on choosing it — since
+     unlike Private/Public, its meaning depends on a list set elsewhere
+     (the Account Settings tab), so it's worth surfacing right at the
+     point of choosing it rather than only via the empty-audience notice
+     below (which only appears once Custom is already selected AND the
+     list happens to be empty). */
+  .custom-hint-popup { position:absolute; top:100%; right:0; margin-top:8px; max-width:230px; background:rgba(30,26,22,0.88); color:#fff; font-size:12px; font-weight:400; line-height:1.4; padding:9px 12px; border-radius:9px; box-shadow:0 4px 14px rgba(0,0,0,0.22); z-index:5; pointer-events:none; }
+  .custom-hint-popup a { color:#fff; text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -610,10 +620,13 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
               <input type="radio" name="visibility" value="public" <?= $visibility === 'public' ? 'checked' : '' ?>>
               <span>Public<span class="vis-caption">My whole connected family</span></span>
             </label>
-            <label>
+            <label id="visCustomLabel">
               <input type="radio" name="visibility" value="custom" <?= $visibility === 'custom' ? 'checked' : '' ?>>
               <span>Custom<span class="vis-caption">Just who you've chosen</span></span>
             </label>
+            <div id="customHintPopup" class="custom-hint-popup" hidden>
+              Choose who sees your Custom posts by selecting family members in the Account Settings section of your profile page.
+            </div>
           </div>
           <?php if ($customAudienceEmpty): ?>
             <p id="customAudienceEmptyNotice" class="tag-picker-empty" style="margin-top:8px;" hidden>
@@ -833,6 +846,39 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       l.querySelector('input').addEventListener('change', sync);
     });
     sync();
+  })();
+
+  // Phase 33 follow-up: a small hint bubble on the Custom option, shown on
+  // hover (mouse or keyboard focus) or right after picking it, explaining
+  // where the audience list for it actually lives. Separate from — and
+  // shown regardless of — the empty-audience notice above, which only
+  // ever appears once Custom is selected AND that list happens to be
+  // empty; this hint is about what "Custom" means at all, not a warning.
+  (function () {
+    var customLabel = document.getElementById('visCustomLabel');
+    var hint = document.getElementById('customHintPopup');
+    if (!customLabel || !hint) return;
+    var customInput = customLabel.querySelector('input');
+    var hideTimer = null;
+    function show() {
+      clearTimeout(hideTimer);
+      hint.hidden = false;
+    }
+    function hideSoon(delay) {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () { hint.hidden = true; }, delay);
+    }
+    customLabel.addEventListener('mouseenter', show);
+    customLabel.addEventListener('mouseleave', function () { hideSoon(150); });
+    customInput.addEventListener('focus', show);
+    customInput.addEventListener('blur', function () { hideSoon(150); });
+    customLabel.addEventListener('click', function () {
+      show();
+      hideSoon(5000);
+    });
+    document.addEventListener('click', function (e) {
+      if (!customLabel.contains(e.target)) hint.hidden = true;
+    });
   })();
   </script>
 </body>
