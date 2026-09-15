@@ -589,10 +589,11 @@ if ($postedProfile) {
      right after the Account Settings save redirect) with no flash of the
      wrong one before JS runs — the click handler below just toggles the
      same classes/attribute without a page reload. */
-  .tabs-bar { display:flex; gap:4px; margin:18px 0 4px; border-bottom:1px solid var(--line); }
-  .tab-btn { font-size:14px; font-weight:600; padding:9px 16px; border:none; background:none; color:var(--ink-faint); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; font-family:inherit; }
-  .tab-btn:hover { color:var(--ink-soft); }
-  .tab-btn.is-active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tabs-bar { display:flex; gap:6px; margin:18px 0 0; border-bottom:2px solid var(--line); }
+  .tab-btn { font-size:14px; font-weight:700; padding:11px 20px; border:1px solid var(--line); border-bottom:none; border-radius:10px 10px 0 0; background:var(--paper-2); color:var(--ink-soft); cursor:pointer; margin-bottom:-2px; font-family:inherit; transition:background .15s ease, color .15s ease, box-shadow .15s ease; }
+  .tab-btn:hover { background:var(--paper); color:var(--ink); box-shadow:0 -2px 6px rgba(26,23,20,0.08); }
+  .tab-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .tab-btn.is-active { background:var(--card); color:var(--accent); border-color:var(--line); border-bottom:2px solid var(--card); box-shadow:0 -3px 8px rgba(26,23,20,0.08); }
 
   /* The new tab's own 3-column form — deliberately a real fixed grid
      (left/middle/right, each its own column) rather than the balanced
