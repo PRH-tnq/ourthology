@@ -59,6 +59,12 @@ foreach ($graph['persons'] as $p) {
 $layout = compute_tree_layout($graph, $myPersonId);
 $unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']);
 
+// Phase 35: anyone in the tree, not recorded as deceased, whose
+// birthday falls in the next week -- shown as a reminder banner next
+// to the "Your tree" heading below (see graph_upcoming_birthdays() in
+// includes/graph.php for the date math).
+$upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
+
 // Phase 28: the onboarding tour (see includes/tour_steps.php) walks onto
 // this page partway through — this page never starts it (that only ever
 // happens from timeline.php, the landing page) but it does need the same
@@ -127,6 +133,24 @@ function ourthology_lifespan(?string $born, ?string $died): string
         return 'd. ' . $d;
     }
     return '';
+}
+
+/** Phase 35: "Pamela turns 52 in 5 days (Sat 20 Sep)" per upcoming
+ *  birthday, joined with a middle dot separator for the tree's reminder banner. */
+function ourthology_birthday_banner_text(array $upcoming): string
+{
+    $parts = [];
+    foreach ($upcoming as $b) {
+        $name = person_display_name($b['person']);
+        $when = match (true) {
+            $b['days_away'] === 0 => 'today',
+            $b['days_away'] === 1 => 'tomorrow',
+            default => 'in ' . $b['days_away'] . ' days',
+        };
+        $dateLabel = $b['next_birthday']->format('D j M');
+        $parts[] = "{$name} turns {$b['turning_age']} {$when} ({$dateLabel})";
+    }
+    return implode(' · ', $parts);
 }
 
 // Ported from the prototype's stepTag(): a child with a step-parent gets a
@@ -198,6 +222,14 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .linklet { font-size:12px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; }
   .flash { word-break:break-all; font-size:13px; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0 16px; }
 
+  /* Phase 35: birthday reminder banner, top-right of the "Your tree"
+     heading -- a friendly gold notice, deliberately not the accent red
+     (reserved for "you"/partnership/emphasis elsewhere) or the
+     unclaimed slate-blue, so it reads as its own, distinct kind of
+     notice. */
+  .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; }
+  .birthday-banner strong { color:#8A5A0A; font-weight:700; }
+
   /* Tree diagram — styled to match the original prototype's family-tree
      view: a soft paper-toned well, no boxes around people (just stacked
      text, name over status), warm serif type, blood lines plain and thin,
@@ -265,7 +297,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      context on a printed page. */
   @media print {
     @page { size: landscape; margin: 10mm; }
-    .nav, .flash, .flash-label, #unclaimedSection { display:none !important; }
+    .nav, .flash, .flash-label, .birthday-banner, #unclaimedSection { display:none !important; }
     .tree-wrap { overflow:visible; border:none; box-shadow:none; background:transparent; padding:0; cursor:default; }
     .tree-wrap svg { width:100% !important; height:auto !important; }
   }
@@ -326,7 +358,14 @@ $hasAnyStepTag = !empty($stepTagsByChild);
       <p class="flash"><?= htmlspecialchars($flashLink, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
-    <h3 style="margin-bottom:4px;">Your tree (<?= count($graph['persons']) ?> <?= count($graph['persons']) === 1 ? 'person' : 'people' ?>)</h3>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+      <h3 style="margin-bottom:4px;">Your tree (<?= count($graph['persons']) ?> <?= count($graph['persons']) === 1 ? 'person' : 'people' ?>)</h3>
+      <?php if ($upcomingBirthdays): ?>
+        <div class="birthday-banner" role="status">
+          <span aria-hidden="true">🎂</span> <?= htmlspecialchars(ourthology_birthday_banner_text($upcomingBirthdays), ENT_QUOTES) ?>
+        </div>
+      <?php endif; ?>
+    </div>
 
     <?php if (count($graph['persons']) <= 1): ?>
       <p style="color:var(--ink-faint);margin-top:8px;">No relationships yet — add a relative to get started.</p>

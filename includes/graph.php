@@ -251,6 +251,64 @@ function graph_people_within_generations(array $graph, int $anchorId, int $minTi
 }
 
 /**
+ * Phase 35: living people (no death date on file) whose birthday falls
+ * within the next $withinDays days, nearest first. Each entry:
+ * ['person' => the persons row, 'next_birthday' => DateTimeImmutable,
+ * 'days_away' => int, 'turning_age' => int]. A person with no birth
+ * date on file is skipped -- there's nothing to count down to. Used by
+ * tree.php to show a reminder banner starting a week out.
+ */
+function graph_upcoming_birthdays(array $persons, int $withinDays = 7): array
+{
+    $today = new DateTimeImmutable('today');
+    $todayYear = (int) $today->format('Y');
+    $upcoming = [];
+
+    foreach ($persons as $p) {
+        if (empty($p['born']) || !empty($p['died'])) {
+            continue;
+        }
+        $bornStr = substr((string) $p['born'], 0, 10);
+        $born = DateTimeImmutable::createFromFormat('!Y-m-d', $bornStr);
+        if ($born === false) {
+            continue;
+        }
+        $month = (int) $born->format('m');
+        $day = (int) $born->format('d');
+
+        // This year's occurrence, guarding a Feb 29 birthday on a
+        // non-leap year by falling back to Feb 28 rather than letting
+        // DateTime silently roll it over into March.
+        $occurrence = static function (int $year) use ($month, $day): DateTimeImmutable {
+            if (!checkdate($month, $day, $year)) {
+                return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-02-28', $year));
+            }
+            return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-%02d-%02d', $year, $month, $day));
+        };
+
+        $next = $occurrence($todayYear);
+        if ($next < $today) {
+            $next = $occurrence($todayYear + 1);
+        }
+
+        $daysAway = (int) $today->diff($next)->format('%r%a');
+        if ($daysAway < 0 || $daysAway > $withinDays) {
+            continue;
+        }
+
+        $upcoming[] = [
+            'person'        => $p,
+            'next_birthday' => $next,
+            'days_away'     => $daysAway,
+            'turning_age'   => ((int) $next->format('Y')) - ((int) $born->format('Y')),
+        ];
+    }
+
+    usort($upcoming, fn(array $a, array $b): int => $a['days_away'] <=> $b['days_away']);
+    return $upcoming;
+}
+
+/**
  * The full relationship vocabulary offered when adding a new relative or
  * attaching an existing person (originally prototypes/timeline.html's
  * RELATIONSHIPS list), grouped the same "older/same/younger generation"
