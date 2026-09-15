@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/custom_audience.php';
+require_once __DIR__ . '/includes/storage.php';
 
 require_login();
 $me = current_user_with_person();
@@ -391,6 +392,12 @@ if ($person !== null) {
     $customAudienceSelectedIds = fetch_custom_audience_ids($pdo, $personId);
 }
 
+// Phase 34: storage usage for this profile's own memories + avatar
+// photo, shown as a tracker bar on the Account Settings tab (see
+// includes/storage.php for the byte-accounting and the single quota
+// constant a future tiered-plan phase will hook into).
+$storageSummary = $person !== null ? person_storage_summary($pdo, $personId, $person) : null;
+
 $rels = [];
 $parts = [];
 if ($person !== null) {
@@ -594,6 +601,13 @@ if ($postedProfile) {
      wherever a masonry layout happens to place it. */
   .account-columns { display:grid; grid-template-columns:repeat(3, 1fr); gap:28px; margin-top:12px; }
   .account-col { min-width:0; }
+
+  /* Phase 34: storage tracker bar on the Account Settings tab. */
+  .storage-bar-track { height:10px; border-radius:6px; background:var(--paper-2); border:1px solid var(--line); overflow:hidden; }
+  .storage-bar-fill { height:100%; background:var(--accent); border-radius:6px 0 0 6px; transition:width .25s ease; }
+  .storage-bar-fill.is-warn { background:#C2790F; }
+  .storage-bar-fill.is-over { background:var(--error); }
+  .storage-meta { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--ink-faint); margin-top:6px; }
   @media (max-width: 820px) {
     .account-columns { grid-template-columns:1fr; }
   }
@@ -1014,7 +1028,27 @@ if ($postedProfile) {
             <p class="locked-notice">Only <?= htmlspecialchars(person_display_name($person), ENT_QUOTES) ?> can change who sees their Custom memories.</p>
           <?php endif; ?>
         </div>
-        <div class="account-col"></div>
+        <div class="account-col">
+          <h3 style="margin:4px 0 4px;">Storage</h3>
+          <?php if ($storageSummary !== null): ?>
+            <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
+              How much space <?= $personId === $myPersonId ? 'your' : htmlspecialchars(person_display_name($person), ENT_QUOTES) . "'s" ?>
+              photos, videos, documents, and profile photo are using.
+            </p>
+            <div class="storage-bar-track">
+              <div class="storage-bar-fill<?= $storageSummary['is_over'] ? ' is-over' : ($storageSummary['is_near_limit'] ? ' is-warn' : '') ?>" style="width:<?= number_format($storageSummary['percent_display'], 1) ?>%;"></div>
+            </div>
+            <div class="storage-meta">
+              <span><?= format_storage_bytes($storageSummary['used_bytes']) ?> of <?= format_storage_bytes($storageSummary['quota_bytes']) ?> used</span>
+              <span><?= number_format($storageSummary['percent_display'], 0) ?>%</span>
+            </div>
+            <?php if ($storageSummary['is_over']): ?>
+              <p style="font-size:12px;color:var(--error);margin:8px 0 0;">Over the current 1GB storage limit. Remove a photo, video, or document to free up space — larger storage plans are coming soon.</p>
+            <?php elseif ($storageSummary['is_near_limit']): ?>
+              <p style="font-size:12px;color:#C2790F;margin:8px 0 0;">Getting close to the 1GB storage limit.</p>
+            <?php endif; ?>
+          <?php endif; ?>
+        </div>
         <div class="account-col"></div>
       </div>
       </div>
