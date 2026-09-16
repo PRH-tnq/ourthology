@@ -47,6 +47,111 @@ const MEDIA_ALLOWED = [
     'txt'  => ['text/plain'],
 ];
 
+// Phase 36: iPhone/Samsung/etc. photos are commonly HEIC/HEIF, not
+// JPEG -- rather than add them as a stored format in their own right,
+// every HEIC/HEIF upload is converted to JPEG (see
+// ourthology_convert_heic_to_jpeg() below) so MEDIA_ALLOWED/AVATAR_ALLOWED
+// above never need a 'heic'/'heif' entry -- what actually lands on disk
+// is always one of the formats already listed there. The browser does
+// this client-side first when it can (see add_entry.php/edit_person.php's
+// heic2any-based conversion); this is the server-side safety net for
+// whatever a browser couldn't or didn't convert -- an old browser with no
+// JS conversion support, a script blocker, or a direct API upload.
+const MEDIA_HEIC_MIME_TYPES = ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'];
+
+// The ISOBMFF 'ftyp' box's 4-byte brand code, for the handful of brands
+// that mean HEIC/HEIF specifically -- checked independently of finfo's
+// mime-type guess (see ourthology_looks_like_heic() below) since a
+// shared host's libmagic version is not something this app controls or
+// can assume is current. Deliberately excludes 'avif'/'avis' (AVIF is
+// the same ISOBMFF container family but a different, already-supported-
+// by-browsers format this app has no reason to convert).
+const HEIC_HEIF_FTYP_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1'];
+
+/**
+ * Reads just the first 12 bytes of a file and checks for the ISOBMFF
+ * 'ftyp' box (offset 4) followed by a known HEIC/HEIF brand code (offset
+ * 8) -- a cheap, dependency-free fallback for when finfo/libmagic on this
+ * particular host doesn't recognise HEIC/HEIF and reports something
+ * generic instead (seen in the wild as application/octet-stream).
+ */
+function ourthology_sniff_heic_heif(string $path): bool
+{
+    $handle = @fopen($path, 'rb');
+    if ($handle === false) {
+        return false;
+    }
+    $header = fread($handle, 12);
+    fclose($handle);
+    if ($header === false || strlen($header) < 12) {
+        return false;
+    }
+    if (substr($header, 4, 4) !== 'ftyp') {
+        return false;
+    }
+    return in_array(substr($header, 8, 4), HEIC_HEIF_FTYP_BRANDS, true);
+}
+
+/** True if finfo's detected mime type OR the raw magic bytes say this file is HEIC/HEIF. */
+function ourthology_looks_like_heic(string $path, ?string $detectedMime): bool
+{
+    if ($detectedMime !== null && in_array($detectedMime, MEDIA_HEIC_MIME_TYPES, true)) {
+        return true;
+    }
+    return ourthology_sniff_heic_heif($path);
+}
+
+/**
+ * Converts a HEIC/HEIF file at $sourcePath to a JPEG written directly
+ * into $destDir (already inside private-media/, so this never touches
+ * anywhere outside the app's own document root -- see the open_basedir
+ * note in this file's own header comment), returning the new file's
+ * full path, or null if conversion isn't possible on this host.
+ *
+ * Feature-detected, never assumed: this app runs on shared hosting whose
+ * Imagick build (if Imagick is even present at all) may or may not carry
+ * the HEIF delegate (libheif) that decoding requires. Both are checked
+ * at runtime, and any failure -- missing extension, missing delegate, a
+ * corrupt or unusual HEIC file Imagick can't parse -- falls back to
+ * returning null rather than throwing, so the caller can show one clear,
+ * user-facing message instead of a raw server error.
+ */
+function ourthology_convert_heic_to_jpeg(string $sourcePath, string $destDir): ?string
+{
+    if (!class_exists('Imagick')) {
+        return null; // Imagick extension not installed on this host
+    }
+    try {
+        $formats = Imagick::queryFormats('HEI*');
+    } catch (\Throwable $e) {
+        return null;
+    }
+    if (!in_array('HEIC', $formats, true) && !in_array('HEIF', $formats, true)) {
+        return null; // Imagick present, but not built with the HEIF delegate
+    }
+
+    $destination = $destDir . '/' . bin2hex(random_bytes(16)) . '.jpg';
+    try {
+        $image = new Imagick();
+        // '[0]' -- a HEIC file can hold a burst/Live Photo sequence of
+        // several images; only the first (the actual photo) is kept.
+        $image->readImage($sourcePath . '[0]');
+        $image->autoOrient();
+        $image->setImageFormat('jpeg');
+        $image->setImageCompressionQuality(88);
+        $ok = $image->writeImage($destination);
+        $image->clear();
+        $image->destroy();
+        if (!$ok || !is_file($destination)) {
+            return null;
+        }
+        return $destination;
+    } catch (\Throwable $e) {
+        @unlink($destination);
+        return null;
+    }
+}
+
 /**
  * Validates and stores an uploaded file (from $_FILES[...]) for a person.
  * Returns ['file_path','mime_type','byte_size','width','height'] for the
@@ -74,29 +179,49 @@ function store_uploaded_media(array $file, int $personId): array
     $detectedMime = finfo_file($finfo, $file['tmp_name']);
     finfo_close($finfo);
 
-    $extension = null;
-    foreach (MEDIA_ALLOWED as $ext => $mimes) {
-        if (in_array($detectedMime, $mimes, true)) {
-            $extension = $ext;
-            break;
-        }
-    }
-    if ($extension === null) {
-        throw new RuntimeException('That file type is not supported — please use a JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT file.');
-    }
-
     $dir = ourthology_media_dir() . '/' . $personId;
     if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
         throw new RuntimeException('Could not save the file — please try again.');
     }
 
-    $filename = bin2hex(random_bytes(16)) . '.' . $extension;
-    $destination = $dir . '/' . $filename;
+    // Phase 36: a HEIC/HEIF photo (iPhone/Samsung/etc.) that reached the
+    // server still in that format -- the browser's own client-side
+    // conversion either isn't available or didn't run -- is converted
+    // to JPEG here instead of being rejected outright.
+    if (ourthology_looks_like_heic($file['tmp_name'], $detectedMime)) {
+        $destination = ourthology_convert_heic_to_jpeg($file['tmp_name'], $dir);
+        if ($destination === null) {
+            throw new RuntimeException('That looks like an iPhone/Samsung HEIC photo, and it couldn\'t be converted automatically — please convert it to JPEG first and try again.');
+        }
+        $filename = basename($destination);
+        $detectedMime = 'image/jpeg';
+    } else {
+        $extension = null;
+        foreach (MEDIA_ALLOWED as $ext => $mimes) {
+            if (in_array($detectedMime, $mimes, true)) {
+                $extension = $ext;
+                break;
+            }
+        }
+        if ($extension === null) {
+            throw new RuntimeException('That file type is not supported — please use a JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT file.');
+        }
 
-    if (!move_uploaded_file($file['tmp_name'], $destination)) {
-        throw new RuntimeException('Could not save the file — please try again.');
+        $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+        $destination = $dir . '/' . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            throw new RuntimeException('Could not save the file — please try again.');
+        }
     }
     chmod($destination, 0640);
+
+    // The HEIC conversion path above re-encodes the file, so its byte
+    // count on disk no longer matches $file['size'] (the original
+    // upload) -- read the real, final size off disk either way rather
+    // than special-casing just the converted branch.
+    $byteSize = @filesize($destination);
+    $byteSize = $byteSize !== false ? $byteSize : $file['size'];
 
     $width = $height = null;
     if (str_starts_with($detectedMime, 'image/')) {
@@ -109,7 +234,7 @@ function store_uploaded_media(array $file, int $personId): array
     return [
         'file_path' => $personId . '/' . $filename,
         'mime_type' => $detectedMime,
-        'byte_size' => $file['size'],
+        'byte_size' => $byteSize,
         'width'     => $width,
         'height'    => $height,
     ];
@@ -229,27 +354,38 @@ function store_uploaded_avatar(array $file, int $personId): array
     $detectedMime = finfo_file($finfo, $file['tmp_name']);
     finfo_close($finfo);
 
-    $extension = null;
-    foreach (AVATAR_ALLOWED as $ext => $mimes) {
-        if (in_array($detectedMime, $mimes, true)) {
-            $extension = $ext;
-            break;
-        }
-    }
-    if ($extension === null) {
-        throw new RuntimeException('Profile photos must be a JPEG, PNG, GIF, or WEBP image.');
-    }
-
     $dir = ourthology_media_dir() . '/avatars/' . $personId;
     if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
         throw new RuntimeException('Could not save the photo — please try again.');
     }
 
-    $filename = bin2hex(random_bytes(16)) . '.' . $extension;
-    $destination = $dir . '/' . $filename;
+    // Phase 36: same HEIC/HEIF -> JPEG server-side safety net as
+    // store_uploaded_media() above.
+    if (ourthology_looks_like_heic($file['tmp_name'], $detectedMime)) {
+        $destination = ourthology_convert_heic_to_jpeg($file['tmp_name'], $dir);
+        if ($destination === null) {
+            throw new RuntimeException('That looks like an iPhone/Samsung HEIC photo, and it couldn\'t be converted automatically — please convert it to JPEG first and try again.');
+        }
+        $filename = basename($destination);
+        $detectedMime = 'image/jpeg';
+    } else {
+        $extension = null;
+        foreach (AVATAR_ALLOWED as $ext => $mimes) {
+            if (in_array($detectedMime, $mimes, true)) {
+                $extension = $ext;
+                break;
+            }
+        }
+        if ($extension === null) {
+            throw new RuntimeException('Profile photos must be a JPEG, PNG, GIF, or WEBP image.');
+        }
 
-    if (!move_uploaded_file($file['tmp_name'], $destination)) {
-        throw new RuntimeException('Could not save the photo — please try again.');
+        $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+        $destination = $dir . '/' . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            throw new RuntimeException('Could not save the photo — please try again.');
+        }
     }
     chmod($destination, 0640);
 

@@ -524,6 +524,12 @@ if ($postedProfile) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Edit person — ourthology.com</title>
 <link rel="stylesheet" href="/styles.css?v=20">
+<!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
+     conversion for the profile-photo upload below. Pinned to the one
+     version this library has ever published. If this fails to load, the
+     form still submits the original file -- the server has its own
+     Imagick-based conversion fallback (see includes/media.php). -->
+<script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
@@ -930,7 +936,7 @@ if ($postedProfile) {
             <?= csrf_field() ?>
             <input type="hidden" name="person_id" value="<?= $personId ?>">
             <input type="hidden" name="action" value="upload_avatar">
-            <input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp" required>
+            <input type="file" name="avatar" accept="image/jpeg,image/png,image/gif,image/webp,.heic,.heif" required>
             <button type="submit" class="btn-small"><?= !empty($person['avatar_path']) ? 'Change photo' : 'Add a photo' ?></button>
           </form>
           <?php if (!empty($person['avatar_path'])): ?>
@@ -1061,6 +1067,39 @@ if ($postedProfile) {
     <?php endif; ?>
   </div>
   <script>
+  (function () {
+    // Phase 36: convert a HEIC/HEIF profile-photo pick to JPEG before the
+    // upload form submits. If heic2any isn't available (didn't load) or
+    // conversion fails, the original file is submitted as-is and the
+    // server's own Imagick fallback (includes/media.php) takes over.
+    var avatarInput = document.querySelector('.avatar-box input[type="file"][name="avatar"]');
+    if (!avatarInput) return;
+    var avatarForm = avatarInput.closest('form');
+    var HEIC_NAME_RE = /\.(heic|heif)$/i;
+    avatarForm.addEventListener('submit', function (e) {
+      var f = avatarInput.files && avatarInput.files[0];
+      if (!f || !HEIC_NAME_RE.test(f.name || '')) return; // not HEIC -- submit normally
+      if (typeof heic2any !== 'function') return; // converter not loaded -- let the server handle it
+      e.preventDefault();
+      var submitBtn = avatarForm.querySelector('button[type="submit"]');
+      var originalLabel = submitBtn ? submitBtn.textContent : '';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Converting…'; }
+      heic2any({ blob: f, toType: 'image/jpeg', quality: 0.88 }).then(function (result) {
+        var blob = Array.isArray(result) ? result[0] : result;
+        var newName = f.name.replace(HEIC_NAME_RE, '') + '.jpg';
+        var jpegFile = new File([blob], newName, { type: 'image/jpeg' });
+        var dt = new DataTransfer();
+        dt.items.add(jpegFile);
+        avatarInput.files = dt.files;
+      }).catch(function () {
+        // Conversion failed -- fall through and submit the original HEIC
+        // file; the server attempts its own conversion.
+      }).then(function () {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
+        avatarForm.submit();
+      });
+    });
+  })();
   (function () {
     var btns = document.querySelectorAll('.tab-btn');
     var panels = document.querySelectorAll('[data-tab-panel]');

@@ -74,6 +74,13 @@ $targetPersonId = (int) $targetPerson['id'];
 $targetIsSelf = $targetPersonId === $myPersonId;
 $targetName = person_display_name($targetPerson);
 
+// Phase 37: set by the redirect right after a brand-new memory is
+// saved (never an edit -- edit_entry's own "Save changes" keeps going
+// straight to the timeline, unchanged) -- renders the "memory saved"
+// confirmation view below instead of the composer form.
+$justSaved = !$isEditing && $_SERVER['REQUEST_METHOD'] !== 'POST'
+    && filter_var($_GET['saved'] ?? '', FILTER_VALIDATE_BOOLEAN);
+
 // Who the "tag people in this memory" picker below offers — bounded to
 // anyone up to a grandparent (older) or a 2× great-grandchild (younger)
 // generational distance from the memory's owner (Phase 24, widened in
@@ -363,7 +370,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             }
 
             $pdo->commit();
-            header('Location: /timeline.php' . ($targetIsSelf ? '' : '?person_id=' . $targetPersonId));
+            if ($isEditing) {
+                header('Location: /timeline.php' . ($targetIsSelf ? '' : '?person_id=' . $targetPersonId));
+            } else {
+                // Phase 37: confirmation view (see $justSaved above),
+                // not straight to the timeline -- gives the option to
+                // add another memory without a full round trip back
+                // through the timeline first.
+                header('Location: /add_entry.php?saved=1' . ($targetIsSelf ? '' : '&person_id=' . $targetPersonId));
+            }
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();
@@ -415,6 +430,13 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
 <link rel="stylesheet" href="/styles.css?v=20">
+<!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
+     conversion, so a phone photo never has to reach the server still in a
+     format most of the web can't display. Pinned to the one version this
+     library has ever published. If this fails to load (offline, blocked),
+     the photo-drop widget below still accepts the file -- the server has
+     its own Imagick-based conversion fallback (see includes/media.php). -->
+<script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root { --accent-bg: #F1DCDC; }
   /* Phase 25: this composer reads as a pop-up-style task dialog (its own
@@ -454,6 +476,12 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   .pick-tile { position:relative; aspect-ratio:1; border-radius:10px; border:1px solid var(--line); background:var(--paper); overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--ink-faint); }
   .pick-tile img { width:100%; height:100%; object-fit:cover; }
   .pick-tile.has-video, .pick-tile.has-doc { flex-direction:column; gap:4px; padding:6px 4px; text-align:center; }
+  /* Phase 36: a HEIC/HEIF file shows this spinner tile while heic2any
+     converts it client-side -- swapped out for a real thumbnail (or,
+     failing that, a plain document tile carrying the original HEIC file
+     for the server to convert) the moment conversion settles. */
+  .tile-spinner { width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:ourthology-spin .8s linear infinite; }
+  @keyframes ourthology-spin { to { transform:rotate(360deg); } }
   .pick-tile.has-video svg, .pick-tile.has-doc svg { width:22px; height:22px; flex:0 0 auto; }
   .pick-tile .media-tile-badge { font-size:8.5px; font-weight:800; letter-spacing:.04em; color:var(--ink-soft); background:rgba(255,255,255,.75); border-radius:5px; padding:1px 5px; }
   .pick-tile .media-tile-name { font-size:9px; font-weight:700; color:var(--ink-soft); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 2px; }
@@ -466,6 +494,19 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
   .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
   .for-banner strong { color:var(--ink); }
+
+  /* Phase 37: the "memory saved" confirmation shown in place of the
+     composer right after a new memory is saved. */
+  .save-confirm { text-align:center; padding:10px 0 4px; }
+  .save-confirm-icon { width:56px; height:56px; margin:0 auto; border-radius:50%; background:var(--accent); color:var(--on-accent); display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:700; }
+  .save-confirm h3 { margin:16px 0 6px; }
+  .save-confirm p { margin:0 0 24px; color:var(--ink-soft); font-size:14.5px; }
+  .save-confirm-actions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .save-confirm-actions a { display:inline-block; padding:11px 22px; border-radius:999px; font-size:15px; font-weight:600; text-decoration:none; cursor:pointer; }
+  .save-confirm-actions a.is-primary { background:var(--accent); color:var(--on-accent); }
+  .save-confirm-actions a.is-primary:hover { background:var(--accent-glow); }
+  .save-confirm-actions a.is-secondary { background:#fff; border:1px solid var(--line); color:var(--ink-soft); }
+  .save-confirm-actions a.is-secondary:hover { background:var(--paper-2); }
   .tag-picker { display:flex; flex-direction:column; gap:6px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; flex:1 1 auto; min-height:140px; max-height:220px; }
   .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
   .tag-picker-empty { font-size:13px; color:var(--ink-faint); margin:0; }
@@ -540,6 +581,17 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       </div>
     </div>
 
+    <?php if ($justSaved): ?>
+      <div class="save-confirm" role="status">
+        <div class="save-confirm-icon" aria-hidden="true">&#10003;</div>
+        <h3>Memory saved</h3>
+        <p>Your memory has been added to <?= $targetIsSelf ? 'your' : htmlspecialchars($targetName, ENT_QUOTES) . "'s" ?> timeline.</p>
+        <div class="save-confirm-actions">
+          <a class="is-primary" href="/add_entry.php<?= $targetIsSelf ? '' : '?person_id=' . $targetPersonId ?>">Add another memory</a>
+          <a class="is-secondary" href="/timeline.php<?= $targetIsSelf ? '' : '?person_id=' . $targetPersonId ?>">Return to timeline</a>
+        </div>
+      </div>
+    <?php else: ?>
     <?php if (!$targetIsSelf): ?>
       <p class="for-banner"><?= $isEditing ? 'Editing a memory belonging to' : 'Adding a memory for' ?> <strong><?= htmlspecialchars($targetName, ENT_QUOTES) ?></strong> (not yet claimed).</p>
     <?php endif; ?>
@@ -579,9 +631,9 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
             </div>
             <div class="media-picker-grid" id="photoGrid" hidden></div>
             <input type="file" id="photoInput" name="media[]" multiple hidden
-              accept="image/*,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+              accept="image/*,.heic,.heif,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
           </div>
-          <span class="media-picker-note">JPEG, PNG, GIF, WEBP, MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
+          <span class="media-picker-note">JPEG, PNG, GIF, WEBP, HEIC/HEIF (converted to JPEG automatically), MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
           <p class="media-picker-error" id="mediaError"></p>
         </div>
 
@@ -657,6 +709,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       <button type="submit" class="btn-primary" style="margin-top:22px;"><?= $isEditing ? 'Save changes' : 'Save entry' ?></button>
     </form>
     <p class="foot-link"><a href="/timeline.php<?= $targetIsSelf ? '' : '?person_id=' . $targetPersonId ?>"><?= $isEditing ? 'Cancel' : ('Back to ' . ($targetIsSelf ? 'my' : htmlspecialchars($targetName, ENT_QUOTES) . "'s") . ' timeline') ?></a></p>
+    <?php endif; ?>
   </div>
   <script>
   (function () {
@@ -702,6 +755,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       return DOC_ICON + '<span class="media-tile-badge">' + escapeHtml(item.badge) + '</span>';
     }
     function pendingTileHtml(item) {
+      if (item.kind === 'converting') return '<span class="tile-spinner" aria-hidden="true"></span><span class="media-tile-name">Converting…</span>';
       if (item.kind === 'image') return '<img src="' + item.url + '" alt="">';
       if (item.kind === 'video') return VIDEO_ICON + '<span class="media-tile-badge">Video</span>';
       return DOC_ICON + '<span class="media-tile-name">' + escapeHtml(item.file.name) + '</span><span class="media-tile-badge">' + escapeHtml(extLabel(item.file.name)) + '</span>';
@@ -712,7 +766,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     }
     function syncInput() {
       var dt = new DataTransfer();
-      pending.forEach(function (item) { dt.items.add(item.file); });
+      pending.forEach(function (item) { if (item.file) dt.items.add(item.file); });
       input.files = dt.files;
     }
     function syncKeptInputs() {
@@ -737,7 +791,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
           '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button></div>';
       }).join('');
       tiles += pending.map(function (item, i) {
-        var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
+        var cls = item.kind === 'video' ? ' has-video' : (item.kind === 'converting' ? ' has-doc' : (item.kind !== 'image' ? ' has-doc' : ''));
         return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + pendingTileHtml(item) +
           '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">×</button></div>';
       }).join('');
@@ -745,6 +799,59 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + ADD_ICON + '</div>';
       }
       grid.innerHTML = tiles;
+    }
+    // Phase 36: a .heic/.heif file (iPhone/Samsung/etc.) is recognised by
+    // extension primarily -- browsers are inconsistent about what mime
+    // type (if any) they report for it, so the filename is the one signal
+    // that actually works everywhere.
+    var HEIC_NAME_RE = /\.(heic|heif)$/i;
+    function looksLikeHeic(file) {
+      return HEIC_NAME_RE.test(file.name || '') || file.type === 'image/heic' || file.type === 'image/heif';
+    }
+    // Converts one HEIC/HEIF File to a JPEG File via heic2any (loaded from
+    // the CDN <script> in <head>). Rejects if the library never loaded (a
+    // network hiccup, an ad/script blocker) or the conversion itself fails
+    // (an unusual or corrupt HEIC file) -- either way the caller falls back
+    // to handing the original file to the server, which has its own
+    // Imagick-based conversion (see includes/media.php).
+    function heicToJpegFile(file) {
+      if (typeof heic2any !== 'function') return Promise.reject(new Error('heic2any not available'));
+      return heic2any({ blob: file, toType: 'image/jpeg', quality: 0.88 }).then(function (result) {
+        var blob = Array.isArray(result) ? result[0] : result; // a Live Photo/burst HEIC can decode to more than one image -- only the first is kept
+        var newName = file.name.replace(HEIC_NAME_RE, '') + '.jpg';
+        return new File([blob], newName, { type: 'image/jpeg' });
+      });
+    }
+    function addOrdinaryFile(f) {
+      var kind = kindOfFile(f);
+      pending.push({ file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null });
+    }
+    // A HEIC file is pushed into `pending` immediately, carrying the
+    // ORIGINAL file, so it's already part of the real hidden <input> (and
+    // safe to submit) even if conversion is still running or never
+    // finishes -- it's just replaced in place with the converted JPEG File
+    // the moment (and if) that succeeds. Nothing blocks form submission
+    // while a conversion is still in flight.
+    function addHeicFile(f) {
+      var placeholder = { file: f, kind: 'converting', url: null };
+      pending.push(placeholder);
+      syncInput();
+      render();
+      heicToJpegFile(f).then(function (jpegFile) {
+        var idx = pending.indexOf(placeholder);
+        if (idx === -1) return; // removed by the user while converting
+        pending[idx] = { file: jpegFile, kind: 'image', url: URL.createObjectURL(jpegFile) };
+        syncInput();
+        render();
+      }).catch(function () {
+        var idx = pending.indexOf(placeholder);
+        if (idx === -1) return;
+        // Couldn't convert in the browser -- keep the original HEIC file
+        // attached (already in the real <input> above) and let the server
+        // convert it on save instead of blocking the upload entirely.
+        pending[idx] = { file: f, kind: 'document', url: null };
+        render();
+      });
     }
     function addFiles(fileList) {
       var incoming = Array.prototype.slice.call(fileList || []);
@@ -754,8 +861,8 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         if (totalCount() >= MAX_FILES) { showError('You can attach at most ' + MAX_FILES + ' files to one entry.'); break; }
         var f = incoming[i];
         if (f.size > MAX_BYTES) { showError('"' + f.name + '" is larger than 25MB and was skipped.'); continue; }
-        var kind = kindOfFile(f);
-        pending.push({ file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null });
+        if (looksLikeHeic(f)) { addHeicFile(f); continue; }
+        addOrdinaryFile(f);
       }
       syncInput();
       render();
