@@ -507,6 +507,22 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   .save-confirm-actions a.is-primary:hover { background:var(--accent-glow); }
   .save-confirm-actions a.is-secondary { background:#fff; border:1px solid var(--line); color:var(--ink-soft); }
   .save-confirm-actions a.is-secondary:hover { background:var(--paper-2); }
+
+  /* Phase 38: shown the instant Save is pressed, covering the composer
+     while the real multipart POST (including any file upload) is still
+     in flight -- a greyed stand-in for the .save-confirm pop-up above,
+     with a spinner and an elapsed-seconds timer in place of the
+     checkmark/heading/buttons (nothing is actually saved yet). There is
+     no JS "hide" path to get wrong: it disappears for free the moment
+     the browser navigates to the real response -- the confirmation
+     above on success, or the composer again with errors on failure. */
+  .saving-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:24px; }
+  .saving-overlay[hidden] { display:none; }
+  .saving-card { background:var(--paper-2); border:1px solid var(--line); border-radius:14px; padding:32px; width:100%; max-width:380px; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,0.22); }
+  .saving-spinner { width:56px; height:56px; margin:0 auto; border-radius:50%; border:4px solid var(--line); border-top-color:var(--ink-faint); animation:ourthology-saving-spin .9s linear infinite; }
+  @keyframes ourthology-saving-spin { to { transform:rotate(360deg); } }
+  .saving-card h3 { margin:16px 0 6px; color:var(--ink-soft); }
+  .saving-card p { margin:0; color:var(--ink-faint); font-size:14.5px; }
   .tag-picker { display:flex; flex-direction:column; gap:6px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; flex:1 1 auto; min-height:140px; max-height:220px; }
   .tag-picker label { text-transform:none; font-weight:400; letter-spacing:normal; display:flex; align-items:center; gap:8px; margin:0; font-size:14px; }
   .tag-picker-empty { font-size:13px; color:var(--ink-faint); margin:0; }
@@ -603,6 +619,14 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         <?php endforeach; ?>
       </div>
     <?php endif; ?>
+
+    <div class="saving-overlay" id="savingOverlay" hidden>
+      <div class="saving-card" role="status" aria-live="polite">
+        <div class="saving-spinner" aria-hidden="true"></div>
+        <h3><?= $isEditing ? 'Saving your changes' : 'Saving your memory' ?>&hellip;</h3>
+        <p><span id="savingTimerCount">0</span>s elapsed</p>
+      </div>
+    </div>
 
     <form method="post" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
@@ -985,6 +1009,24 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     });
     document.addEventListener('click', function (e) {
       if (!customLabel.contains(e.target)) hint.hidden = true;
+    });
+  })();
+  (function () {
+    var form = document.querySelector('.card > form[enctype="multipart/form-data"]');
+    var overlay = document.getElementById('savingOverlay');
+    var timerEl = document.getElementById('savingTimerCount');
+    if (!form || !overlay) return;
+    form.addEventListener('submit', function () {
+      overlay.hidden = false;
+      var seconds = 0;
+      if (timerEl) timerEl.textContent = String(seconds);
+      setInterval(function () {
+        seconds += 1;
+        if (timerEl) timerEl.textContent = String(seconds);
+      }, 1000);
+      // No clearInterval: the whole page unloads within a moment either
+      // way (success redirects to the confirmation, an error re-renders
+      // this same page), taking the interval and the overlay with it.
     });
   })();
   </script>
