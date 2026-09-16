@@ -169,6 +169,14 @@ $tourStepsJsonSafe = str_replace('</', '<\/', (string) $tourStepsJson);
 $entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage, $myPersonId);
 $targetName = person_display_name($target);
 
+// Phase 39: the same "anyone in my family, not marked deceased, with a
+// birthday due within a week" reminder Phase 35 added to tree.php, now
+// also shown here per Phil's request -- $myGroup matches tree.php's own
+// scoping (the viewer's own family group; always the same group $target
+// belongs to, per the access check above).
+$graph = fetch_family_graph($pdo, $myGroup);
+$upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
+
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
 function ourthology_entry_date(array $entry): string
 {
@@ -370,6 +378,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .zoom-pill:hover { filter:brightness(0.97); }
   .zoom-pill svg { width:14px; height:14px; flex:0 0 auto; }
   .zoom-pill .zoom-pill-x { font-size:16px; line-height:1; opacity:.75; margin-left:2px; }
+
+  /* Phase 39: birthday reminder banner, shared with tree.php's Phase 35
+     original -- sits as the right-pushed last item in .controls, i.e.
+     top-right of the page, just under the avatar, in line with the
+     River/Rings/Spiral and zoom buttons. */
+  .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; margin-left:auto; }
+  .birthday-banner strong { color:#8A5A0A; font-weight:700; }
 
   /* ---------- timeline canvas ---------- */
   .arc-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
@@ -636,6 +651,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <span id="customZoomLabel"></span>
         <span class="zoom-pill-x">×</span>
       </button>
+      <?php if ($upcomingBirthdays): ?>
+        <div class="birthday-banner" role="status">
+          <span aria-hidden="true">&#127874;</span> <?= htmlspecialchars(ourthology_birthday_banner_text($upcomingBirthdays), ENT_QUOTES) ?>
+        </div>
+      <?php endif; ?>
     </div>
 
     <div class="arc-wrap layout-river" id="arcWrap">

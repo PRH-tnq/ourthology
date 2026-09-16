@@ -50,6 +50,15 @@ CREATE TABLE users (
   -- tour (Phase 19) — NULL means "hasn't seen it yet," checked on
   -- timeline.php to decide whether to show it.
   tour_completed_at DATETIME NULL,
+  -- Phase 40: "notify me about pending memory approvals" (Account
+  -- Settings). notify_email_enc is app-layer encrypted (libsodium
+  -- crypto_secretbox -- see includes/crypto.php), never a plaintext
+  -- email, so a database-only read (a backup, a compromised DB
+  -- credential without the separate above-webroot secrets file) never
+  -- recovers the address. Sized for a nonce (24 bytes) + MAC (16
+  -- bytes) + a generously long email address.
+  notify_email_enc    VARBINARY(400) NULL,
+  notify_pending_tags TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

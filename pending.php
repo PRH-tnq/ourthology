@@ -233,7 +233,7 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="error"><?php foreach ($errors as $e): ?><div><?= htmlspecialchars($e, ENT_QUOTES) ?></div><?php endforeach; ?></div>
     <?php endif; ?>
 
-    <h3 class="section-title">Waiting on you (<?= $incomingCount ?>)</h3>
+    <h3 class="section-title" id="waiting-on-you">Waiting on you (<?= $incomingCount ?>)</h3>
     <?php if (!$incomingCount): ?>
       <p style="color:var(--ink-faint);font-size:14px;margin:4px 0 0;">Nothing needs your approval right now.</p>
     <?php endif; ?>

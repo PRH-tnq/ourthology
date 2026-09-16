@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/custom_audience.php';
 require_once __DIR__ . '/includes/storage.php';
+require_once __DIR__ . '/includes/crypto.php'; // Phase 40
 
 require_login();
 $me = current_user_with_person();
@@ -361,6 +362,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_edit_notice'] = 'Custom Memory Settings saved.';
         header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
         exit;
+    } elseif ($action === 'update_notification_settings') {
+        // Phase 40: the Account Settings tab's "Notifications" panel --
+        // always your own account, never someone else's, so this
+        // doesn't consult $canEdit the way the profile-editing actions
+        // above do.
+        if ($personId !== $myPersonId) {
+            $errors[] = 'You can only change your own notification settings.';
+        } else {
+            $submittedEmail = trim((string) ($_POST['notify_email'] ?? ''));
+            $wantsNotify = !empty($_POST['notify_pending_tags']);
+            if ($submittedEmail !== '' && !filter_var($submittedEmail, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = 'Enter a valid email address.';
+            } elseif ($wantsNotify && $submittedEmail === '') {
+                $errors[] = 'Add an email address to turn on pending-approval emails.';
+            } else {
+                $encrypted = $submittedEmail !== '' ? ourthology_encrypt_notify_email($submittedEmail) : null;
+                $pdo->prepare('UPDATE users SET notify_email_enc = :email, notify_pending_tags = :notify WHERE id = :uid')
+                    ->execute(['email' => $encrypted, 'notify' => $wantsNotify ? 1 : 0, 'uid' => $myUserId]);
+                $_SESSION['flash_edit_notice'] = 'Notification settings saved.';
+                header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
+                exit;
+            }
+        }
     }
 }
 
@@ -397,6 +421,31 @@ if ($person !== null) {
 // includes/storage.php for the byte-accounting and the single quota
 // constant a future tiered-plan phase will hook into).
 $storageSummary = $person !== null ? person_storage_summary($pdo, $personId, $person) : null;
+
+// Phase 40: the Account Settings tab's "Notifications" panel --
+// decrypted here (server-side, this request only) so the account
+// holder can see the address they've stored; nobody else's
+// edit_person.php?tab=account view ever reaches this branch.
+$postedNotify = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_notification_settings' && $errors;
+$notifyEmail = null;
+$notifyPendingTags = false;
+if ($postedNotify) {
+    // Same convention as $postedProfile above: an error on this action
+    // redisplays what was just typed, not what's still saved -- otherwise
+    // a cleared email field that got rejected would silently reappear
+    // filled with the old stored address, making the error banner look
+    // like it refers to nothing.
+    $notifyEmail = trim((string) ($_POST['notify_email'] ?? ''));
+    $notifyPendingTags = !empty($_POST['notify_pending_tags']);
+} elseif ($personId === $myPersonId) {
+    $notifyStmt = $pdo->prepare('SELECT notify_email_enc, notify_pending_tags FROM users WHERE id = :uid');
+    $notifyStmt->execute(['uid' => $myUserId]);
+    $notifyRow = $notifyStmt->fetch();
+    if ($notifyRow) {
+        $notifyEmail = ourthology_decrypt_notify_email($notifyRow['notify_email_enc']);
+        $notifyPendingTags = (bool) $notifyRow['notify_pending_tags'];
+    }
+}
 
 $rels = [];
 $parts = [];
@@ -1056,7 +1105,28 @@ if ($postedProfile) {
             <?php endif; ?>
           <?php endif; ?>
         </div>
-        <div class="account-col"></div>
+        <div class="account-col">
+          <h3 style="margin:4px 0 4px;">Notifications</h3>
+          <?php if ($personId === $myPersonId): ?>
+            <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
+              Get an email when someone tags you in a memory and it needs your OK.
+              Your address is encrypted in storage and never shown to anyone but you.
+            </p>
+            <form method="post">
+              <?= csrf_field() ?>
+              <input type="hidden" name="person_id" value="<?= $personId ?>">
+              <input type="hidden" name="action" value="update_notification_settings">
+              <input type="hidden" name="tab" value="account">
+              <label for="notify_email" style="display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;">Notification email</label>
+              <input type="email" id="notify_email" name="notify_email" value="<?= htmlspecialchars($notifyEmail ?? '', ENT_QUOTES) ?>" placeholder="you@example.com" style="margin-bottom:10px;">
+              <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:0 0 12px;">
+                <input type="checkbox" name="notify_pending_tags" value="1" style="margin-top:2px;" <?= $notifyPendingTags ? 'checked' : '' ?>>
+                <span>Email me when a memory is pending my approval</span>
+              </label>
+              <button type="submit" class="btn-primary" style="margin-top:0;">Save Notification Settings</button>
+            </form>
+          <?php endif; ?>
+        </div>
       </div>
       </div>
 

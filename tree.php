@@ -135,23 +135,9 @@ function ourthology_lifespan(?string $born, ?string $died): string
     return '';
 }
 
-/** Phase 35: "Pamela turns 52 in 5 days (Sat 20 Sep)" per upcoming
- *  birthday, joined with a middle dot separator for the tree's reminder banner. */
-function ourthology_birthday_banner_text(array $upcoming): string
-{
-    $parts = [];
-    foreach ($upcoming as $b) {
-        $name = person_display_name($b['person']);
-        $when = match (true) {
-            $b['days_away'] === 0 => 'today',
-            $b['days_away'] === 1 => 'tomorrow',
-            default => 'in ' . $b['days_away'] . ' days',
-        };
-        $dateLabel = $b['next_birthday']->format('D j M');
-        $parts[] = "{$name} turns {$b['turning_age']} {$when} ({$dateLabel})";
-    }
-    return implode(' · ', $parts);
-}
+// Phase 39: ourthology_birthday_banner_text() moved to
+// includes/graph.php (already required above) so timeline.php can
+// share it too -- see that file for the implementation.
 
 // Ported from the prototype's stepTag(): a child with a step-parent gets a
 // short "S-" + that parent's own initials next to their dates on the tree

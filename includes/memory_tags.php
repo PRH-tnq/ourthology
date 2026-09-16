@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/notifications.php'; // Phase 40
 
 /**
  * memory_tags: "this memory is about you too." One row per (timeline
@@ -37,6 +38,7 @@ function create_memory_tag(PDO $pdo, int $timelineEntryId, array $taggedPerson, 
             "INSERT INTO memory_tags (timeline_entry_id, person_id, status, created_by_user_id, approving_user_id)
              VALUES (:eid, :pid, 'pending', :uid, :approver)"
         )->execute(['eid' => $timelineEntryId, 'pid' => $personId, 'uid' => $createdByUserId, 'approver' => (int) $claimedBy]);
+        ourthology_notify_pending_memory_tag($pdo, $timelineEntryId, $taggedPerson, $createdByUserId);
     }
 }
 
