@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
 $me = current_user_with_person();
@@ -236,7 +237,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $existingPerson !== null ? 'Attach ' . htmlspecialchars(person_display_name($existingPerson), ENT_QUOTES) : 'Add a relative' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=20">
+<link rel="stylesheet" href="/styles.css?v=21">
 <style>
   select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
   .field-group { margin-top:0; }
@@ -368,7 +369,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
         <input type="text" id="middle_name" name="middle_name" value="<?= htmlspecialchars($middle, ENT_QUOTES) ?>" placeholder="e.g. Marie" maxlength="60">
       <?php endif; ?>
 
-      <button type="submit" class="btn-primary"><?= $existingPerson !== null ? 'Attach relationship' : 'Add person' ?></button>
+      <button type="submit" class="btn-primary" id="addRelativeSubmitBtn"><?= $existingPerson !== null ? 'Attach relationship' : 'Add person' ?></button>
     </form>
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
     <?php endif; ?>
@@ -507,5 +508,6 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
   previousParent2Id = null;
 })();
 </script>
+  <?php ourthology_render_tour('add_relative', (int) $me['person_id']); ?>
 </body>
 </html>

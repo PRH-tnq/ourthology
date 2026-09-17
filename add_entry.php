@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/custom_audience.php';
+require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
 $me = current_user_with_person();
@@ -429,7 +430,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=20">
+<link rel="stylesheet" href="/styles.css?v=21">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -661,7 +662,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
           <p class="media-picker-error" id="mediaError"></p>
         </div>
 
-        <div class="entry-col">
+        <div class="entry-col" id="entryDetailsCol">
           <label for="title">Title <span style="text-transform:none;font-weight:400;">(optional)</span></label>
           <input type="text" id="title" name="title" value="<?= htmlspecialchars($title, ENT_QUOTES) ?>" maxlength="255">
 
@@ -687,7 +688,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 
         <div class="entry-col">
           <label>Visibility</label>
-          <div class="visibility-toggle">
+          <div class="visibility-toggle" id="visibilityBlock">
             <label>
               <input type="radio" name="visibility" value="private" <?= $visibility === 'private' ? 'checked' : '' ?>>
               <span>Private<span class="vis-caption">Only me, for now</span></span>
@@ -730,7 +731,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         </div>
       </div>
 
-      <button type="submit" class="btn-primary" style="margin-top:22px;"><?= $isEditing ? 'Save changes' : 'Save entry' ?></button>
+      <button type="submit" class="btn-primary" id="entrySubmitBtn" style="margin-top:22px;"><?= $isEditing ? 'Save changes' : 'Save entry' ?></button>
     </form>
     <p class="foot-link"><a href="/timeline.php<?= $targetIsSelf ? '' : '?person_id=' . $targetPersonId ?>"><?= $isEditing ? 'Cancel' : ('Back to ' . ($targetIsSelf ? 'my' : htmlspecialchars($targetName, ENT_QUOTES) . "'s") . ' timeline') ?></a></p>
     <?php endif; ?>
@@ -1030,5 +1031,6 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     });
   })();
   </script>
+  <?php ourthology_render_tour('add_entry', $myPersonId); ?>
 </body>
 </html>

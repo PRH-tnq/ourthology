@@ -7,7 +7,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
-require_once __DIR__ . '/includes/tour_steps.php';
+require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
 $me = current_user_with_person();
@@ -229,9 +229,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // action takes effect immediately, on this same request, rather than
 // needing one more page load.
 $autostartTour = $isOwner && empty($me['tour_completed_at']);
-$tourSteps = ourthology_tour_steps();
-$tourStepsJson = json_encode($tourSteps, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-$tourStepsJsonSafe = str_replace('</', '<\/', (string) $tourStepsJson);
 
 $entries = fetch_entries_for_person($pdo, (int) $target['id'], $canManage, $myPersonId);
 $targetName = person_display_name($target);
@@ -335,7 +332,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=20">
+<link rel="stylesheet" href="/styles.css?v=21">
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -528,19 +525,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .pill.diary { background:var(--fam2-bg); color:var(--fam2); }
   .empty-state { text-align:center; padding:34px 20px; color:var(--ink-faint); font-size:14px; border:2px dashed var(--line); border-radius:16px; }
 
-  /* ---------- first-login onboarding tour ---------- */
-  .tour-scrim { position:fixed; inset:0; background:rgba(20,16,12,.55); z-index:200; opacity:0; pointer-events:none; transition:opacity .15s ease; }
-  .tour-scrim.open { opacity:1; pointer-events:auto; }
-  .tour-highlight { position:fixed; border:3px solid var(--accent); border-radius:14px; box-shadow:0 0 0 4px rgba(154,42,42,.25); pointer-events:none; transition:top .2s ease, left .2s ease, width .2s ease, height .2s ease; z-index:201; }
-  .tour-tooltip { position:fixed; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px 20px; width:280px; box-shadow:0 20px 46px -18px rgba(26,23,20,.5); z-index:202; transition:top .2s ease, left .2s ease; }
-  .tour-tooltip.tour-centered { position:fixed; top:50% !important; left:50% !important; transform:translate(-50%,-50%); width:300px; }
-  .tour-tooltip h4 { margin:0 0 8px; font-family:"Fraunces",Georgia,serif; font-size:17px; color:var(--ink); }
-  .tour-tooltip p { margin:0 0 16px; font-size:13.5px; color:var(--ink-soft); line-height:1.5; }
-  .tour-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .tour-step-label { font-size:11.5px; color:var(--ink-faint); }
-  .tour-skip { font-size:12.5px; background:transparent; border:none; color:var(--ink-faint); cursor:pointer; padding:0; text-decoration:underline; }
-  .tour-next { padding:8px 16px; border:none; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:13.5px; font-weight:600; cursor:pointer; }
-  .tour-next:hover { background:var(--accent-glow); }
 
   /* ---------- memory viewer (read-only) ---------- */
   .modal-scrim { position:fixed; inset:0; background:rgba(20,16,12,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:50; opacity:0; pointer-events:none; transition:opacity .15s ease; }
@@ -1800,164 +1784,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   })();
   </script>
 
-  <!-- Phase 28: the tour's markup is now always present (not just on a
-       fresh account's first visit) so the "Take the tour" button can
-       replay it any time — see includes/tour_steps.php for the step
-       content and the matching engine script on tree.php, which the tour
-       now moves onto partway through. -->
-  <div class="tour-scrim" id="tourScrim">
-    <div class="tour-highlight" id="tourHighlight" hidden></div>
-    <div class="tour-tooltip" id="tourTooltip">
-      <h4 id="tourTitle"></h4>
-      <p id="tourBody"></p>
-      <div class="tour-footer">
-        <button type="button" class="tour-skip" id="tourSkipBtn">Skip tour</button>
-        <span class="tour-step-label" id="tourStepLabel"></span>
-        <button type="button" class="tour-next" id="tourNextBtn"></button>
-      </div>
-    </div>
-  </div>
-  <input type="hidden" id="tourCsrf" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES) ?>">
-  <script id="tourStepsData" type="application/json"><?= $tourStepsJsonSafe ?></script>
-  <script>
-  window.OURTHOLOGY_AUTOSTART_TOUR = <?= $autostartTour ? 'true' : 'false' ?>;
-  </script>
-  <script>
-  (function () {
-    "use strict";
-    // Phase 28: the walkthrough now spans two pages (timeline.php and
-    // tree.php — Phil's own training script covers both), so its state has
-    // to survive a real page navigation. sessionStorage carries the
-    // in-progress step across that; TOUR_PAGE says which page's steps this
-    // copy of the engine is allowed to show. Every step still points at a
-    // real element via a spotlight box that tracks its live position (or,
-    // for a couple of steps, is centered with nothing highlighted) —
-    // unchanged from the original single-page version.
-    var TOUR_PAGE = "timeline";
-    var TOUR_URLS = { timeline: "/timeline.php", tree: "/tree.php" };
-    var TOUR_STEPS = JSON.parse(document.getElementById("tourStepsData").textContent);
-
-    var step = -1;
-    var scrim = document.getElementById("tourScrim");
-    var highlight = document.getElementById("tourHighlight");
-    var tooltip = document.getElementById("tourTooltip");
-    var titleEl = document.getElementById("tourTitle");
-    var bodyEl = document.getElementById("tourBody");
-    var stepLabel = document.getElementById("tourStepLabel");
-    var nextBtn = document.getElementById("tourNextBtn");
-    var skipBtn = document.getElementById("tourSkipBtn");
-    var replayBtn = document.getElementById("tourReplayBtn");
-
-    function saveState(i) {
-      try {
-        sessionStorage.setItem("ourthologyTourStep", String(i));
-        sessionStorage.setItem("ourthologyTourActive", "1");
-      } catch (e) { /* private browsing etc — the tour just won't survive a page change */ }
-    }
-    function clearState() {
-      try {
-        sessionStorage.removeItem("ourthologyTourStep");
-        sessionStorage.removeItem("ourthologyTourActive");
-      } catch (e) {}
-    }
-
-    function place() {
-      var s = TOUR_STEPS[step];
-      titleEl.textContent = s.title;
-      bodyEl.textContent = s.body;
-      stepLabel.textContent = (step + 1) + " of " + TOUR_STEPS.length;
-      nextBtn.textContent = (step === TOUR_STEPS.length - 1) ? "Done" : "Next";
-
-      var target = s.target ? document.querySelector(s.target) : null;
-      if (!target) {
-        highlight.hidden = true;
-        tooltip.classList.add("tour-centered");
-        return;
-      }
-      tooltip.classList.remove("tour-centered");
-      if (typeof target.scrollIntoView === "function") {
-        // "auto" (instant), not "smooth" — a smooth scroll is still
-        // animating when the getBoundingClientRect() below runs, so the
-        // highlight and tooltip would be positioned from the target's
-        // pre-scroll spot. That's invisible for a target already on
-        // screen, but for one further down the page (like the memory
-        // cards) it placed the tooltip and its Next button off-screen
-        // entirely. Instant scroll reflows synchronously, so the very
-        // next measurement is the real, post-scroll position.
-        target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
-      }
-      var r = target.getBoundingClientRect();
-      var pad = 8;
-      highlight.hidden = false;
-      highlight.style.left = (r.left - pad) + "px";
-      highlight.style.top = (r.top - pad) + "px";
-      highlight.style.width = (r.width + pad * 2) + "px";
-      highlight.style.height = (r.height + pad * 2) + "px";
-
-      var tooltipW = 280, tooltipH = tooltip.offsetHeight || 160;
-      var spaceBelow = window.innerHeight - r.bottom;
-      var top = (spaceBelow > tooltipH + 24) ? (r.bottom + pad + 14) : Math.max(14, r.top - pad - 14 - tooltipH);
-      var left = Math.min(Math.max(14, r.left), window.innerWidth - tooltipW - 14);
-      tooltip.style.top = top + "px";
-      tooltip.style.left = left + "px";
-    }
-
-    function open_() {
-      scrim.classList.add("open");
-      place();
-    }
-
-    function finishTour() {
-      clearState();
-      scrim.classList.remove("open");
-      var fd = new FormData();
-      fd.append("action", "dismiss_tour");
-      fd.append("csrf_token", document.getElementById("tourCsrf").value);
-      // Best-effort, and always fired (replay or first run alike) — it just
-      // records "this account doesn't need the automatic first-run tour
-      // any more," which stays true either way. A network hiccup here only
-      // means the automatic tour could show once more on a future login.
-      fetch("/timeline.php", { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
-    }
-
-    function goToStep(i) {
-      if (i >= TOUR_STEPS.length) { finishTour(); return; }
-      var s = TOUR_STEPS[i];
-      if (s.page !== TOUR_PAGE) {
-        // The next step lives on the other page — hand off via
-        // sessionStorage and navigate there for real; that page's own copy
-        // of this same engine picks the tour back up on load (see the
-        // resume check below).
-        saveState(i);
-        window.location.href = TOUR_URLS[s.page];
-        return;
-      }
-      step = i;
-      saveState(i);
-      open_();
-    }
-
-    nextBtn.addEventListener("click", function () { goToStep(step + 1); });
-    skipBtn.addEventListener("click", finishTour);
-    window.addEventListener("resize", function () { if (step >= 0) place(); });
-    if (replayBtn) {
-      replayBtn.addEventListener("click", function () { goToStep(0); });
-    }
-
-    var resumeActive = false;
-    try { resumeActive = sessionStorage.getItem("ourthologyTourActive") === "1"; } catch (e) {}
-    if (resumeActive) {
-      var savedStep = 0;
-      try { savedStep = parseInt(sessionStorage.getItem("ourthologyTourStep") || "0", 10); } catch (e) {}
-      if (TOUR_STEPS[savedStep] && TOUR_STEPS[savedStep].page === TOUR_PAGE) {
-        step = savedStep;
-        saveState(step);
-        open_();
-      }
-    } else if (window.OURTHOLOGY_AUTOSTART_TOUR) {
-      goToStep(0);
-    }
-  })();
-  </script>
+  <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
 </body>
 </html>

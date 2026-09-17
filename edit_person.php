@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/tour_engine.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/custom_audience.php';
@@ -583,7 +584,7 @@ if ($postedProfile) {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Edit person — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=20">
+<link rel="stylesheet" href="/styles.css?v=21">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion for the profile-photo upload below. Pinned to the one
      version this library has ever published. If this fails to load, the
@@ -760,7 +761,7 @@ if ($postedProfile) {
 
       <div class="tab-panel" data-tab-panel="profile" <?= $activeTab === 'profile' ? '' : 'hidden' ?>>
       <div class="edit-columns">
-      <div class="edit-block">
+      <div class="edit-block" id="profileFieldsBlock">
       <h3 style="margin:4px 0 4px;">Profile</h3>
       <?php if ($canEdit): ?>
         <form method="post" style="margin-top:8px;">
@@ -982,7 +983,7 @@ if ($postedProfile) {
       </div>
       <?php endif; ?>
 
-      <div class="edit-block">
+      <div class="edit-block" id="avatarSectionBlock">
       <h3 style="margin:4px 0 4px;">Photo &amp; more</h3>
 
       <div class="avatar-box">
@@ -1063,7 +1064,7 @@ if ($postedProfile) {
 
       <div class="tab-panel" data-tab-panel="account" <?= $activeTab === 'account' ? '' : 'hidden' ?>>
       <div class="account-columns">
-        <div class="account-col">
+        <div class="account-col" id="customAudienceBlock">
           <h3 style="margin:4px 0 4px;">Custom Memory Settings</h3>
           <?php if ($canEdit): ?>
             <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
@@ -1116,7 +1117,7 @@ if ($postedProfile) {
             <?php endif; ?>
           <?php endif; ?>
         </div>
-        <div class="account-col">
+        <div class="account-col" id="notificationsBlock">
           <h3 style="margin:4px 0 4px;">Notifications</h3>
           <?php if ($personId === $myPersonId): ?>
             <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
@@ -1193,5 +1194,6 @@ if ($postedProfile) {
     });
   })();
   </script>
+  <?php ourthology_render_tour('edit_person', $myPersonId); ?>
 </body>
 </html>
