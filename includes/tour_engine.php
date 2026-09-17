@@ -57,6 +57,6 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
     window.OURTHOLOGY_AUTOSTART_TOUR = <?= $autostart ? 'true' : 'false' ?>;
     window.OURTHOLOGY_MY_PERSON_ID = <?= $myPersonId ?>;
     </script>
-    <script src="/tour.js?v=1"></script>
+    <script src="/tour.js?v=2"></script>
     <?php
 }

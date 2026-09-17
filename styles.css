@@ -204,3 +204,20 @@ button.btn-primary:hover { background: var(--accent-glow); }
   .media-picker-note { display:block; font-size:12px; color:var(--ink-faint); margin-top:6px; }
   .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
   .media-picker-status { display:none; font-size:12.5px; color:var(--ink-soft); margin-top:6px; }
+
+/* ---------- post-tour nudge (Phase 44) ----------
+   Shown once, right after the onboarding tour finishes (Done or Skip) --
+   see tour.js's finishTour()/showPostTourNudge(). Deliberately NOT part
+   of the tour's own #tourScrim/#tourAnnoLayer machinery, which darkens
+   and captures clicks across the whole page while open -- this needs to
+   sit quietly on an otherwise fully usable page. */
+  .post-tour-nudge { display:flex; align-items:flex-start; gap:10px; background:var(--accent-bg); border:1px solid var(--accent); border-radius:10px; padding:10px 14px; margin:0 0 14px; }
+  .post-tour-nudge[hidden] { display:none; }
+  .post-tour-nudge p { margin:0; font-size:14px; color:var(--ink-soft); line-height:1.5; }
+  .post-tour-nudge p a { color:var(--accent); font-weight:600; }
+  .post-tour-nudge button { flex:0 0 auto; border:none; background:transparent; color:var(--ink-faint); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
+  .post-tour-nudge button:hover { color:var(--accent); }
+  .post-tour-arrow { position:fixed; z-index:150; pointer-events:none; transform:translate(-50%, -100%); color:var(--accent); }
+  .post-tour-arrow-inner { animation: postTourArrowBounce .7s ease-in-out 4 both, postTourArrowFadeOut .5s ease-in 2.9s forwards; }
+  @keyframes postTourArrowBounce { 0%, 100% { transform:translateY(0); } 50% { transform:translateY(10px); } }
+  @keyframes postTourArrowFadeOut { to { opacity:0; } }

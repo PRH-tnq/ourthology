@@ -58,6 +58,14 @@
   var skipBtn = document.getElementById("tourSkipBtn");
   var replayBtn = document.getElementById("tourReplayBtn"); // only present on timeline.php
   var annoLayer = document.getElementById("tourAnnoLayer");
+  // Phase 44: the post-tour "get started" nudge and its dismiss button --
+  // like replayBtn above, these only exist on timeline.php's own markup,
+  // so every other page just leaves them null (see the null checks below).
+  var postTourNudge = document.getElementById("postTourNudge");
+  var postTourNudgeClose = document.getElementById("postTourNudgeClose");
+  if (postTourNudgeClose) {
+    postTourNudgeClose.addEventListener("click", function () { postTourNudge.hidden = true; });
+  }
   var annoSvg = annoLayer ? annoLayer.querySelector("svg.tour-anno-svg") : null;
 
   function saveState(i) {
@@ -311,6 +319,40 @@
     place();
   }
 
+  // Phase 44: a few bounces of a small arrow above a real element (used
+  // below to call out "+ Add a memory" once the tour is done), fully
+  // separate from the tour's own highlight/annotation machinery above --
+  // that all lives inside #tourScrim, which darkens and captures clicks
+  // across the whole page while .open, and this needs to run with the
+  // page otherwise fully usable underneath it.
+  function flashArrowAt(target) {
+    var r = target.getBoundingClientRect();
+    var wrap = document.createElement("div");
+    wrap.className = "post-tour-arrow";
+    wrap.style.left = (r.left + r.width / 2) + "px";
+    wrap.style.top = r.top + "px";
+    var inner = document.createElement("div");
+    inner.className = "post-tour-arrow-inner";
+    inner.innerHTML = '<svg viewBox="0 0 30 34" width="26" height="30" aria-hidden="true">'
+      + '<path d="M15 2 L15 24 M15 24 L7 16 M15 24 L23 16" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
+    wrap.appendChild(inner);
+    document.body.appendChild(wrap);
+    inner.addEventListener("animationend", function (e) {
+      if (e.animationName === "postTourArrowFadeOut") { wrap.remove(); }
+    });
+  }
+
+  // Phase 44: shown once, right after the tour finishes (Done or Skip --
+  // see finishTour() below, which sets the sessionStorage flag this reads,
+  // and the resume check at the bottom of this file, which calls this on
+  // the fresh page load that flag survives into).
+  function showPostTourNudge() {
+    try { sessionStorage.removeItem("ourthologyShowPostTourNudge"); } catch (e) {}
+    if (postTourNudge) { postTourNudge.hidden = false; }
+    var addMemoryLink = document.getElementById("tourAddMemory");
+    if (addMemoryLink) { flashArrowAt(addMemoryLink); }
+  }
+
   function finishTour() {
     clearState();
     clearAnnotations();
@@ -324,7 +366,28 @@
     // the automatic tour could show once more on a future login. Always
     // posted to timeline.php regardless of which of the tour's five pages
     // we finish on — that's the one page whose PHP handles dismiss_tour.
-    fetch("/timeline.php", { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
+    // sendBeacon (not fetch) because Phase 44 below follows this with a
+    // real navigation to timeline.php -- a fetch() issued right before a
+    // navigation can be cancelled by the browser before it completes,
+    // while sendBeacon is built specifically to survive that.
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/timeline.php", fd);
+    } else {
+      fetch("/timeline.php", { method: "POST", body: fd, credentials: "same-origin" }).catch(function () {});
+    }
+
+    // Phase 44: land back on the timeline with the "get started" nudge --
+    // whether the tour was finished or skipped, it's over either way, and
+    // the nudge is useful regardless. The flag survives a real navigation
+    // the same way an in-progress tour step already does (sessionStorage);
+    // already being on timeline.php (e.g. finishing a replay) skips the
+    // navigation and just shows it in place.
+    try { sessionStorage.setItem("ourthologyShowPostTourNudge", "1"); } catch (e) {}
+    if (TOUR_PAGE === "timeline") {
+      showPostTourNudge();
+    } else {
+      window.location.href = "/timeline.php";
+    }
   }
 
   function goToStep(i) {
@@ -367,5 +430,13 @@
     }
   } else if (window.OURTHOLOGY_AUTOSTART_TOUR) {
     goToStep(0);
+  }
+
+  // Phase 44: independent of the resume/autostart check above -- this
+  // fires on the fresh timeline.php load finishTour() just navigated to.
+  var showNudge = false;
+  try { showNudge = sessionStorage.getItem("ourthologyShowPostTourNudge") === "1"; } catch (e) {}
+  if (showNudge && TOUR_PAGE === "timeline") {
+    showPostTourNudge();
   }
 })();

@@ -362,7 +362,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=22">
+<link rel="stylesheet" href="/styles.css?v=23">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root {
@@ -698,6 +698,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       </div>
     </div>
 
+    <?php if ($isOwner): ?>
+    <div class="post-tour-nudge" id="postTourNudge" hidden>
+      <p>Let's get started &mdash; time to add your first memory! But first, don't forget to set up your profile: go to <a href="/tree.php">My tree</a>, then double-click your name (or tap the pencil icon if you're on mobile or a tablet), and add your birth date &mdash; that way your timeline starts in the right place.</p>
+      <button type="button" id="postTourNudgeClose" aria-label="Dismiss">&times;</button>
+    </div>
+    <?php endif; ?>
     <?php if ($notice): ?><p style="color:var(--accent);font-weight:600;"><?= htmlspecialchars($notice, ENT_QUOTES) ?></p><?php endif; ?>
     <?php if ($errors): ?>
       <div class="error"><?php foreach ($errors as $e): ?><div><?= htmlspecialchars($e, ENT_QUOTES) ?></div><?php endforeach; ?></div>
