@@ -109,6 +109,28 @@ button.btn-primary {
 
 button.btn-primary:hover { background: var(--accent-glow); }
 
+/* Phase 46: a secondary, outlined counterpart to .btn-primary -- same
+   size and shape, so a genuine alternative action (e.g. "start a new
+   family tree" on login.php) reads as an equally real choice rather
+   than a footnote link. */
+a.btn-secondary {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 22px;
+  padding: 10px 16px;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+a.btn-secondary:hover { background: var(--paper-2); }
+
 .error {
   background: var(--error-bg);
   color: var(--error);

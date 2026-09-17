@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Start a new family tree — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=24">
+<link rel="stylesheet" href="/styles.css?v=25">
 </head>
 <body>
   <div class="card">

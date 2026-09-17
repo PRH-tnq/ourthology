@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Log in — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=24">
+<link rel="stylesheet" href="/styles.css?v=25">
 </head>
 <body>
   <div class="card">
@@ -106,9 +106,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <!-- Phase 45: this used to read "New here? Create an account" -- the
          exact words someone who was actually invited would click, sending
          them into their own disconnected family tree instead of the one
-         they were meant to join. See roadmap-ideas.md. -->
+         they were meant to join. See roadmap-ideas.md.
+         Phase 46: Phil asked for the "start a new family tree" option to
+         be much more prominent than Phase 45 left it -- now a real
+         secondary button instead of a small footnote link, while the
+         "invited by a family member?" line above it still steers a real
+         invitee toward their personal link first. -->
     <p class="foot-link">Invited by a family member? You need their personal link — ask them to resend it from their tree page.</p>
-    <p class="foot-link" style="font-size:12px;">Starting a brand-new family tree instead? <a href="/signup.php">Start here</a>.</p>
+    <a href="/signup.php" class="btn-secondary">Start a new family tree</a>
   </div>
 </body>
 </html>
