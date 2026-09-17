@@ -4,8 +4,15 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 
+// Phase 40: if we got here via a "please log in first" bounce from a
+// page that needed auth (e.g. a pending-approval notification email
+// clicked while logged out), ?next carries where to send the user once
+// they're in -- validated so it can only ever be a same-site relative
+// path, never used to redirect anywhere off ourthology.com.
+$next = ourthology_safe_redirect_target($_GET['next'] ?? $_POST['next'] ?? null);
+
 if (current_user_id() !== null) {
-    header('Location: /timeline.php');
+    header('Location: ' . ($next ?? '/timeline.php'));
     exit;
 }
 
@@ -36,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             login_user((int) $user['id']);
             ourthology_pdo()->prepare('UPDATE users SET last_login_at = NOW() WHERE id = :id')
                 ->execute(['id' => $user['id']]);
-            header('Location: /timeline.php');
+            header('Location: ' . ($next ?? '/timeline.php'));
             exit;
         }
 
@@ -84,6 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <form method="post" novalidate>
       <?= csrf_field() ?>
+      <?php if ($next !== null): ?>
+        <input type="hidden" name="next" value="<?= htmlspecialchars($next, ENT_QUOTES) ?>">
+      <?php endif; ?>
       <label for="email">Email</label>
       <input type="email" id="email" name="email" value="<?= htmlspecialchars($email, ENT_QUOTES) ?>" required autofocus>
 

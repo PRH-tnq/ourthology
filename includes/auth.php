@@ -23,12 +23,41 @@ function current_user_id(): ?int
     return isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 }
 
-/** Call at the top of any page that requires a logged-in user. */
+/**
+ * Phase 40: true only for a same-site relative path this app can safely
+ * redirect to -- used both to build the ?next= a login bounce carries,
+ * and to validate ?next= (and login.php's own hidden field) before ever
+ * putting it in a Location header, since that value round-trips through
+ * the browser and a crafted one ("https://evil.example", "//evil.example")
+ * is exactly how an open-redirect vulnerability happens.
+ */
+function ourthology_safe_redirect_target(?string $raw): ?string
+{
+    if ($raw === null || $raw === '') {
+        return null;
+    }
+    if ($raw[0] !== '/' || (isset($raw[1]) && $raw[1] === '/')) {
+        return null; // not "/...", or protocol-relative "//..."
+    }
+    if (str_contains($raw, "\r") || str_contains($raw, "\n")) {
+        return null; // header-injection guard, belt and braces
+    }
+    return $raw;
+}
+
+/**
+ * Call at the top of any page that requires a logged-in user. Bounces to
+ * /login.php?next=<here>, so a deep link clicked while logged out --
+ * a pending-approval notification email, say -- lands back on the page
+ * it was meant for once the user's signed in, rather than dumping them
+ * on the generic timeline.
+ */
 function require_login(): int
 {
     $id = current_user_id();
     if ($id === null) {
-        header('Location: /login.php');
+        $next = ourthology_safe_redirect_target($_SERVER['REQUEST_URI'] ?? null);
+        header('Location: /login.php' . ($next !== null ? '?next=' . rawurlencode($next) : ''));
         exit;
     }
     return $id;

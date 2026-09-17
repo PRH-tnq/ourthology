@@ -377,12 +377,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($wantsNotify && $submittedEmail === '') {
                 $errors[] = 'Add an email address to turn on pending-approval emails.';
             } else {
-                $encrypted = $submittedEmail !== '' ? ourthology_encrypt_notify_email($submittedEmail) : null;
-                $pdo->prepare('UPDATE users SET notify_email_enc = :email, notify_pending_tags = :notify WHERE id = :uid')
-                    ->execute(['email' => $encrypted, 'notify' => $wantsNotify ? 1 : 0, 'uid' => $myUserId]);
-                $_SESSION['flash_edit_notice'] = 'Notification settings saved.';
-                header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
-                exit;
+                try {
+                    $encrypted = $submittedEmail !== '' ? ourthology_encrypt_notify_email($submittedEmail) : null;
+                    $pdo->prepare('UPDATE users SET notify_email_enc = :email, notify_pending_tags = :notify WHERE id = :uid')
+                        ->execute(['email' => $encrypted, 'notify' => $wantsNotify ? 1 : 0, 'uid' => $myUserId]);
+                    $_SESSION['flash_edit_notice'] = 'Notification settings saved.';
+                    header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
+                    exit;
+                } catch (Throwable $e) {
+                    // A missing or malformed notify_email_key in the secrets file
+                    // (not yet added, or added wrong) throws from crypto.php --
+                    // surface that as a normal form error instead of a blank
+                    // fatal-error page inside the tree.php popup iframe, and log
+                    // the real reason server-side for whoever is finishing the
+                    // Phase 40 setup steps to diagnose.
+                    error_log('ourthology: notification settings save failed: ' . $e->getMessage());
+                    $errors[] = "Could not save notification settings right now -- the site's email setup looks incomplete. Please try again later.";
+                }
             }
         }
     }

@@ -104,7 +104,7 @@ function ourthology_render_pending_tag_email(
     string $entryBody,
     ?string $occurredOn
 ): array {
-    $pendingUrl = ourthology_absolute_url('/pending.php#waiting-on-you');
+    $pendingUrl = ourthology_absolute_url('/pending.php?goto=waiting-on-you');
 
     $memoryLabel = $entryTitle !== '' ? $entryTitle : 'Untitled memory';
     $snippet = trim(preg_replace('/\s+/', ' ', $entryBody));

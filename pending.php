@@ -11,7 +11,8 @@ require_login();
 $me = current_user_with_person();
 if ($me === null) {
     logout_user();
-    header('Location: /login.php');
+    $next = ourthology_safe_redirect_target($_SERVER['REQUEST_URI'] ?? null);
+    header('Location: /login.php' . ($next !== null ? '?next=' . rawurlencode($next) : ''));
     exit;
 }
 $pdo = ourthology_pdo();
@@ -357,5 +358,17 @@ function ourthology_pending_memory_preview_html(array $row): string
 
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
   </div>
+  <?php if (($_GET['goto'] ?? '') === 'waiting-on-you'): ?>
+  <script>
+    // Phase 40: a pending-approval notification email links here with
+    // ?goto=waiting-on-you rather than a plain #waiting-on-you fragment,
+    // because a logged-out click has to go through /login.php first --
+    // fragments never reach the server, so they don't survive that
+    // round trip, but this query param does (see require_login() /
+    // login.php's ?next= handling). Scrolls straight to the section
+    // once the page has actually loaded.
+    document.getElementById('waiting-on-you')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  </script>
+  <?php endif; ?>
 </body>
 </html>
