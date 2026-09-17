@@ -117,6 +117,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "You don't have an approved tag on that memory.";
             }
         }
+    } elseif ($action === 'add_tagged_media') {
+        // Phase 41: a person with an APPROVED tag on a memory may add --
+        // never remove or replace -- media on it, same spirit as their own
+        // note just above, just able to carry a photo instead of only
+        // text. The memory itself (title, body, visibility, and any
+        // EXISTING media) stays the owner's alone to change (see
+        // add_entry.php's edit mode); this path only ever INSERTs new
+        // media rows, nothing else.
+        $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+        if ($entryId === false || !person_has_approved_tag($pdo, $entryId, $myPersonId)) {
+            $errors[] = "You don't have an approved tag on that memory.";
+        } else {
+            // The memory's own owner -- not me -- is whose folder and
+            // storage total this media belongs to, same as every other
+            // file already on their timeline (Phase 34's usage accounting
+            // is per memory-owner, not per-uploader; an occasional added
+            // photo from someone I've tagged and approved staying inside
+            // that same accounting keeps this a lightweight, family-trust
+            // feature rather than needing its own separate quota).
+            $ownerStmt = $pdo->prepare('SELECT person_id FROM timeline_entries WHERE id = :id');
+            $ownerStmt->execute(['id' => $entryId]);
+            $ownerPersonId = $ownerStmt->fetchColumn();
+            $existingCountStmt = $pdo->prepare('SELECT COUNT(*) FROM media WHERE timeline_entry_id = :eid');
+            $existingCountStmt->execute(['eid' => $entryId]);
+            $existingCount = (int) $existingCountStmt->fetchColumn();
+            $incoming = normalize_multi_file_upload($_FILES['media'] ?? []);
+
+            if ($ownerPersonId === false) {
+                $errors[] = "That memory doesn't exist.";
+            } elseif (count($incoming) === 0) {
+                $errors[] = 'Choose at least one photo, video, or document to add.';
+            } elseif ($existingCount + count($incoming) > MEDIA_MAX_FILES_PER_ENTRY) {
+                $errors[] = 'Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files total on one entry.';
+            } else {
+                $stored = [];
+                try {
+                    $pdo->beginTransaction();
+                    $stored = store_uploaded_media_files($_FILES['media'] ?? [], (int) $ownerPersonId);
+                    $mediaStmt = $pdo->prepare(
+                        'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
+                         VALUES (:eid, :path, :mime, :size, :w, :h)'
+                    );
+                    foreach ($stored as $file) {
+                        $mediaStmt->execute([
+                            'eid'  => $entryId,
+                            'path' => $file['file_path'],
+                            'mime' => $file['mime_type'],
+                            'size' => $file['byte_size'],
+                            'w'    => $file['width'],
+                            'h'    => $file['height'],
+                        ]);
+                    }
+                    $pdo->commit();
+                    $notice = count($stored) === 1 ? 'Photo added.' : count($stored) . ' files added.';
+                } catch (RuntimeException $e) {
+                    $pdo->rollBack();
+                    $errors[] = $e->getMessage();
+                } catch (PDOException $e) {
+                    $pdo->rollBack();
+                    foreach ($stored as $done) {
+                        delete_media_file($done['file_path']);
+                    }
+                    error_log('ourthology add_tagged_media error: ' . $e->getMessage());
+                    $errors[] = 'Something went wrong saving that. Please try again.';
+                }
+            }
+        }
     } elseif ($action === 'dismiss_tour') {
         // Fired by the onboarding tour's own JS (Skip, or the last step's
         // "Get started") — always about the CURRENTLY logged-in account,
@@ -518,6 +585,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .viewer-thought-view { font-size:14.5px; line-height:1.65; color:var(--ink-soft); white-space:pre-wrap; margin:0; }
   .viewer-thought-view:empty::before { content:"No thoughts written yet."; color:var(--ink-faint); font-style:italic; }
   .viewer-actions { display:flex; justify-content:space-between; align-items:center; padding:14px 24px; border-top:1px solid var(--line); }
+  /* Pre-existing bug, found incidentally while testing Phase 41: this link
+     carries its own inline "display:inline-block" (needed for its padding
+     when visible), which -- because an inline style always outranks a
+     plain stylesheet rule -- silently defeated the ordinary [hidden]{display:none}
+     rule the browser applies for free everywhere else in this modal. A
+     viewer with no edit rights (e.g. someone who only has an approved tag
+     on the memory, not its owner) could see a clickable "Edit" link that
+     led nowhere but a 403 from add_entry.php's own server-side check --
+     never a real permission hole, just a confusing dead end. !important is
+     the only way to override an inline style from here. */
+  #viewerEditLink[hidden] { display:none !important; }
 
   /* Notes family members tagged on this memory have added — read-only for
      everyone else, always shown when at least one exists (regardless of
@@ -714,6 +792,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <label for="viewerMyNoteText">Your note on this memory <span style="text-transform:none;font-weight:400;">(shown to everyone who can see it)</span></label>
             <textarea name="note" id="viewerMyNoteText" placeholder="Add what you remember about this…"></textarea>
             <button type="submit" class="btn-ghost">Save note</button>
+          </form>
+
+          <form method="post" enctype="multipart/form-data" class="viewer-my-note" id="viewerAddMediaForm" hidden>
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="add_tagged_media">
+            <input type="hidden" name="entry_id" id="viewerAddMediaEntryId" value="">
+            <label for="viewerAddMediaInput">Add your own photo, video, or document to this memory</label>
+            <input type="file" id="viewerAddMediaInput" name="media[]" multiple
+              accept="image/*,.heic,.heif,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+            <button type="submit" class="btn-ghost">Add media</button>
           </form>
         </div>
       </div>
@@ -1623,6 +1711,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerMyNoteForm = document.getElementById("viewerMyNoteForm");
     var viewerMyNoteEntryId = document.getElementById("viewerMyNoteEntryId");
     var viewerMyNoteText = document.getElementById("viewerMyNoteText");
+    var viewerAddMediaForm = document.getElementById("viewerAddMediaForm");
+    var viewerAddMediaEntryId = document.getElementById("viewerAddMediaEntryId");
 
     function viewerMediaViewHtml(mediaList) {
       var list = mediaList || [];
@@ -1671,8 +1761,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerMyNoteForm.hidden = false;
         viewerMyNoteEntryId.value = e.id;
         viewerMyNoteText.value = e.myNote || "";
+        viewerAddMediaForm.hidden = false;
+        viewerAddMediaEntryId.value = e.id;
       } else {
         viewerMyNoteForm.hidden = true;
+        viewerAddMediaForm.hidden = true;
       }
 
       // Edit/Delete are per-MEMORY, not per-page: a memory shared onto my
