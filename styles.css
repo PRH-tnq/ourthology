@@ -118,6 +118,20 @@ button.btn-primary:hover { background: var(--accent-glow); }
   margin-top: 16px;
 }
 
+/* Phase 45: a neutral explanatory box, distinct from .error -- used on
+   signup.php to warn that it starts a brand-new, disconnected family
+   tree before anyone fills the form in. */
+.notice {
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 16px;
+}
+
 .foot-link {
   margin-top: 20px;
   font-size: 14px;

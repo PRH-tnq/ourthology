@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Log in — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=23">
+<link rel="stylesheet" href="/styles.css?v=24">
 </head>
 <body>
   <div class="card">
@@ -103,7 +103,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <button type="submit" class="btn-primary">Log in</button>
     </form>
 
-    <p class="foot-link">New here? <a href="/signup.php">Create an account</a></p>
+    <!-- Phase 45: this used to read "New here? Create an account" -- the
+         exact words someone who was actually invited would click, sending
+         them into their own disconnected family tree instead of the one
+         they were meant to join. See roadmap-ideas.md. -->
+    <p class="foot-link">Invited by a family member? You need their personal link — ask them to resend it from their tree page.</p>
+    <p class="foot-link" style="font-size:12px;">Starting a brand-new family tree instead? <a href="/signup.php">Start here</a>.</p>
   </div>
 </body>
 </html>

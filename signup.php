@@ -15,6 +15,10 @@ $first  = '';
 $middle = '';
 $surname = '';
 $email  = '';
+// Phase 45: server-enforced confirmation that this really is meant to
+// start a brand-new, disconnected family tree -- see roadmap-ideas.md
+// ("Signup without a claim link creates an invisible orphan island").
+$confirmNewTree = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -25,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
     $confirm  = (string) ($_POST['confirm_password'] ?? '');
+    $confirmNewTree = isset($_POST['confirm_new_tree']);
 
     if ($first === '') {
         $errors[] = 'First name is required.';
@@ -37,6 +42,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($password !== $confirm) {
         $errors[] = 'Passwords do not match.';
+    }
+    if (!$confirmNewTree) {
+        $errors[] = 'Please confirm you understand this starts a brand-new family tree before continuing.';
     }
 
     if (!$errors) {
@@ -102,8 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign up — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=23">
+<title>Start a new family tree — ourthology.com</title>
+<link rel="stylesheet" href="/styles.css?v=24">
 </head>
 <body>
   <div class="card">
@@ -131,6 +139,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
     <?php endif; ?>
 
+    <div class="notice">
+      This creates a brand-new, separate family archive on ourthology.com —
+      not connected to anyone already here. If a family member already added
+      you to their tree, use the personal invite link they sent you instead
+      (ask them to resend it if you've lost it) — don't create an account here,
+      or you'll end up in your own disconnected tree instead of theirs.
+    </div>
+
     <form method="post" novalidate>
       <?= csrf_field() ?>
       <div class="row-2">
@@ -155,7 +171,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <label for="confirm_password">Confirm password</label>
       <input type="password" id="confirm_password" name="confirm_password" minlength="10" required>
 
-      <button type="submit" class="btn-primary">Create account</button>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:16px 0 4px;">
+        <input type="checkbox" id="confirm_new_tree" name="confirm_new_tree" value="1" style="margin-top:2px;" <?= $confirmNewTree ? 'checked' : '' ?> required>
+        <span>I understand this starts a brand-new family tree, separate from any existing one on ourthology.com.</span>
+      </label>
+
+      <button type="submit" class="btn-primary">Start my new family tree</button>
     </form>
 
     <p class="foot-link">Already have an account? <a href="/login.php">Log in</a></p>

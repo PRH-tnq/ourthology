@@ -127,7 +127,7 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claim your record — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=23">
+<link rel="stylesheet" href="/styles.css?v=24">
 </head>
 <body>
   <div class="card">
@@ -153,7 +153,12 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
           <div><?= htmlspecialchars($err, ENT_QUOTES) ?></div>
         <?php endforeach; ?>
       </div>
-      <p class="foot-link"><a href="/login.php">Log in</a> · <a href="/signup.php">Sign up</a></p>
+      <!-- Phase 45: "Sign up" is no longer an equal-weight option next to
+           a failed claim -- that was the single most likely way someone
+           who was genuinely invited (an expired/mistyped link) ended up
+           silently founding their own disconnected family tree instead. -->
+      <p class="foot-link">Already have an account? <a href="/login.php">Log in</a>.</p>
+      <p class="foot-link" style="font-size:12px;">Not being invited to an existing family? <a href="/signup.php">Start a new family tree</a> instead.</p>
 
     <?php elseif ($alreadyLoggedIn): ?>
       <p>You're already logged in, so you can't claim another record from this session.</p>
