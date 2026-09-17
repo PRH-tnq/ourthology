@@ -430,7 +430,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=21">
+<link rel="stylesheet" href="/styles.css?v=22">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -458,41 +458,10 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   .row-3 input { text-align:center; }
   .date-slot span { display:block; font-size:11px; font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink-faint); text-align:center; margin-top:4px; }
 
-  /* Multi-file attach widget — matching the prototype's own drag-and-drop
-     "photo-drop" composer widget: an empty-state dropzone that turns into a
-     grid of small thumbnails/icons once one or more files are attached.
-     When editing, the grid can start pre-populated with the entry's
-     existing files (see the "kept" array in the script below). */
-  .photo-drop { border:2px dashed var(--line); border-radius:14px; padding:16px; cursor:pointer; background:var(--paper-2); transition:border-color .15s ease, background .15s ease; }
-  .photo-drop:hover, .photo-drop.dragover { border-color:var(--accent); background:var(--accent-bg); }
-  .media-picker-empty { display:flex; align-items:center; gap:13px; }
-  .media-picker-empty[hidden] { display:none; }
-  .photo-drop .thumb { width:44px; height:44px; border-radius:10px; background:var(--paper); display:flex; align-items:center; justify-content:center; overflow:hidden; flex:0 0 auto; color:var(--ink-faint); }
-  .photo-drop .thumb svg { width:20px; height:20px; }
-  .photo-drop .copy { font-size:13.5px; color:var(--ink-soft); }
-  .photo-drop .copy b { color:var(--ink); }
-  .photo-drop .copy .paste-hint { display:block; font-size:11.5px; opacity:.75; margin-top:2px; }
-  .media-picker-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(72px,1fr)); gap:8px; }
-  .media-picker-grid[hidden] { display:none; }
-  .pick-tile { position:relative; aspect-ratio:1; border-radius:10px; border:1px solid var(--line); background:var(--paper); overflow:hidden; display:flex; align-items:center; justify-content:center; color:var(--ink-faint); }
-  .pick-tile img { width:100%; height:100%; object-fit:cover; }
-  .pick-tile.has-video, .pick-tile.has-doc { flex-direction:column; gap:4px; padding:6px 4px; text-align:center; }
-  /* Phase 36: a HEIC/HEIF file shows this spinner tile while heic2any
-     converts it client-side -- swapped out for a real thumbnail (or,
-     failing that, a plain document tile carrying the original HEIC file
-     for the server to convert) the moment conversion settles. */
-  .tile-spinner { width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:ourthology-spin .8s linear infinite; }
-  @keyframes ourthology-spin { to { transform:rotate(360deg); } }
-  .pick-tile.has-video svg, .pick-tile.has-doc svg { width:22px; height:22px; flex:0 0 auto; }
-  .pick-tile .media-tile-badge { font-size:8.5px; font-weight:800; letter-spacing:.04em; color:var(--ink-soft); background:rgba(255,255,255,.75); border-radius:5px; padding:1px 5px; }
-  .pick-tile .media-tile-name { font-size:9px; font-weight:700; color:var(--ink-soft); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 2px; }
-  .pick-tile--add { border:2px dashed var(--line); background:transparent; cursor:pointer; color:var(--ink-faint); transition:border-color .15s ease, color .15s ease, background .15s ease; }
-  .pick-tile--add svg { width:18px; height:18px; }
-  .pick-tile--add:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-bg); }
-  .pick-remove { position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; border:none; background:rgba(26,23,20,.7); color:#fff; font-size:13px; line-height:1; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; }
-  .pick-remove:hover { background:var(--accent); }
-  .media-picker-note { display:block; font-size:12px; color:var(--ink-faint); margin-top:6px; }
-  .media-picker-error { display:none; font-size:12.5px; color:var(--accent); margin-top:6px; }
+  /* Phase 43: this whole multi-file attach widget's CSS moved to the
+     shared styles.css -- timeline.php's memory-viewer "add media" form
+     now uses the same #photoDrop pattern, so it's no longer only ever
+     needed on this one page. See styles.css for the rules themselves. */
   .for-banner { background:var(--paper-2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; font-size:13.5px; color:var(--ink-soft); margin-bottom:14px; }
   .for-banner strong { color:var(--ink); }
 

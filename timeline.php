@@ -126,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // add_entry.php's edit mode); this path only ever INSERTs new
         // media rows, nothing else.
         $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+        $addedMedia = [];
         if ($entryId === false || !person_has_approved_tag($pdo, $entryId, $myPersonId)) {
             $errors[] = "You don't have an approved tag on that memory.";
         } else {
@@ -168,14 +169,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'w'    => $file['width'],
                             'h'    => $file['height'],
                         ]);
+                        // Phase 43: the freshly-inserted row's own id is what the
+                        // AJAX response below needs to build a working
+                        // /media.php?id=... URL for each newly-added file, so it's
+                        // captured here rather than re-querying everything back out
+                        // afterward.
+                        $addedMedia[] = [
+                            'kind' => str_starts_with($file['mime_type'], 'video/')
+                                ? 'video'
+                                : (str_starts_with($file['mime_type'], 'image/') ? 'image' : 'file'),
+                            'url'  => '/media.php?id=' . (int) $pdo->lastInsertId(),
+                        ];
                     }
                     $pdo->commit();
                     $notice = count($stored) === 1 ? 'Photo added.' : count($stored) . ' files added.';
                 } catch (RuntimeException $e) {
                     $pdo->rollBack();
+                    $addedMedia = [];
                     $errors[] = $e->getMessage();
                 } catch (PDOException $e) {
                     $pdo->rollBack();
+                    $addedMedia = [];
                     foreach ($stored as $done) {
                         delete_media_file($done['file_path']);
                     }
@@ -183,6 +197,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $errors[] = 'Something went wrong saving that. Please try again.';
                 }
             }
+        }
+
+        // Phase 43: the memory-viewer modal now submits this form over
+        // fetch() so it can stay open and update the media grid in place --
+        // the old plain-form full-page POST+reload closed the modal and put
+        // any success/error message at the top of an unrelated-looking fresh
+        // page load, easy to miss (the most likely explanation behind a
+        // report that "Add Media" doesn't work). A hidden "ajax" field marks
+        // a fetch() submission; a non-JS fallback (no such field) still gets
+        // the normal full-page render below, unchanged.
+        if (isset($_POST['ajax'])) {
+            header('Content-Type: application/json');
+            echo json_encode(empty($errors)
+                ? ['ok' => true, 'notice' => $notice, 'media' => $addedMedia]
+                : ['ok' => false, 'error' => $errors[array_key_last($errors)]]);
+            exit;
         }
     } elseif ($action === 'dismiss_tour') {
         // Fired by the onboarding tour's own JS (Skip, or the last step's
@@ -332,7 +362,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=21">
+<link rel="stylesheet" href="/styles.css?v=22">
+<script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -781,11 +812,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <form method="post" enctype="multipart/form-data" class="viewer-my-note" id="viewerAddMediaForm" hidden>
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="add_tagged_media">
+            <input type="hidden" name="ajax" value="1">
             <input type="hidden" name="entry_id" id="viewerAddMediaEntryId" value="">
             <label for="viewerAddMediaInput">Add your own photo, video, or document to this memory</label>
-            <input type="file" id="viewerAddMediaInput" name="media[]" multiple
-              accept="image/*,.heic,.heif,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
-            <button type="submit" class="btn-ghost">Add media</button>
+            <div class="photo-drop media-picker" id="viewerAddMediaDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
+              <div class="media-picker-empty" id="viewerAddMediaDropEmpty" hidden>
+                <div class="thumb">
+                  <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
+                </div>
+                <div class="copy"><b>Click to attach</b> or drop files here<span class="paste-hint">You can also paste from your clipboard, and add more than one</span></div>
+              </div>
+              <div class="media-picker-grid" id="viewerAddMediaGrid" hidden></div>
+              <input type="file" id="viewerAddMediaInput" name="media[]" multiple hidden
+                accept="image/*,.heic,.heif,video/*,application/pdf,.pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+            </div>
+            <p class="media-picker-error" id="viewerAddMediaError"></p>
+            <p class="media-picker-status" id="viewerAddMediaStatus"></p>
+            <button type="submit" class="btn-ghost" id="viewerAddMediaSubmitBtn">Add media</button>
           </form>
         </div>
       </div>
@@ -1698,6 +1741,235 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerAddMediaForm = document.getElementById("viewerAddMediaForm");
     var viewerAddMediaEntryId = document.getElementById("viewerAddMediaEntryId");
 
+    // Phase 43: a richer, drag-and-drop-capable file picker for the "add
+    // media to a memory I'm tagged on" form -- matching add_entry.php's own
+    // #photoDrop pattern (same CSS, now shared via styles.css) but simpler,
+    // since this form only ever ADDS new files: there's no "kept" existing-
+    // media list to render alongside it (the memory's existing media is
+    // already shown, read-only, in #viewerMedia above). Submitted over
+    // fetch() below (see the "submit" listener further down) so the memory
+    // viewer stays open and the media grid updates in place, instead of the
+    // old plain-form full-page POST that closed the modal and put any
+    // error/success message at the top of an unrelated-looking fresh page
+    // load. Names are all "vam"-prefixed to avoid colliding with this same
+    // big IIFE's other top-level names (render, place, entries, and so on).
+    var vamDropzone = document.getElementById("viewerAddMediaDrop");
+    var vamEmptyState = document.getElementById("viewerAddMediaDropEmpty");
+    var vamGrid = document.getElementById("viewerAddMediaGrid");
+    var vamInput = document.getElementById("viewerAddMediaInput");
+    var vamErrorEl = document.getElementById("viewerAddMediaError");
+    var vamStatusEl = document.getElementById("viewerAddMediaStatus");
+    var vamSubmitBtn = document.getElementById("viewerAddMediaSubmitBtn");
+    var vamPending = []; // { file, kind, url }
+    var vamRemainingSlots = 10; // recomputed per-memory in openViewer() below
+    var vamSubmitting = false;
+    var vamStatusTimer = null;
+    var VAM_MAX_BYTES = 25 * 1024 * 1024;
+    var VAM_HEIC_RE = /\.(heic|heif)$/i;
+    var VAM_ADD_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 4v12M4 10h12" stroke-linecap="round"/></svg>';
+
+    function vamKindOfFile(file) {
+      if (file.type.indexOf("image/") === 0) return "image";
+      if (file.type.indexOf("video/") === 0) return "video";
+      return "document";
+    }
+    function vamExtLabel(name) {
+      var m = /\.([a-z0-9]+)$/i.exec(name || "");
+      return m ? m[1].toUpperCase() : "FILE";
+    }
+    function vamTileHtml(item) {
+      if (item.kind === "converting") return '<span class="tile-spinner" aria-hidden="true"></span><span class="media-tile-name">Converting\u2026</span>';
+      if (item.kind === "image") return '<img src="' + item.url + '" alt="">';
+      if (item.kind === "video") return VIDEO_ICON + '<span class="media-tile-badge">Video</span>';
+      return DOC_ICON + '<span class="media-tile-name">' + escapeHtml(item.file.name) + '</span><span class="media-tile-badge">' + escapeHtml(vamExtLabel(item.file.name)) + '</span>';
+    }
+    function vamShowError(msg) {
+      vamErrorEl.textContent = msg || "";
+      vamErrorEl.style.display = msg ? "block" : "none";
+    }
+    function vamShowStatus(msg) {
+      if (vamStatusTimer) { clearTimeout(vamStatusTimer); vamStatusTimer = null; }
+      vamStatusEl.textContent = msg || "";
+      vamStatusEl.style.display = msg ? "block" : "none";
+      if (msg) {
+        vamStatusTimer = setTimeout(function () { vamStatusEl.style.display = "none"; }, 4000);
+      }
+    }
+    function vamSyncInput() {
+      var dt = new DataTransfer();
+      vamPending.forEach(function (item) { if (item.file) dt.items.add(item.file); });
+      vamInput.files = dt.files;
+    }
+    function vamRender() {
+      if (!vamPending.length) {
+        vamEmptyState.hidden = false;
+        vamGrid.hidden = true;
+        vamGrid.innerHTML = "";
+        return;
+      }
+      vamEmptyState.hidden = true;
+      vamGrid.hidden = false;
+      var tiles = vamPending.map(function (item, i) {
+        var cls = item.kind === "video" ? " has-video" : (item.kind !== "image" ? " has-doc" : "");
+        return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + vamTileHtml(item) +
+          '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">\u00d7</button></div>';
+      }).join("");
+      if (vamPending.length < vamRemainingSlots) {
+        tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + VAM_ADD_ICON + '</div>';
+      }
+      vamGrid.innerHTML = tiles;
+    }
+    function vamLooksLikeHeic(file) {
+      return VAM_HEIC_RE.test(file.name || "") || file.type === "image/heic" || file.type === "image/heif";
+    }
+    function vamHeicToJpegFile(file) {
+      if (typeof heic2any !== "function") return Promise.reject(new Error("heic2any not available"));
+      return heic2any({ blob: file, toType: "image/jpeg", quality: 0.88 }).then(function (result) {
+        var blob = Array.isArray(result) ? result[0] : result;
+        var newName = file.name.replace(VAM_HEIC_RE, "") + ".jpg";
+        return new File([blob], newName, { type: "image/jpeg" });
+      });
+    }
+    function vamAddOrdinaryFile(f) {
+      var kind = vamKindOfFile(f);
+      vamPending.push({ file: f, kind: kind, url: kind === "image" ? URL.createObjectURL(f) : null });
+    }
+    function vamAddHeicFile(f) {
+      var placeholder = { file: f, kind: "converting", url: null };
+      vamPending.push(placeholder);
+      vamSyncInput();
+      vamRender();
+      vamHeicToJpegFile(f).then(function (jpegFile) {
+        var idx = vamPending.indexOf(placeholder);
+        if (idx === -1) return;
+        vamPending[idx] = { file: jpegFile, kind: "image", url: URL.createObjectURL(jpegFile) };
+        vamSyncInput();
+        vamRender();
+      }).catch(function () {
+        var idx = vamPending.indexOf(placeholder);
+        if (idx === -1) return;
+        vamPending[idx] = { file: f, kind: "document", url: null };
+        vamRender();
+      });
+    }
+    function vamAddFiles(fileList) {
+      var incoming = Array.prototype.slice.call(fileList || []);
+      if (!incoming.length) return;
+      vamShowError("");
+      for (var i = 0; i < incoming.length; i++) {
+        if (vamPending.length >= vamRemainingSlots) {
+          vamShowError(vamRemainingSlots <= 0 ? "This memory already has the most files it can hold." : "Attach at most " + vamRemainingSlots + " more file" + (vamRemainingSlots === 1 ? "" : "s") + " to this memory.");
+          break;
+        }
+        var f = incoming[i];
+        if (f.size > VAM_MAX_BYTES) { vamShowError('"' + f.name + '" is larger than 25MB and was skipped.'); continue; }
+        if (vamLooksLikeHeic(f)) { vamAddHeicFile(f); continue; }
+        vamAddOrdinaryFile(f);
+      }
+      vamSyncInput();
+      vamRender();
+    }
+    function vamRemoveAt(idx) {
+      var item = vamPending[idx];
+      if (item && item.url) URL.revokeObjectURL(item.url);
+      vamPending.splice(idx, 1);
+      vamSyncInput();
+      vamRender();
+    }
+    function vamReset() {
+      vamPending.forEach(function (item) { if (item.url) URL.revokeObjectURL(item.url); });
+      vamPending = [];
+      vamSyncInput();
+      vamShowError("");
+      vamShowStatus("");
+      vamRender();
+    }
+    if (vamDropzone) {
+      vamDropzone.addEventListener("click", function (e) {
+        var removeBtn = e.target.closest(".pick-remove");
+        if (removeBtn) {
+          e.stopPropagation();
+          vamRemoveAt(parseInt(removeBtn.getAttribute("data-pending-idx"), 10));
+          return;
+        }
+        if (e.target.closest(".pick-tile") && !e.target.closest(".pick-tile--add")) return;
+        vamInput.click();
+      });
+      vamDropzone.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); vamInput.click(); }
+      });
+      ["dragenter", "dragover"].forEach(function (evtName) {
+        vamDropzone.addEventListener(evtName, function (e) { e.preventDefault(); e.stopPropagation(); vamDropzone.classList.add("dragover"); });
+      });
+      ["dragleave", "drop"].forEach(function (evtName) {
+        vamDropzone.addEventListener(evtName, function (e) {
+          e.preventDefault(); e.stopPropagation();
+          if (evtName === "dragleave" && e.target !== vamDropzone) return;
+          vamDropzone.classList.remove("dragover");
+        });
+      });
+      vamDropzone.addEventListener("drop", function (e) {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) vamAddFiles(e.dataTransfer.files);
+      });
+    }
+    if (vamInput) {
+      vamInput.addEventListener("change", function () { vamAddFiles(vamInput.files); });
+    }
+    document.addEventListener("paste", function (e) {
+      if (!viewerScrim.classList.contains("open") || viewerAddMediaForm.hidden || !e.clipboardData) return;
+      var files = [];
+      if (e.clipboardData.files && e.clipboardData.files.length) {
+        files = Array.prototype.slice.call(e.clipboardData.files);
+      } else if (e.clipboardData.items) {
+        for (var i = 0; i < e.clipboardData.items.length; i++) {
+          if (e.clipboardData.items[i].kind === "file") {
+            var f = e.clipboardData.items[i].getAsFile();
+            if (f) files.push(f);
+          }
+        }
+      }
+      if (files.length) { e.preventDefault(); vamAddFiles(files); }
+    });
+    viewerAddMediaForm.addEventListener("submit", function (evt) {
+      evt.preventDefault();
+      if (vamSubmitting) return;
+      if (!vamPending.length) {
+        vamShowError("Choose at least one photo, video, or document to add.");
+        return;
+      }
+      vamSubmitting = true;
+      vamSubmitBtn.disabled = true;
+      vamSubmitBtn.textContent = "Adding\u2026";
+      vamShowError("");
+      vamShowStatus("");
+      var fd = new FormData(viewerAddMediaForm);
+      fetch(window.location.href, { method: "POST", body: fd, credentials: "same-origin" })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          vamSubmitting = false;
+          vamSubmitBtn.disabled = false;
+          vamSubmitBtn.textContent = "Add media";
+          if (!data || !data.ok) {
+            vamShowError((data && data.error) || "Something went wrong saving that. Please try again.");
+            return;
+          }
+          var e = findEntry(viewerAddMediaEntryId.value);
+          if (e) {
+            e.media = (e.media || []).concat(data.media || []);
+            viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
+            vamRemainingSlots = Math.max(0, 10 - e.media.length);
+          }
+          vamReset();
+          vamShowStatus(data.notice || "Added.");
+        })
+        .catch(function () {
+          vamSubmitting = false;
+          vamSubmitBtn.disabled = false;
+          vamSubmitBtn.textContent = "Add media";
+          vamShowError("Something went wrong saving that. Please try again.");
+        });
+    });
+
     function viewerMediaViewHtml(mediaList) {
       var list = mediaList || [];
       if (!list.length) {
@@ -1747,6 +2019,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerMyNoteText.value = e.myNote || "";
         viewerAddMediaForm.hidden = false;
         viewerAddMediaEntryId.value = e.id;
+        vamRemainingSlots = Math.max(0, 10 - (e.media || []).length);
+        vamReset();
       } else {
         viewerMyNoteForm.hidden = true;
         viewerAddMediaForm.hidden = true;
