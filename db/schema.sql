@@ -426,3 +426,45 @@ ALTER TABLE timeline_entries
 ALTER TABLE letters
   ADD COLUMN to_line VARCHAR(80) NULL AFTER body_html,
   ADD COLUMN from_line VARCHAR(80) NULL AFTER to_line;
+
+-- ---------------------------------------------------------------------
+-- Phase 56: the family calendar -- "add in a family calendar feature and
+-- populate it with birthdays from the family... allow other key dates to
+-- be added by anyone in the family." Birthdays are computed on the fly
+-- from persons.born (see includes/calendar.php) and never stored here;
+-- this table holds only the "key dates" a family member adds by hand
+-- (anniversaries, memorials, and so on).
+--
+-- Every key date recurs annually by design -- there's no one-off vs.
+-- recurring flag, since a family calendar's whole point is things that
+-- come back every year -- so event_month/event_day are the date that
+-- matters and are always required. event_year is optional and exists
+-- only so a date with a natural "since" (a wedding, a move) can show a
+-- "N years" count the way a birthday shows "turns N"; leave it NULL for
+-- a date with no such count (e.g. "First day of summer holidays").
+--
+-- created_by_person_id/created_by_user_id follow the same "store the
+-- real family member, not just the account" choice postcards.
+-- sender_person_id already made -- no FK-backed family_groups table
+-- exists (family_group_id is the same plain app-maintained column used
+-- throughout persons/postcards/letters), and any family member -- not
+-- only the original adder -- can remove a key date (delete_calendar_
+-- event() in includes/calendar.php), matching how permissively this app
+-- already treats shared family content elsewhere (e.g. any family
+-- member can edit an unclaimed person's profile).
+-- ---------------------------------------------------------------------
+CREATE TABLE calendar_events (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  family_group_id       INT UNSIGNED NOT NULL,
+  title                 VARCHAR(120) NOT NULL,
+  event_month           TINYINT UNSIGNED NOT NULL,
+  event_day             TINYINT UNSIGNED NOT NULL,
+  event_year            SMALLINT UNSIGNED NULL,
+  created_by_person_id  INT UNSIGNED NOT NULL,
+  created_by_user_id    INT UNSIGNED NOT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_calendar_event_person FOREIGN KEY (created_by_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_calendar_event_user FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_calendar_event_group ON calendar_events(family_group_id);

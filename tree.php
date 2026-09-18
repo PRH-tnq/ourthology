@@ -329,6 +329,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
         <a href="/add_relative.php" id="tourAddRelative">+ Add a relative</a>
         <a href="/edit_person.php">Edit a person</a>
         <a href="/link_existing.php">Link to existing account</a>
+        <a href="/calendar.php">Family calendar</a>
         <a href="/pending.php" id="tourPendingLink" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
         <button type="button" id="printTreeBtn" class="linklet-btn" onclick="window.print()">Print tree</button>
       </div>
