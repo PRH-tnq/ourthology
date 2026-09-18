@@ -61,6 +61,11 @@ CREATE TABLE users (
   notify_pending_tags TINYINT(1) NOT NULL DEFAULT 0,
   -- Phase 48: "email me when someone sends me a postcard" -- same
   -- shared notify_email_enc address, its own independent opt-in.
+  -- Phase 53: this same column now also gates letter emails (see
+  -- includes/notifications.php's ourthology_notify_letter_received()) --
+  -- deliberately reused rather than adding a second checkbox, per Phil's
+  -- own request that "the Account Settings tick box... cover postcards
+  -- AND letters" (edit_person.php's label was updated to say so).
   notify_postcards    TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
@@ -306,3 +311,72 @@ CREATE TABLE postcard_recipients (
 
 CREATE INDEX idx_postcard_sender ON postcards(sender_person_id);
 CREATE INDEX idx_pr_recipient_status ON postcard_recipients(recipient_person_id, status);
+
+-- ---------------------------------------------------------------------
+-- Phase 53: letters. A longer-form, single-recipient alternative to a
+-- postcard, offered from the same compose pop-up. Its body is rich text
+-- (basic formatting + any number of inline photos) rather than one photo
+-- and a short plain-text note, so it gets its own body_html column and
+-- its own letter_images table (see includes/media.php's
+-- store_letter_image() and includes/letters.php's
+-- ourthology_sanitize_letter_body_html()) instead of reusing postcards'
+-- single image_path.
+--
+-- The greeting ("Dear <first name>") and closing ("Best regards,
+-- <sender>") are never stored -- both are generated at render time from
+-- sender_person_id/recipient_person_id, the same way a postcard's
+-- sender/recipient names are joined in rather than frozen as text.
+--
+-- One row per letter (not one row per recipient, unlike postcards): a
+-- letter only ever has exactly one recipient, so there's no equivalent
+-- of postcard_recipients to split out.
+-- ---------------------------------------------------------------------
+CREATE TABLE letters (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sender_person_id      INT UNSIGNED NOT NULL,
+  created_by_user_id    INT UNSIGNED NOT NULL,
+  family_group_id       INT UNSIGNED NOT NULL,
+  recipient_person_id   INT UNSIGNED NOT NULL,
+  body_html             MEDIUMTEXT NOT NULL,
+  status                ENUM('pending','read','saved','discarded') NOT NULL DEFAULT 'pending',
+  timeline_entry_id     INT UNSIGNED NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at               DATETIME NULL,
+  resolved_at           DATETIME NULL,
+  CONSTRAINT fk_letter_sender FOREIGN KEY (sender_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_letter_recipient FOREIGN KEY (recipient_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_letter_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_letter_entry FOREIGN KEY (timeline_entry_id) REFERENCES timeline_entries(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- letter_images: one row per inline photo. Uploaded (letter_image_
+-- upload.php) as the sender types, before the letter itself exists --
+-- letter_id starts NULL and is claimed by create_letter() once the
+-- sender actually sends, for only the images the final sanitized body
+-- really references and that this same uploader really uploaded (see
+-- ourthology_sanitize_letter_body_html()'s own doc comment). ON DELETE
+-- CASCADE here only ever matters if a letters row itself were ever
+-- deleted outright, which this app never does (same "nothing deleted,
+-- just marked closed" rule as postcards) -- kept anyway as the correct
+-- constraint for the relationship, not because anything currently
+-- triggers it.
+-- ---------------------------------------------------------------------
+CREATE TABLE letter_images (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  letter_id             INT UNSIGNED NULL,
+  uploader_person_id    INT UNSIGNED NOT NULL,
+  family_group_id       INT UNSIGNED NOT NULL,
+  file_path             VARCHAR(255) NOT NULL,
+  mime_type             VARCHAR(100) NOT NULL,
+  byte_size             INT UNSIGNED NOT NULL,
+  width                 INT UNSIGNED NULL,
+  height                INT UNSIGNED NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_letter_image_letter FOREIGN KEY (letter_id) REFERENCES letters(id) ON DELETE CASCADE,
+  CONSTRAINT fk_letter_image_uploader FOREIGN KEY (uploader_person_id) REFERENCES persons(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_letter_sender ON letters(sender_person_id);
+CREATE INDEX idx_letter_recipient_status ON letters(recipient_person_id, status);
+CREATE INDEX idx_letter_image_uploader ON letter_images(uploader_person_id, letter_id);

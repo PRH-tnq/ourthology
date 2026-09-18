@@ -345,3 +345,131 @@ function ourthology_render_postcard_email(string $recipientFirstName, string $se
 
     return [$subject, $html, $text];
 }
+
+/**
+ * Phase 53: "someone sent you a letter" email -- same best-effort,
+ * never-throws shape as ourthology_notify_postcard_received() just
+ * above, and deliberately gated on the SAME notify_postcards preference
+ * rather than a second checkbox of its own: Phil's own request for this
+ * feature was explicit that the existing "email me about postcards"
+ * setting should cover letters too (see edit_person.php's checkbox
+ * label, and the ALTER TABLE comment in db/schema.sql).
+ */
+function ourthology_notify_letter_received(PDO $pdo, int $recipientPersonId, string $senderName): void
+{
+    try {
+        $stmt = $pdo->prepare('SELECT claimed_by_user_id FROM persons WHERE id = :id');
+        $stmt->execute(['id' => $recipientPersonId]);
+        $recipientUserId = $stmt->fetchColumn();
+        if (!$recipientUserId) {
+            return; // shouldn't happen -- only claimed persons can be addressed -- but never assume
+        }
+        $recipientUserId = (int) $recipientUserId;
+
+        $prefStmt = $pdo->prepare('SELECT notify_postcards, notify_email_enc FROM users WHERE id = :id');
+        $prefStmt->execute(['id' => $recipientUserId]);
+        $prefs = $prefStmt->fetch();
+        if ($prefs === null || !$prefs['notify_postcards']) {
+            return; // opted out (or never opted in) -- the default
+        }
+
+        $toEmail = ourthology_decrypt_notify_email($prefs['notify_email_enc']);
+        if ($toEmail === null || $toEmail === '') {
+            return; // opted in but never actually saved an address
+        }
+
+        $recipStmt = $pdo->prepare('SELECT first_name FROM persons WHERE id = :id');
+        $recipStmt->execute(['id' => $recipientPersonId]);
+        $recipientFirstName = (string) ($recipStmt->fetchColumn() ?: '');
+
+        [$subject, $html, $text] = ourthology_render_letter_email($recipientFirstName, $senderName);
+        ourthology_send_email($toEmail, trim($recipientFirstName), $subject, $html, $text);
+    } catch (Throwable $e) {
+        error_log('ourthology: letter notification failed for person ' . $recipientPersonId . ': ' . $e->getMessage());
+    }
+}
+
+/** Returns [subject, htmlBody, textBody] for the "you've got a letter" email, same branded shell as ourthology_render_postcard_email() above. */
+function ourthology_render_letter_email(string $recipientFirstName, string $senderName): array
+{
+    $pendingUrl = ourthology_absolute_url('/pending.php?goto=waiting-on-you');
+    $subject = "$senderName sent you a letter — ourthology.com";
+    $greetName = $recipientFirstName !== '' ? $recipientFirstName : 'there';
+
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= htmlspecialchars($subject, ENT_QUOTES) ?></title>
+</head>
+<body style="margin:0; padding:0; background-color:#F1ECDF; font-family:Georgia, 'Times New Roman', serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F1ECDF; padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px; background-color:#FBF8F1; border:1px solid #e4ddcb; border-radius:14px; overflow:hidden;">
+          <tr>
+            <td style="background-color:#9A2A2A; padding:22px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:20px; font-weight:bold; color:#FBF8F1;">
+                    ourthology<span style="color:#e8c9c9; font-weight:normal;">.com</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:12.5px; font-style:italic; color:#e8c9c9; padding-top:2px;">
+                    an anthology of us.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 28px 8px;">
+              <p style="margin:0 0 16px; font-size:16px; line-height:1.5; color:#1a1714;">Hi <?= htmlspecialchars($greetName, ENT_QUOTES) ?>,</p>
+              <p style="margin:0 0 20px; font-size:15px; line-height:1.6; color:#1a1714;">
+                <strong><?= htmlspecialchars($senderName, ENT_QUOTES) ?></strong> just sent you a letter on ourthology.com — a longer note, waiting for you to read.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 28px 8px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-radius:999px; background-color:#9A2A2A;">
+                    <a href="<?= htmlspecialchars($pendingUrl, ENT_QUOTES) ?>" style="display:inline-block; padding:13px 30px; font-family:Georgia, 'Times New Roman', serif; font-size:15px; font-weight:bold; color:#FBF8F1; text-decoration:none; border-radius:999px;">Read your letter</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 28px 32px;">
+              <p style="margin:0; font-size:12px; line-height:1.6; color:#a39c8c;">
+                You're getting this because postcard and letter emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree → Edit → Account Settings.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    <?php
+    $html = (string) ob_get_clean();
+
+    $text = implode("\n", [
+        "Hi {$greetName},",
+        '',
+        "{$senderName} just sent you a letter on ourthology.com — a longer note, waiting for you to read.",
+        '',
+        'Read it here: ' . $pendingUrl,
+        '',
+        "You're getting this because postcard and letter emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree -> Edit -> Account Settings.",
+    ]);
+
+    return [$subject, $html, $text];
+}

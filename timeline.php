@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/postcards.php';
+require_once __DIR__ . '/includes/letters.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -68,6 +69,15 @@ if (!empty($_SESSION['flash_postcard_error'])) {
     $errors[] = (string) $_SESSION['flash_postcard_error'];
 }
 unset($_SESSION['flash_postcard_sent'], $_SESSION['flash_postcard_error']);
+// Phase 53: letter.php's own send flash -- same reused $notice/$errors
+// slot, same reasoning as the postcard flashes just above.
+if (!empty($_SESSION['flash_letter_sent'])) {
+    $notice = (string) $_SESSION['flash_letter_sent'];
+}
+if (!empty($_SESSION['flash_letter_error'])) {
+    $errors[] = (string) $_SESSION['flash_letter_error'];
+}
+unset($_SESSION['flash_letter_sent'], $_SESSION['flash_letter_error']);
 // The compose pop-up's recipient checkboxes -- always resolved for the
 // ACTUAL logged-in user, regardless of whose timeline is currently
 // being viewed (sending is a personal action, not scoped to $target).
@@ -539,6 +549,39 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-flip-btn:hover { background:var(--paper-2); }
   .postcard-send-btn { width:auto; margin:0; padding:9px 20px; }
   .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
+
+  /* Phase 53: "send a letter instead" -- a longer-form single-recipient
+     alternative offered from the same compose pop-up, styled like a
+     single sheet of ourthology.com letterhead rather than a flipped
+     postcard: a branded header (sender + date, same as a standard form
+     letter), a recipient picker that fills in "Dear X,", a large
+     handwriting-font body that can carry inline photos, and an
+     auto-generated "Best regards" close. */
+  .letter-switch-link { display:inline-block; background:none; border:none; padding:0; margin:0 0 14px; font-size:13px; color:var(--accent); text-decoration:underline; cursor:pointer; font-family:inherit; }
+  .letter-mode-panel { display:none; }
+  .letter-back-link { display:inline-block; background:none; border:none; padding:0; margin:0 0 12px; font-size:12.5px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; font-family:inherit; }
+  .letterhead { display:flex; align-items:center; gap:12px; padding:14px 18px; border:1px solid var(--line); border-radius:12px 12px 0 0; background:linear-gradient(135deg, #9A2A2A, #7a2020); color:#FBF8F1; }
+  .letterhead .letter-brand-mark { flex:none; }
+  .letterhead-text { flex:1 1 auto; min-width:0; }
+  .letterhead-word { margin:0; font-family:"Fraunces", Georgia, serif; font-size:17px; font-weight:700; }
+  .letterhead-word .tld { color:#e8c9c9; font-weight:400; }
+  .letterhead-meta { margin:2px 0 0; font-size:12px; color:#e8c9c9; }
+  .letter-sheet { border:1px solid var(--line); border-top:none; border-radius:0 0 12px 12px; background:#fffdf7; padding:18px 22px 20px; box-shadow:0 6px 18px -12px rgba(0,0,0,0.3); }
+  .letter-recipient-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 14px; font-size:13.5px; }
+  .letter-recipient-row select { width:auto; flex:1 1 220px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; font-family:inherit; font-size:13.5px; }
+  .letter-salutation { font-family:'Caveat',cursive; font-size:24px; color:#2b2620; margin:0 0 6px; }
+  .letter-body-editor { min-height:220px; max-height:420px; overflow:auto; padding:10px 2px; font-family:'Caveat',cursive; font-size:21px; line-height:1.55; color:#2b2620; outline:none; }
+  .letter-body-editor:empty::before { content:attr(data-placeholder); color:var(--ink-faint); font-family:'Caveat',cursive; font-size:21px; }
+  .letter-body-editor img { max-width:100%; border-radius:6px; margin:8px 0; display:block; }
+  .letter-closing { font-family:'Caveat',cursive; font-size:22px; color:#2b2620; margin:10px 0 0; line-height:1.3; }
+  .letter-toolbar { display:flex; align-items:center; gap:10px; margin:0 0 4px; padding-bottom:8px; border-bottom:1px dashed var(--line); }
+  .letter-insert-photo { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
+  .letter-insert-photo:hover { background:var(--paper-2); }
+  .letter-insert-photo:disabled { opacity:0.6; cursor:default; }
+  .letter-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
+  .letter-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
+  .letter-send-btn { width:auto; margin:0; padding:9px 20px; }
+
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -2168,10 +2211,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <div class="postcard-overlay" id="postcardComposeOverlay">
       <div class="postcard-box">
         <button type="button" class="postcard-close" id="postcardComposeClose" aria-label="Close">×</button>
+        <div class="postcard-mode-panel" id="postcardModePanel">
         <h3 style="margin:0 0 14px;">Send a postcard</h3>
         <?php if (!$postcardRecipientOptions): ?>
           <p class="notice">Nobody else in your family has claimed a profile yet — a postcard needs someone actually signed up to receive it.</p>
         <?php else: ?>
+          <button type="button" class="letter-switch-link" id="switchToLetterBtn">Need a longer form of message? Send a letter instead.</button>
           <form method="post" action="/postcard.php" enctype="multipart/form-data">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="send">
@@ -2250,6 +2295,56 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               </div>
             </div>
           </form>
+        <?php endif; ?>
+        </div>
+
+        <?php if ($postcardRecipientOptions): ?>
+        <div class="letter-mode-panel" id="letterModePanel">
+          <button type="button" class="letter-back-link" id="switchToPostcardBtn">← Back to postcard</button>
+          <h3 style="margin:0 0 12px;">Send a letter</h3>
+          <form method="post" action="/letter.php" id="letterForm">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="send">
+            <input type="hidden" name="body_html" id="letterBodyHtmlField">
+
+            <div class="letterhead">
+              <svg class="letter-brand-mark" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+                <circle cx="16" cy="16" r="15" fill="#FBF8F1"/>
+                <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#9A2A2A"/>
+                <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#9A2A2A"/>
+                <line x1="16" y1="7.2" x2="16" y2="17" stroke="#FBF8F1" stroke-width="1" stroke-linecap="round"/>
+                <line x1="16" y1="17" x2="16" y2="23.2" stroke="#9A2A2A" stroke-width="2.2" stroke-linecap="round"/>
+                <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#9A2A2A" stroke-width="1.6" stroke-linecap="round"/>
+                <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#9A2A2A" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <div class="letterhead-text">
+                <p class="letterhead-word">ourthology<span class="tld">.com</span></p>
+                <p class="letterhead-meta">From <?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?> · <?= date('d F Y') ?></p>
+              </div>
+            </div>
+            <div class="letter-sheet">
+              <div class="letter-recipient-row">
+                <label for="letterRecipientSelect">To</label>
+                <select name="recipient_id" id="letterRecipientSelect" required>
+                  <?php foreach ($postcardRecipientOptions as $opt): ?>
+                    <option value="<?= (int) $opt['id'] ?>" data-first-name="<?= htmlspecialchars((string) $opt['first_name'], ENT_QUOTES) ?>"><?= htmlspecialchars(person_display_name($opt), ENT_QUOTES) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <p class="letter-salutation">Dear <span id="letterSalutationName"><?= htmlspecialchars((string) ($postcardRecipientOptions[0]['first_name'] ?? ''), ENT_QUOTES) ?></span>,</p>
+              <div class="letter-toolbar">
+                <button type="button" class="letter-insert-photo" id="letterInsertPhotoBtn">Insert a photo</button>
+                <input type="file" id="letterImageInput" accept="image/*" hidden>
+              </div>
+              <div class="letter-body-editor" id="letterBodyEditor" contenteditable="true" data-placeholder="Write your letter here…"></div>
+              <p class="letter-closing">Best regards,<br><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></p>
+              <div class="letter-footer">
+                <label><input type="checkbox" name="record_to_timeline" value="1"> Also add this to my own timeline</label>
+                <button type="submit" class="btn-primary letter-send-btn">Send letter</button>
+              </div>
+            </div>
+          </form>
+        </div>
         <?php endif; ?>
       </div>
     </div>
@@ -2332,6 +2427,124 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             btn.addEventListener("click", function () { flipInner.classList.toggle("is-flipped"); });
           });
         }
+
+        // Phase 53: "need a longer form of message? send a letter
+        // instead" -- swaps which panel is visible inside the SAME
+        // pop-up rather than opening a second one, so the × / overlay-
+        // click / Escape close handling already wired up above just
+        // keeps working unchanged.
+        var postcardPanel = root.querySelector("#postcardModePanel");
+        var letterPanel = root.querySelector("#letterModePanel");
+        var toLetterBtn = root.querySelector("#switchToLetterBtn");
+        var toPostcardBtn = root.querySelector("#switchToPostcardBtn");
+        if (toLetterBtn && letterPanel && postcardPanel) {
+          toLetterBtn.addEventListener("click", function () {
+            postcardPanel.style.display = "none";
+            letterPanel.style.display = "block";
+          });
+        }
+        if (toPostcardBtn && letterPanel && postcardPanel) {
+          toPostcardBtn.addEventListener("click", function () {
+            letterPanel.style.display = "none";
+            postcardPanel.style.display = "";
+          });
+        }
+      }
+
+      // Phase 53: the letter composer -- a recipient <select> that fills
+      // in "Dear X,", a contenteditable body an "Insert a photo" button
+      // can drop images into at the caret (uploaded immediately via
+      // fetch() to letter_image_upload.php, well before the letter
+      // itself is ever sent -- see that file's own doc comment), and a
+      // submit handler that copies the editor's HTML into the hidden
+      // body_html field the form actually posts.
+      function wireLetterForm(root) {
+        var form = root.querySelector("#letterForm");
+        var select = root.querySelector("#letterRecipientSelect");
+        var salutationName = root.querySelector("#letterSalutationName");
+        var editor = root.querySelector("#letterBodyEditor");
+        var hiddenBody = root.querySelector("#letterBodyHtmlField");
+        var insertBtn = root.querySelector("#letterInsertPhotoBtn");
+        var imageInput = root.querySelector("#letterImageInput");
+        var csrfInput = form ? form.querySelector('input[name="csrf_token"]') : null;
+        if (!form || !select || !editor) return;
+
+        function updateSalutation() {
+          var opt = select.options[select.selectedIndex];
+          var first = opt ? opt.getAttribute("data-first-name") : "";
+          if (salutationName) salutationName.textContent = first || "there";
+        }
+        select.addEventListener("change", updateSalutation);
+        updateSalutation();
+
+        var savedRange = null;
+        function saveSelectionIfInEditor() {
+          var sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+            savedRange = sel.getRangeAt(0).cloneRange();
+          } else {
+            savedRange = null;
+          }
+        }
+        function restoreSelectionOrEnd() {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          var range = savedRange;
+          if (!range) {
+            range = document.createRange();
+            range.selectNodeContents(editor);
+            range.collapse(false);
+          }
+          sel.addRange(range);
+        }
+
+        if (insertBtn && imageInput) {
+          insertBtn.addEventListener("click", function () {
+            saveSelectionIfInEditor();
+            imageInput.click();
+          });
+          imageInput.addEventListener("change", function () {
+            var file = imageInput.files && imageInput.files[0];
+            if (!file) return;
+            var fd = new FormData();
+            fd.append("image", file);
+            fd.append("csrf_token", csrfInput ? csrfInput.value : "");
+            insertBtn.disabled = true;
+            insertBtn.textContent = "Uploading…";
+            fetch("/letter_image_upload.php", { method: "POST", body: fd })
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                insertBtn.disabled = false;
+                insertBtn.textContent = "Insert a photo";
+                imageInput.value = "";
+                if (!data || !data.ok) {
+                  alert((data && data.error) || "Could not upload that photo — please try again.");
+                  return;
+                }
+                editor.focus();
+                restoreSelectionOrEnd();
+                var ok = false;
+                try { ok = document.execCommand("insertHTML", false, '<img src="' + data.url + '">'); } catch (e) { ok = false; }
+                if (!ok) {
+                  // Fallback for a browser without execCommand support --
+                  // appends at the end rather than at the caret, which is
+                  // still a correct, working result, just less precise.
+                  var img = document.createElement("img");
+                  img.src = data.url;
+                  editor.appendChild(img);
+                }
+              })
+              .catch(function () {
+                insertBtn.disabled = false;
+                insertBtn.textContent = "Insert a photo";
+                alert("Could not upload that photo — please try again.");
+              });
+          });
+        }
+
+        form.addEventListener("submit", function () {
+          if (hiddenBody) hiddenBody.value = editor.innerHTML;
+        });
       }
 
       openBtn.addEventListener("click", function () {
@@ -2344,6 +2557,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         document.getElementById("postcardComposeClose").addEventListener("click", closeOverlay);
         document.addEventListener("keydown", onEscape);
         wireForm(overlay);
+        wireLetterForm(overlay);
       });
     })();
   </script>

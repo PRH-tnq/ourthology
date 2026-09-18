@@ -747,14 +747,114 @@ function store_postcard_image(array $file, int $senderPersonId): array
     ];
 }
 
+// --- Letters (Phase 53) -------------------------------------------------
+//
+// A letter's inline images are validated and stored the same
+// real-content-sniffing, HEIC-safety-netted way as any other upload here,
+// images-only, under their own letters/<uploaderPersonId>/ subfolder --
+// kept apart from a person's own timeline media (and not counted in any
+// quota) until save_letter_copy_to_timeline() (includes/letters.php)
+// makes an actual, independent copy via store_postcard_copy_as_media()
+// below, exactly the same "not really theirs to keep yet" reasoning as a
+// postcard's own image just above.
+
+const LETTER_IMAGE_MAX_BYTES = 15 * 1024 * 1024; // 15MB -- same generous per-photo limit as a postcard's image
+const LETTER_IMAGE_ALLOWED = [
+    'jpg'  => ['image/jpeg'],
+    'jpeg' => ['image/jpeg'],
+    'png'  => ['image/png'],
+    'gif'  => ['image/gif'],
+    'webp' => ['image/webp'],
+];
+
+/**
+ * Validates and stores one inline image for a letter being composed.
+ * Mirrors store_postcard_image() above (same real-content sniffing, same
+ * HEIC/HEIF server-side safety net) but written to its own
+ * letters/<uploaderPersonId>/ subfolder -- a letter can carry any number
+ * of these, unlike a postcard's single front photo, so this is called
+ * once per image as the sender inserts each one (letter_image_upload.php)
+ * rather than once per submission.
+ */
+function store_letter_image(array $file, int $uploaderPersonId): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException(match ($file['error'] ?? null) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'That photo is too large for this server to accept.',
+            UPLOAD_ERR_NO_FILE => 'Choose a photo to insert.',
+            default => 'Upload failed — please try again.',
+        });
+    }
+    if (!is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Upload failed — please try again.');
+    }
+    if ($file['size'] > LETTER_IMAGE_MAX_BYTES) {
+        throw new RuntimeException('That photo is larger than the 15MB limit.');
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $detectedMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+
+    $dir = ourthology_media_dir() . '/letters/' . $uploaderPersonId;
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+
+    if (ourthology_looks_like_heic($file['tmp_name'], $detectedMime)) {
+        $destination = ourthology_convert_heic_to_jpeg($file['tmp_name'], $dir);
+        if ($destination === null) {
+            throw new RuntimeException('That looks like an iPhone/Samsung HEIC photo, and it couldn\'t be converted automatically — please convert it to JPEG first and try again.');
+        }
+        $filename = basename($destination);
+        $detectedMime = 'image/jpeg';
+    } else {
+        $extension = null;
+        foreach (LETTER_IMAGE_ALLOWED as $ext => $mimes) {
+            if (in_array($detectedMime, $mimes, true)) {
+                $extension = $ext;
+                break;
+            }
+        }
+        if ($extension === null) {
+            throw new RuntimeException('Letter photos must be a JPEG, PNG, GIF, or WEBP image.');
+        }
+
+        $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+        $destination = $dir . '/' . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            throw new RuntimeException('Could not save the photo — please try again.');
+        }
+    }
+    chmod($destination, 0640);
+
+    $byteSize = @filesize($destination);
+    $byteSize = $byteSize !== false ? $byteSize : $file['size'];
+
+    $dims = @getimagesize($destination);
+    [$width, $height] = $dims ?: [null, null];
+
+    return [
+        'file_path' => 'letters/' . $uploaderPersonId . '/' . $filename,
+        'mime_type' => $detectedMime,
+        'byte_size' => $byteSize,
+        'width'     => $width,
+        'height'    => $height,
+    ];
+}
+
 /**
  * Copies an already-stored file (by its path relative to
- * ourthology_media_dir(), e.g. a postcard's own image_path) into a real
- * media-row-ready file under $ownerPersonId's normal timeline media
- * folder -- used when a postcard's photo needs to become an actual,
- * independent media row: the sender's own "record to my timeline" copy,
- * or a recipient's "save to my timeline" copy. A genuine on-disk copy,
- * not a shared reference, so each resulting media row (and, later,
+ * ourthology_media_dir(), e.g. a postcard's own image_path, or a
+ * letter's own letter_images.file_path -- this is entirely generic, not
+ * postcard-specific despite the name) into a real media-row-ready file
+ * under $ownerPersonId's normal timeline media folder -- used when a
+ * postcard's photo, or a letter's inline image, needs to become an
+ * actual, independent media row: the sender's own "record to my
+ * timeline" copy, or a recipient's "save to my timeline" copy. A genuine
+ * on-disk copy, not a shared reference, so each resulting media row (and,
+ * later,
  * delete_media_file() on any one of them) can never affect another.
  */
 function store_postcard_copy_as_media(string $sourceRelativePath, string $mimeType, int $ownerPersonId): array

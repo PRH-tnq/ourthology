@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php'; // fetch_entry_media() — the memory preview below (Phase 32)
 require_once __DIR__ . '/includes/postcards.php';
+require_once __DIR__ . '/includes/letters.php';
 
 require_login();
 $me = current_user_with_person();
@@ -33,6 +34,15 @@ if (!empty($_SESSION['flash_postcard_notice'])) {
     $notice = (string) $_SESSION['flash_postcard_notice'];
 }
 unset($_SESSION['flash_postcard_notice']);
+
+// Phase 53: same pattern, one flash pair for letters -- letter.php
+// (open/save/discard) redirects back here just like postcard.php does.
+$openLetterRowId = $_SESSION['flash_open_letter'] ?? null;
+unset($_SESSION['flash_open_letter']);
+if (!empty($_SESSION['flash_letter_notice'])) {
+    $notice = (string) $_SESSION['flash_letter_notice'];
+}
+unset($_SESSION['flash_letter_notice']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -133,11 +143,16 @@ $pendingTags = fetch_pending_memory_tags_for_user($pdo, $myUserId);
 $outgoingTags = fetch_outgoing_memory_tags_for_user($pdo, $myUserId);
 $pendingPostcards = fetch_pending_postcards_for_person($pdo, $myPersonId);
 $outgoingPostcards = fetch_outgoing_postcards_for_person($pdo, $myPersonId);
-$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards);
-$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards);
+$pendingLetters = fetch_pending_letters_for_person($pdo, $myPersonId);
+$outgoingLetters = fetch_outgoing_letters_for_person($pdo, $myPersonId);
+$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards) + count($pendingLetters);
+$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards) + count($outgoingLetters);
 
 $openPostcard = $openPostcardRowId !== null
     ? fetch_postcard_recipient_row($pdo, (int) $openPostcardRowId, $myPersonId)
+    : null;
+$openLetter = $openLetterRowId !== null
+    ? fetch_letter_for_recipient($pdo, (int) $openLetterRowId, $myPersonId)
     : null;
 
 // Phase 32: a memory-tag request is a judgment call ("does this actually
@@ -222,7 +237,7 @@ function ourthology_pending_memory_preview_html(array $row): string
 <title>Pending requests — ourthology.com</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css?v=25">
 <style>
   .req-card { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:14px; background:#fff; }
@@ -287,6 +302,21 @@ function ourthology_pending_memory_preview_html(array $row): string
   .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
   .postcard-flip-btn:hover { background:var(--paper-2); }
   .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+
+  /* Phase 53: same letterhead sheet, byte-for-byte, as timeline.php's
+     letter composer -- this page only ever shows it read-only. */
+  .letterhead { display:flex; align-items:center; gap:12px; padding:14px 18px; border:1px solid var(--line); border-radius:12px 12px 0 0; background:linear-gradient(135deg, #9A2A2A, #7a2020); color:#FBF8F1; }
+  .letterhead .letter-brand-mark { flex:none; }
+  .letterhead-text { flex:1 1 auto; min-width:0; }
+  .letterhead-word { margin:0; font-family:"Fraunces", Georgia, serif; font-size:17px; font-weight:700; }
+  .letterhead-word .tld { color:#e8c9c9; font-weight:400; }
+  .letterhead-meta { margin:2px 0 0; font-size:12px; color:#e8c9c9; }
+  .letter-sheet { border:1px solid var(--line); border-top:none; border-radius:0 0 12px 12px; background:#fffdf7; padding:18px 22px 20px; box-shadow:0 6px 18px -12px rgba(0,0,0,0.3); }
+  .letter-salutation { font-family:'Caveat',cursive; font-size:24px; color:#2b2620; margin:0 0 6px; }
+  .letter-body-read { min-height:120px; max-height:420px; overflow:auto; padding:10px 2px; font-family:'Caveat',cursive; font-size:21px; line-height:1.55; color:#2b2620; }
+  .letter-body-read img { max-width:100%; border-radius:6px; margin:8px 0; display:block; }
+  .letter-closing { font-family:'Caveat',cursive; font-size:22px; color:#2b2620; margin:10px 0 0; line-height:1.3; }
+  .letter-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -395,6 +425,21 @@ function ourthology_pending_memory_preview_html(array $row): string
       </div>
     <?php endforeach; ?>
 
+    <?php foreach ($pendingLetters as $lt): ?>
+      <div class="req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($lt['received_at']), ENT_QUOTES) ?></span>
+        <p style="margin:0;font-size:14px;">
+          A letter from <strong><?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?></strong><?= $lt['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(already opened)</span>' : '' ?>
+        </p>
+        <form method="post" action="/letter.php" style="margin-top:8px;">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="open">
+          <input type="hidden" name="letter_id" value="<?= (int) $lt['letter_id'] ?>">
+          <button type="submit" class="btn-primary btn-small">Open letter</button>
+        </form>
+      </div>
+    <?php endforeach; ?>
+
     <h3 class="section-title">Sent by you, waiting on them (<?= $outgoingCount ?>)</h3>
     <?php if (!$outgoingCount): ?>
       <p style="color:var(--ink-faint);font-size:14px;margin:4px 0 0;">Nothing outstanding.</p>
@@ -466,6 +511,16 @@ function ourthology_pending_memory_preview_html(array $row): string
             <?= $pc['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(opened, not yet decided)</span>' : ' <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>' ?>
           </p>
         </div>
+      </div>
+    <?php endforeach; ?>
+
+    <?php foreach ($outgoingLetters as $lt): ?>
+      <div class="req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($lt['sent_at']), ENT_QUOTES) ?></span>
+        <p style="margin:0;font-size:14px;">
+          Letter sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $lt['recipient_first'], 'surname' => $lt['recipient_surname']]), ENT_QUOTES) ?></strong>
+          <?= $lt['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(opened, not yet decided)</span>' : ' <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>' ?>
+        </p>
       </div>
     <?php endforeach; ?>
 
@@ -566,6 +621,67 @@ function ourthology_pending_memory_preview_html(array $row): string
       overlay.querySelectorAll(".postcard-flip-btn").forEach(function (btn) {
         btn.addEventListener("click", function () { inner.classList.toggle("is-flipped"); });
       });
+    })();
+  </script>
+  <?php endif; ?>
+  <?php if ($openLetter): ?>
+  <div class="postcard-overlay" id="letterReadOverlay">
+    <div class="postcard-box" style="max-width:560px;">
+      <button type="button" class="postcard-close" id="letterReadClose" aria-label="Close">×</button>
+      <div class="letterhead">
+        <svg class="letter-brand-mark" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="15" fill="#FBF8F1"/>
+          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#9A2A2A"/>
+          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#9A2A2A"/>
+          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#FBF8F1" stroke-width="1" stroke-linecap="round"/>
+          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#9A2A2A" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#9A2A2A" stroke-width="1.6" stroke-linecap="round"/>
+          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#9A2A2A" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <div class="letterhead-text">
+          <p class="letterhead-word">ourthology<span class="tld">.com</span></p>
+          <p class="letterhead-meta">From <?= htmlspecialchars(person_display_name(['first_name' => $openLetter['sender_first'], 'surname' => $openLetter['sender_surname']]), ENT_QUOTES) ?> · <?= htmlspecialchars(date('d F Y', strtotime($openLetter['created_at'])), ENT_QUOTES) ?></p>
+        </div>
+      </div>
+      <div class="letter-sheet">
+        <p class="letter-salutation">Dear <?= htmlspecialchars((string) $me['first_name'], ENT_QUOTES) ?>,</p>
+        <div class="letter-body-read"><?= $openLetter['body_html'] !== '' ? $openLetter['body_html'] : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
+        <p class="letter-closing">Best regards,<br><?= htmlspecialchars(person_display_name(['first_name' => $openLetter['sender_first'], 'surname' => $openLetter['sender_surname']]), ENT_QUOTES) ?></p>
+        <?php if (in_array($openLetter['status'], ['pending', 'read'], true)): ?>
+        <div class="letter-read-footer">
+          <form method="post" action="/letter.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="discard">
+            <input type="hidden" name="letter_id" value="<?= (int) $openLetter['letter_id'] ?>">
+            <button type="submit" class="btn-primary btn-small ghost">Discard</button>
+          </form>
+          <form method="post" action="/letter.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="letter_id" value="<?= (int) $openLetter['letter_id'] ?>">
+            <button type="submit" class="btn-primary btn-small">Save to my timeline</button>
+          </form>
+        </div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var overlay = document.getElementById("letterReadOverlay");
+      if (!overlay) return;
+      function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onEsc);
+      }
+      function onEsc(evt) {
+        if (evt.key === "Escape") close();
+      }
+      overlay.addEventListener("click", function (evt) {
+        if (evt.target === overlay) close();
+      });
+      document.getElementById("letterReadClose").addEventListener("click", close);
+      document.addEventListener("keydown", onEsc);
     })();
   </script>
   <?php endif; ?>
