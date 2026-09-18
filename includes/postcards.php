@@ -160,7 +160,7 @@ function fetch_pending_postcards_for_person(PDO $pdo, int $personId): array
 function fetch_postcard_recipient_row(PDO $pdo, int $recipientRowId, int $personId): ?array
 {
     $stmt = $pdo->prepare(
-        "SELECT pr.id AS recipient_row_id, pr.postcard_id, pr.status, pr.timeline_entry_id,
+        "SELECT pr.id AS recipient_row_id, pr.postcard_id, pr.status, pr.timeline_entry_id, pr.created_at AS received_at,
                 pc.message, pc.image_path, pc.image_mime_type, pc.sender_person_id,
                 sp.first_name AS sender_first, sp.surname AS sender_surname
          FROM postcard_recipients pr

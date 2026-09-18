@@ -490,16 +490,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      coloured-gradient mat. */
   .postcard-face-front { padding:16px; box-sizing:border-box; background:#fff; }
   .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:2px; overflow:hidden; background:#fff; }
+  /* Phase 52: thicker stripes, closer to Phil's reference image than
+     Phase 50's narrower 9px band. */
   .postcard-face-back {
-    border-width:9px;
+    border-width:14px;
     border-style:solid;
     border-image-source: repeating-linear-gradient(-45deg,
-      #9a2a2a 0, #9a2a2a 10px,
-      #fff 10px, #fff 20px,
-      #29456e 20px, #29456e 30px,
-      #fff 30px, #fff 40px);
-    border-image-slice: 30;
-    border-image-repeat: round;
+      #9a2a2a 0, #9a2a2a 14px,
+      #fff 14px, #fff 28px,
+      #29456e 28px, #29456e 42px,
+      #fff 42px, #fff 56px);
+    border-image-slice:46;
+    border-image-repeat:round;
     border-radius:0;
   }
   .postcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; }
@@ -521,7 +523,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-back-message { flex:1 1 58%; width:auto; min-width:0; box-sizing:border-box; border:none; resize:none; padding:16px 18px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; background:repeating-linear-gradient(to bottom, transparent, transparent 34px, var(--line) 35px); outline:none; }
   .postcard-read-message { flex:1 1 58%; width:auto; min-width:0; box-sizing:border-box; padding:16px 18px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
   .postcard-back-address { flex:0 0 40%; box-sizing:border-box; border-left:1px dashed var(--line); padding:14px 16px; display:flex; flex-direction:column; }
-  .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:40px; height:50px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.5; margin-bottom:16px; }
+  /* Phase 52: a real postmark -- a branded postage-stamp graphic (the
+     site's own brand mark) plus a cancellation-style circular postmark
+     reading "OURTHOLOGY POST OFFICE" -- replacing the placeholder
+     dashed box. */
+  .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:104px; aspect-ratio:118/84; margin-bottom:16px; }
+  .postcard-stamp svg { display:block; width:100%; height:100%; }
   .postcard-address-lines { display:flex; flex-direction:column; gap:14px; margin-top:auto; }
   .postcard-address-line { border-bottom:1px solid var(--line); height:1px; }
   .postcard-address-line.is-filled { height:auto; border-bottom:1px solid var(--line); font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -2200,7 +2207,34 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                   <div class="postcard-back-content">
                     <textarea class="postcard-back-message" name="message" placeholder="Write your message here…" maxlength="2000"></textarea>
                     <div class="postcard-back-address">
-                      <div class="postcard-stamp" aria-hidden="true"></div>
+                      <div class="postcard-stamp" aria-hidden="true">
+                      <svg viewBox="-2 -6 118 84" aria-hidden="true">
+                        <defs>
+                          <path id="pmArc" d="M 53 36 A 25 25 0 0 1 103 36"/>
+                        </defs>
+                        <rect x="2" y="3" width="54" height="64" rx="2" fill="#9A2A2A" stroke="#FBF8F1" stroke-width="2.5" stroke-dasharray="3.6 3.2"/>
+                        <g transform="translate(15,13) scale(0.92)">
+                          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
+                          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
+                          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1.1" stroke-linecap="round"/>
+                          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.4" stroke-linecap="round"/>
+                          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
+                          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
+                        </g>
+                        <text x="29" y="60" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="7" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
+                        <g opacity="0.74">
+                          <circle cx="78" cy="36" r="25" fill="none" stroke="#29456e" stroke-width="1.6"/>
+                          <circle cx="78" cy="36" r="19" fill="none" stroke="#29456e" stroke-width="1"/>
+                          <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
+                            <textPath href="#pmArc" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
+                          </text>
+                          <text x="78" y="39" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="6.2" fill="#29456e" letter-spacing="0.4"><?= date('d M Y') ?></text>
+                          <line x1="78" y1="7" x2="78" y2="1" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+                          <line x1="60" y1="13" x2="57" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+                          <line x1="96" y1="13" x2="99" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+                        </g>
+                      </svg>
+                    </div>
                       <div class="postcard-address-lines" aria-hidden="true">
                         <span class="postcard-address-line"></span>
                         <span class="postcard-address-line"></span>

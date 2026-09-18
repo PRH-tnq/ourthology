@@ -141,6 +141,12 @@ function ourthology_tour_steps(): array
         ],
         [
             'page' => 'timeline',
+            'target' => '#sendPostcardBtn',
+            'title' => 'Send a postcard',
+            'body' => "Not every memory needs to go on the record. Send a postcard — a photo and a short note — to any family member or a group you pick. It's yours to keep light: nothing joins anyone's timeline unless you choose to keep your own copy when you send it, or they choose to save theirs after reading it. Otherwise it's just a quick hello, not a permanent record.",
+        ],
+        [
+            'page' => 'timeline',
             'target' => null,
             'title' => 'On to your family tree',
             'body' => "Everyone in your family has their own timeline, just like this one. You can open any of them from your family tree — let's take a look at that now.",
@@ -207,7 +213,7 @@ function ourthology_tour_steps(): array
             'page' => 'tree',
             'target' => '#unclaimedSection',
             'title' => 'Inviting them properly',
-            'body' => "Every person you add gets their own profile. Look for them in this list for a \"get invite link\" button to send them, so they can claim it themselves. Until then you can keep editing it and adding memories — a lovely way to build up a departed relative's timeline as you find old photos.",
+            'body' => "Every person you add gets their own profile. Look for them in this list for an \"Invite this person\" button to send them, so they can claim it themselves. Until then you can keep editing it and adding memories — a lovely way to build up a departed relative's timeline as you find old photos.",
             'arrows' => [
                 ['type' => 'point', 'text' => 'new people show up here', 'ax' => 0.5, 'ay' => 0, 'ldx' => 0, 'ldy' => -40],
             ],
