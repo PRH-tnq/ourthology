@@ -51,13 +51,24 @@ function create_postcard(
     string $message,
     string $audience,
     array $recipientPersonIds,
-    bool $recordToOwnTimeline
+    bool $recordToOwnTimeline,
+    ?string $toLine = null,
+    ?string $fromLine = null
 ): int {
+    // Phase 54: "as if it had been done by hand, at a jaunty angle that
+    // changes each time a new postcard is made" -- picked once here, at
+    // creation, and stored, so the same postcard always shows the same
+    // angle rather than re-rolling on every page load (see the postmark
+    // <g transform="rotate(...)"> in both timeline.php's compose preview
+    // and pending.php's read view). Range is wide enough to read as
+    // "hand-stamped, not machine-straight" without ever landing upside-down.
+    $postmarkAngle = random_int(-18, 22);
+
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO postcards (sender_person_id, created_by_user_id, family_group_id, image_path, image_mime_type, image_byte_size, image_width, image_height, message, audience)
-             VALUES (:sender, :uid, :gid, :path, :mime, :size, :w, :h, :msg, :aud)'
+            'INSERT INTO postcards (sender_person_id, created_by_user_id, family_group_id, image_path, image_mime_type, image_byte_size, image_width, image_height, message, audience, postmark_angle, to_line, from_line)
+             VALUES (:sender, :uid, :gid, :path, :mime, :size, :w, :h, :msg, :aud, :angle, :toln, :froml)'
         );
         $stmt->execute([
             'sender' => $senderPersonId,
@@ -70,6 +81,9 @@ function create_postcard(
             'h'      => $storedImage['height'],
             'msg'    => $message,
             'aud'    => $audience,
+            'angle'  => $postmarkAngle,
+            'toln'   => $toLine !== null && $toLine !== '' ? $toLine : null,
+            'froml'  => $fromLine !== null && $fromLine !== '' ? $fromLine : null,
         ]);
         $postcardId = (int) $pdo->lastInsertId();
 
@@ -83,16 +97,17 @@ function create_postcard(
         if ($recordToOwnTimeline) {
             $ownCopy = store_postcard_copy_as_media($storedImage['file_path'], $storedImage['mime_type'], $senderPersonId);
             $entryStmt = $pdo->prepare(
-                'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
-                 VALUES (:pid, :type, :title, :body, CURDATE(), :vis, :uid)'
+                'INSERT INTO timeline_entries (person_id, entry_type, origin, title, body, occurred_on, visibility, created_by_user_id)
+                 VALUES (:pid, :type, :origin, :title, :body, CURDATE(), :vis, :uid)'
             );
             $entryStmt->execute([
-                'pid'   => $senderPersonId,
-                'type'  => 'photo',
-                'title' => ourthology_postcard_sent_title($pdo, $audience, $recipientPersonIds),
-                'body'  => $message !== '' ? $message : null,
-                'vis'   => 'private',
-                'uid'   => $senderUserId,
+                'pid'    => $senderPersonId,
+                'type'   => 'photo',
+                'origin' => 'postcard',
+                'title'  => ourthology_postcard_sent_title($pdo, $audience, $recipientPersonIds),
+                'body'   => $message !== '' ? $message : null,
+                'vis'    => 'private',
+                'uid'    => $senderUserId,
             ]);
             $entryId = (int) $pdo->lastInsertId();
             $pdo->prepare(
@@ -162,6 +177,7 @@ function fetch_postcard_recipient_row(PDO $pdo, int $recipientRowId, int $person
     $stmt = $pdo->prepare(
         "SELECT pr.id AS recipient_row_id, pr.postcard_id, pr.status, pr.timeline_entry_id, pr.created_at AS received_at,
                 pc.message, pc.image_path, pc.image_mime_type, pc.sender_person_id,
+                pc.postmark_angle, pc.to_line, pc.from_line,
                 sp.first_name AS sender_first, sp.surname AS sender_surname
          FROM postcard_recipients pr
          JOIN postcards pc ON pc.id = pr.postcard_id
@@ -213,16 +229,17 @@ function save_postcard_to_timeline(PDO $pdo, array $recipientRow, int $personId,
         $copy = store_postcard_copy_as_media($recipientRow['image_path'], $recipientRow['image_mime_type'], $personId);
         $senderName = person_display_name(['first_name' => $recipientRow['sender_first'], 'surname' => $recipientRow['sender_surname']]);
         $stmt = $pdo->prepare(
-            'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
-             VALUES (:pid, :type, :title, :body, CURDATE(), :vis, :uid)'
+            'INSERT INTO timeline_entries (person_id, entry_type, origin, title, body, occurred_on, visibility, created_by_user_id)
+             VALUES (:pid, :type, :origin, :title, :body, CURDATE(), :vis, :uid)'
         );
         $stmt->execute([
-            'pid'   => $personId,
-            'type'  => 'photo',
-            'title' => 'Postcard from ' . $senderName,
-            'body'  => $recipientRow['message'] !== '' ? $recipientRow['message'] : null,
-            'vis'   => 'private',
-            'uid'   => $userId,
+            'pid'    => $personId,
+            'type'   => 'photo',
+            'origin' => 'postcard',
+            'title'  => 'Postcard from ' . $senderName,
+            'body'   => $recipientRow['message'] !== '' ? $recipientRow['message'] : null,
+            'vis'    => 'private',
+            'uid'    => $userId,
         ]);
         $entryId = (int) $pdo->lastInsertId();
         $pdo->prepare(
@@ -251,4 +268,131 @@ function discard_postcard(PDO $pdo, int $recipientRowId): void
 {
     $pdo->prepare("UPDATE postcard_recipients SET status = 'discarded', resolved_at = NOW() WHERE id = :id")
         ->execute(['id' => $recipientRowId]);
+}
+
+/**
+ * Phase 54: the postage-stamp + postmark graphic, shared byte-for-byte
+ * between timeline.php's compose preview and pending.php's read view (it
+ * used to be duplicated inline in both, which is exactly how they drifted
+ * out of sync before -- one function, one place to get it right).
+ *
+ * $angleDeg is the postmark's "hand-stamped" rotation -- the compose
+ * preview passes a freshly rolled one (nothing to persist yet), the read
+ * view passes the postcard's own stored postmark_angle, so the same
+ * postcard always looks the same way once sent. $dateLabel is pre-
+ * formatted by the caller (today's date for the preview, the postcard's
+ * real received_at once it's actually been sent) since date formatting
+ * isn't this function's job.
+ *
+ * The white perforated border is a <mask> with a static ring of holes
+ * punched around the stamp's fixed-size rect -- there's nothing
+ * per-postcard about the perforation itself, only the postmark rotates.
+ */
+function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
+{
+    $angle = max(-45, min(45, $angleDeg));
+    $date = htmlspecialchars($dateLabel, ENT_QUOTES);
+    return <<<SVG
+        <svg viewBox="-2 -6 118 84" aria-hidden="true">
+          <defs>
+            <path id="pmArc" d="M 53 36 A 25 25 0 0 1 103 36"/>
+            <mask id="stampPerf" maskUnits="userSpaceOnUse" x="0" y="0" width="60" height="72">
+              <rect x="0" y="0" width="60" height="72" fill="white"/>
+              <circle cx="2.00" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="7.40" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="12.80" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="18.20" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="23.60" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="29.00" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="34.40" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="39.80" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="45.20" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="50.60" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="7.40" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="12.80" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="18.20" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="23.60" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="29.00" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="34.40" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="39.80" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="45.20" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="50.60" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="8.33" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="13.67" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="19.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="24.33" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="29.67" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="35.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="40.33" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="45.67" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="51.00" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="56.33" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="61.67" r="2.1" fill="black"/>
+              <circle cx="2.00" cy="67.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="3.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="8.33" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="13.67" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="19.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="24.33" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="29.67" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="35.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="40.33" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="45.67" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="51.00" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="56.33" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="61.67" r="2.1" fill="black"/>
+              <circle cx="56.00" cy="67.00" r="2.1" fill="black"/>
+            </mask>
+            <radialGradient id="stampGlow" cx="50%" cy="42%" r="55%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.32"/>
+              <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+            </radialGradient>
+            <clipPath id="ukFlagClip"><rect x="0" y="0" width="60" height="36"/></clipPath>
+          </defs>
+
+          <rect x="2" y="3" width="54" height="64" rx="1" fill="#FBF8F1" mask="url(#stampPerf)"/>
+          <rect x="6.5" y="7.5" width="45" height="55" fill="#9A2A2A"/>
+          <circle cx="29" cy="33" r="18" fill="url(#stampGlow)"/>
+
+          <text x="29" y="14" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="4.2" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
+
+          <g transform="translate(9.5,14) scale(1.22)">
+            <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
+            <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
+            <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1.1" stroke-linecap="round"/>
+            <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.4" stroke-linecap="round"/>
+            <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
+            <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
+          </g>
+
+          <text x="29" y="59.5" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="3.6" fill="#FBF8F1" letter-spacing="0.15">UNITED KINGDOM</text>
+
+          <g transform="translate(9,46.5)">
+            <g clip-path="url(#ukFlagClip)" transform="scale(0.25)">
+              <rect width="60" height="36" fill="#00247d"/>
+              <path d="M0,0 L60,36 M60,0 L0,36" stroke="#fff" stroke-width="9"/>
+              <path d="M0,0 L60,36 M60,0 L0,36" stroke="#cf142b" stroke-width="4"/>
+              <path d="M30,0 V36 M0,18 H60" stroke="#fff" stroke-width="14"/>
+              <path d="M30,0 V36 M0,18 H60" stroke="#cf142b" stroke-width="8"/>
+            </g>
+            <rect x="0.3" y="0.3" width="14.4" height="8.4" fill="none" stroke="#FBF8F1" stroke-width="0.5"/>
+          </g>
+
+          <g opacity="0.78" transform="rotate({$angle} 78 36)">
+            <circle cx="78" cy="36" r="25" fill="none" stroke="#29456e" stroke-width="1.6"/>
+            <circle cx="78" cy="36" r="19" fill="none" stroke="#29456e" stroke-width="1"/>
+            <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
+              <textPath href="#pmArc" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
+            </text>
+            <text x="78" y="39" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="6.2" fill="#29456e" letter-spacing="0.4">{$date}</text>
+            <line x1="78" y1="7" x2="78" y2="1" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="60" y1="13" x2="57" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="96" y1="13" x2="99" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
+          </g>
+        </svg>
+        SVG;
 }

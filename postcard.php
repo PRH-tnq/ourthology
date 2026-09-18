@@ -44,6 +44,13 @@ if ($action === 'send') {
     $audience = ($_POST['audience'] ?? '') === 'everyone' ? 'everyone' : 'selected';
     $message = trim((string) ($_POST['message'] ?? ''));
     $recordToOwnTimeline = !empty($_POST['record_to_timeline']);
+    // Phase 54: "let me edit the To and From lines, I might want to
+    // contract my name or the recipient's" -- free text, capped and
+    // trimmed, stored as-is; null (not empty string) when left blank so
+    // the read view's fallback to the computed sender/recipient name
+    // still kicks in (see fetch_postcard_recipient_row() callers).
+    $toLine = mb_substr(trim((string) ($_POST['to_line'] ?? '')), 0, 80);
+    $fromLine = mb_substr(trim((string) ($_POST['from_line'] ?? '')), 0, 80);
 
     $options = fetch_postcard_recipient_options($pdo, $myGroup, $myPersonId);
     $validIds = array_map(fn($p) => (int) $p['id'], $options);
@@ -75,7 +82,7 @@ if ($action === 'send') {
         exit;
     }
 
-    create_postcard($pdo, $myPersonId, $myUserId, $myGroup, $storedImage, $message, $audience, $recipientIds, $recordToOwnTimeline);
+    create_postcard($pdo, $myPersonId, $myUserId, $myGroup, $storedImage, $message, $audience, $recipientIds, $recordToOwnTimeline, $toLine, $fromLine);
 
     $senderName = person_display_name(['first_name' => $me['first_name'], 'surname' => $me['surname']]);
     foreach ($recipientIds as $rid) {

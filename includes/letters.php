@@ -240,16 +240,17 @@ function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml,
         : 'Letter from ' . ($senderName !== '' ? $senderName : 'a family member');
 
     $stmt = $pdo->prepare(
-        'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
-         VALUES (:pid, :type, :title, :body, CURDATE(), :vis, :uid)'
+        'INSERT INTO timeline_entries (person_id, entry_type, origin, title, body, occurred_on, visibility, created_by_user_id)
+         VALUES (:pid, :type, :origin, :title, :body, CURDATE(), :vis, :uid)'
     );
     $stmt->execute([
-        'pid'   => $ownerPersonId,
-        'type'  => 'note',
-        'title' => $title,
-        'body'  => $plainBody,
-        'vis'   => 'private',
-        'uid'   => $ownerUserId,
+        'pid'    => $ownerPersonId,
+        'type'   => 'note',
+        'origin' => 'letter',
+        'title'  => $title,
+        'body'   => $plainBody,
+        'vis'    => 'private',
+        'uid'    => $ownerUserId,
     ]);
     $entryId = (int) $pdo->lastInsertId();
 

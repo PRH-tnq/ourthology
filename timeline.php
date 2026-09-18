@@ -82,6 +82,11 @@ unset($_SESSION['flash_letter_sent'], $_SESSION['flash_letter_error']);
 // ACTUAL logged-in user, regardless of whose timeline is currently
 // being viewed (sending is a personal action, not scoped to $target).
 $postcardRecipientOptions = fetch_postcard_recipient_options($pdo, $myGroup, $myPersonId);
+// Phase 54: the compose preview isn't a real postcard yet, so there's no
+// stored postmark_angle to show -- just roll one for this page load
+// (create_postcard() rolls the real one that actually gets saved when
+// they send). Cosmetic only, never sent anywhere.
+$previewPostmarkAngle = random_int(-18, 22);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -353,6 +358,13 @@ foreach ($entries as $entry) {
         'tags'       => $tags,
         'iAmTagged'  => $iAmTagged,
         'myNote'     => $myNote,
+        // Phase 54: "show it on their timeline as a little mini
+        // postcard/envelope symbol" -- set only on the copy a save
+        // creates (save_postcard_to_timeline()/save_letter_copy_to_
+        // timeline() in includes/postcards.php / includes/letters.php),
+        // never on an ordinary memory, so the card rail can badge just
+        // those.
+        'origin'     => $entry['origin'],
     ];
 }
 
@@ -538,10 +550,20 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      reading "OURTHOLOGY POST OFFICE" -- replacing the placeholder
      dashed box. */
   .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:104px; aspect-ratio:118/84; margin-bottom:16px; }
-  .postcard-stamp svg { display:block; width:100%; height:100%; }
-  .postcard-address-lines { display:flex; flex-direction:column; gap:14px; margin-top:auto; }
-  .postcard-address-line { border-bottom:1px solid var(--line); height:1px; }
-  .postcard-address-line.is-filled { height:auto; border-bottom:1px solid var(--line); font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .postcard-stamp svg { display:block; width:100%; height:100%; overflow:visible; }
+  .postcard-address-lines { display:flex; flex-direction:column; gap:12px; margin-top:auto; }
+  /* Phase 54: "let me edit the To and From lines" -- these used to be
+     read-only spans filled in from the recipient/sender's real names;
+     now they're real inputs the sender can shorten ("Mum" instead of a
+     full name), prefilled with a sensible default and posted as
+     to_line/from_line (see postcard.php's send action + create_postcard()
+     in includes/postcards.php). pending.php's read view keeps the old
+     read-only .postcard-address-line/.is-filled styling for the same
+     spot -- it never needs to be editable there. */
+  .postcard-address-field { display:flex; align-items:baseline; gap:6px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  .postcard-address-label { flex:0 0 auto; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); font-family:inherit; }
+  .postcard-address-field input { flex:1 1 auto; min-width:0; border:none; outline:none; background:transparent; font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding:0; }
+  .postcard-address-field input::placeholder { color:var(--ink-faint); font-family:'Caveat',cursive; opacity:.8; }
 
   .postcard-back-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; border-top:1px solid var(--line); background:var(--paper-2); }
   .postcard-back-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
@@ -557,7 +579,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      letter), a recipient picker that fills in "Dear X,", a large
      handwriting-font body that can carry inline photos, and an
      auto-generated "Best regards" close. */
-  .letter-switch-link { display:inline-block; background:none; border:none; padding:0; margin:0 0 14px; font-size:13px; color:var(--accent); text-decoration:underline; cursor:pointer; font-family:inherit; }
+  /* Phase 54: split into plain lead-in text plus a real button for just
+     the "Send a letter instead" part -- it used to be one giant button
+     with the whole sentence as its label. */
+  .letter-switch-text { margin:0 0 14px; font-size:13px; color:var(--ink-soft); }
+  .letter-switch-btn { display:inline; background:none; border:none; padding:0; margin:0; font-size:13px; font-weight:700; color:var(--accent); text-decoration:underline; cursor:pointer; font-family:inherit; }
   .letter-mode-panel { display:none; }
   .letter-back-link { display:inline-block; background:none; border:none; padding:0; margin:0 0 12px; font-size:12.5px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; font-family:inherit; }
   .letterhead { display:flex; align-items:center; gap:12px; padding:14px 18px; border:1px solid var(--line); border-radius:12px 12px 0 0; background:linear-gradient(135deg, #9A2A2A, #7a2020); color:#FBF8F1; }
@@ -685,6 +711,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .card-media img { width:100%; height:100%; object-fit:cover; border-radius:18px 18px 0 0; }
   .card-media svg { width:34px; height:34px; opacity:.55; }
   .card-media-count { position:absolute; bottom:6px; right:6px; background:rgba(26,23,20,.75); color:#fff; font-size:10px; font-weight:800; padding:2px 7px; border-radius:999px; }
+  /* Phase 54: "show it on their timeline as a little mini postcard/
+     envelope symbol" -- a small round badge in the corner of a saved
+     postcard's or letter's own card, distinguishing it from an ordinary
+     memory at a glance without needing to open it. */
+  .card-origin-badge { position:absolute; top:8px; left:8px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 2px 6px rgba(26,23,20,.3); display:flex; align-items:center; justify-content:center; color:var(--accent); }
+  .card-origin-badge svg { width:14px; height:14px; }
   .card-body { padding:14px 15px 16px; }
   .card-date { font-size:11.5px; color:var(--ink-faint); margin-bottom:4px; font-weight:700; letter-spacing:.02em; }
   .card-title { font-size:15.5px; font-weight:800; margin-bottom:5px; }
@@ -1023,6 +1055,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     ];
 
     var DIARY_PILL_HTML = '<span class="pill diary"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4.3c1.8-.9 3.6-.9 5.4 0v11c-1.8-.9-3.6-.9-5.4 0v-11ZM15.4 4.3c-1.8-.9-3.6-.9-5.4 0v11c1.8-.9 3.6-.9 5.4 0v-11Z" stroke-linejoin="round"/></svg>Diary</span>';
+    // Phase 54: the little corner badge on a saved postcard's/letter's own
+    // card (see .card-origin-badge) -- a postcard icon (a photo with a
+    // torn corner) or an envelope icon, matched to entry.origin.
+    var ORIGIN_BADGE_HTML = {
+      postcard: '<span class="card-origin-badge" title="Saved from a postcard"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4.5" width="15" height="11" rx="1.2"/><path d="M2.5 7.5h15M6 4.5v3" stroke-linecap="round"/></svg></span>',
+      letter: '<span class="card-origin-badge" title="Saved from a letter"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.2" y="4.5" width="15.6" height="11.5" rx="1.2"/><path d="M2.6 5.3l7.4 6 7.4-6" stroke-linejoin="round"/></svg></span>'
+    };
     // Phase 33: shared by the memory-card rail and the viewer's detail
     // panel — previously each had its own copy of the public/private
     // ternary, which is exactly the kind of place a third value (Custom)
@@ -1449,7 +1488,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           : '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 3.5h6.5L15 7v9.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" stroke-linejoin="round"/><path d="M7 8h6M7 11h6M7 14h4" stroke-linecap="round"/></svg>';
         card.innerHTML =
           '<div class="card-tape" style="background: var(--fam' + fi + ')"></div>' +
-          '<div class="card-media" style="--stage-a: var(--fam' + fi + '-bg); --stage-b: var(--fam' + fi2 + '-bg);">' + mediaInner + '</div>' +
+          '<div class="card-media" style="--stage-a: var(--fam' + fi + '-bg); --stage-b: var(--fam' + fi2 + '-bg);">' + mediaInner + (ORIGIN_BADGE_HTML[e.origin] || '') + '</div>' +
           '<div class="card-body">' +
             '<div class="card-date mono">' + fmtDate(d) + '</div>' +
             '<div class="card-title">' + escapeHtml(e.title) + '</div>' +
@@ -2216,7 +2255,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <?php if (!$postcardRecipientOptions): ?>
           <p class="notice">Nobody else in your family has claimed a profile yet — a postcard needs someone actually signed up to receive it.</p>
         <?php else: ?>
-          <button type="button" class="letter-switch-link" id="switchToLetterBtn">Need a longer form of message? Send a letter instead.</button>
+          <p class="letter-switch-text">Need a longer form of message? <button type="button" class="letter-switch-btn" id="switchToLetterBtn">Send a letter instead</button></p>
           <form method="post" action="/postcard.php" enctype="multipart/form-data">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="send">
@@ -2253,37 +2292,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                     <textarea class="postcard-back-message" name="message" placeholder="Write your message here…" maxlength="2000"></textarea>
                     <div class="postcard-back-address">
                       <div class="postcard-stamp" aria-hidden="true">
-                      <svg viewBox="-2 -6 118 84" aria-hidden="true">
-                        <defs>
-                          <path id="pmArc" d="M 53 36 A 25 25 0 0 1 103 36"/>
-                        </defs>
-                        <rect x="2" y="3" width="54" height="64" rx="2" fill="#9A2A2A" stroke="#FBF8F1" stroke-width="2.5" stroke-dasharray="3.6 3.2"/>
-                        <g transform="translate(15,13) scale(0.92)">
-                          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
-                          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
-                          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1.1" stroke-linecap="round"/>
-                          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.4" stroke-linecap="round"/>
-                          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
-                          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
-                        </g>
-                        <text x="29" y="60" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="7" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
-                        <g opacity="0.74">
-                          <circle cx="78" cy="36" r="25" fill="none" stroke="#29456e" stroke-width="1.6"/>
-                          <circle cx="78" cy="36" r="19" fill="none" stroke="#29456e" stroke-width="1"/>
-                          <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
-                            <textPath href="#pmArc" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
-                          </text>
-                          <text x="78" y="39" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="6.2" fill="#29456e" letter-spacing="0.4"><?= date('d M Y') ?></text>
-                          <line x1="78" y1="7" x2="78" y2="1" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                          <line x1="60" y1="13" x2="57" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                          <line x1="96" y1="13" x2="99" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                        </g>
-                      </svg>
+                      <?= ourthology_postcard_stamp_svg($previewPostmarkAngle, date('d M Y')) ?>
                     </div>
-                      <div class="postcard-address-lines" aria-hidden="true">
-                        <span class="postcard-address-line"></span>
-                        <span class="postcard-address-line"></span>
-                        <span class="postcard-address-line"></span>
+                      <div class="postcard-address-lines">
+                        <label class="postcard-address-field">
+                          <span class="postcard-address-label">To</span>
+                          <input type="text" name="to_line" maxlength="80" placeholder="e.g. Mum, The Smiths…" autocomplete="off">
+                        </label>
+                        <label class="postcard-address-field">
+                          <span class="postcard-address-label">From</span>
+                          <input type="text" name="from_line" maxlength="80" value="<?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?>" autocomplete="off">
+                        </label>
                       </div>
                     </div>
                   </div>

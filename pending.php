@@ -294,7 +294,7 @@ function ourthology_pending_memory_preview_html(array $row): string
      reading "OURTHOLOGY POST OFFICE" -- replacing the placeholder
      dashed box. */
   .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:104px; aspect-ratio:118/84; margin-bottom:16px; }
-  .postcard-stamp svg { display:block; width:100%; height:100%; }
+  .postcard-stamp svg { display:block; width:100%; height:100%; overflow:visible; }
   .postcard-address-lines { display:flex; flex-direction:column; gap:14px; margin-top:auto; }
   .postcard-address-line { border-bottom:1px solid var(--line); height:1px; }
   .postcard-address-line.is-filled { height:auto; border-bottom:1px solid var(--line); font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -317,6 +317,47 @@ function ourthology_pending_memory_preview_html(array $row): string
   .letter-body-read img { max-width:100%; border-radius:6px; margin:8px 0; display:block; }
   .letter-closing { font-family:'Caveat',cursive; font-size:22px; color:#2b2620; margin:10px 0 0; line-height:1.3; }
   .letter-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
+
+  /* Phase 54: "appear in the recipient's pending as an envelope, with
+     their name on it and a from section written in the top left hand
+     corner" -- replaces the plain text-plus-button row a letter used to
+     get in "Waiting on you". The whole card is one submit button so
+     tapping anywhere on the envelope opens it. */
+  .envelope-req-card { padding:0; overflow:hidden; background:transparent; border:none; }
+  .envelope-req-card .req-when { padding:0 2px; margin-bottom:6px; }
+  .envelope-row { display:block; position:relative; width:100%; height:112px; padding:0; margin:0; border:1px solid #c9b998; border-radius:8px; cursor:pointer; font-family:inherit; text-align:left; background:linear-gradient(135deg,#f3ead9,#e9dcc4); box-shadow:0 6px 16px -9px rgba(26,23,20,.45); overflow:hidden; }
+  .envelope-row:hover { box-shadow:0 8px 20px -8px rgba(26,23,20,.55); }
+  .envelope-row::before {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      linear-gradient(135deg, transparent 49.3%, rgba(0,0,0,.06) 50%, transparent 50.7%),
+      linear-gradient(45deg, transparent 49.3%, rgba(0,0,0,.06) 50%, transparent 50.7%);
+  }
+  .envelope-row-flap { position:absolute; top:0; left:0; width:100%; height:58%; background:linear-gradient(135deg,#ede1c9,#ddcba3); clip-path:polygon(0 0,100% 0,50% 100%); box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  .envelope-row-return { position:absolute; top:9px; left:11px; font-family:'Caveat',cursive; font-size:13.5px; color:#6b5a3a; line-height:1.15; max-width:52%; z-index:2; }
+  .envelope-row-return b { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.04em; font-family:Georgia,serif; color:#8a7750; font-weight:600; }
+  .envelope-row-stamp { position:absolute; top:8px; right:10px; width:26px; height:20px; background:#fff; border:1px solid #c9b998; border-radius:2px; z-index:2; }
+  .envelope-row-addressee { position:absolute; left:0; right:0; bottom:22px; text-align:center; font-family:'Caveat',cursive; font-size:24px; color:#3a3226; z-index:2; }
+  .envelope-row-sub { position:absolute; left:0; right:0; bottom:8px; text-align:center; font-size:10px; color:#8a7750; letter-spacing:.02em; z-index:2; }
+
+  /* Phase 54: opening a letter runs the flap-open + pull-the-letter-out
+     animation below before the real letter-sheet is usable -- see the
+     JS at the bottom of the $openLetter block. Everything here is
+     inert (display:none, no transitions) until that JS opts in by
+     adding .js-anim, so a page where JS fails just shows the letter
+     immediately with no envelope in the way. */
+  .letter-envelope-scene { position:relative; perspective:1800px; }
+  .envelope-anim-flap, .envelope-anim-body { display:none; position:absolute; left:0; right:0; top:0; }
+  .envelope-anim-body { height:170px; border-radius:12px; background:linear-gradient(135deg,#f3ead9,#e9dcc4); border:1px solid #c9b998; box-shadow:0 10px 24px -12px rgba(0,0,0,.4); z-index:2; }
+  .envelope-anim-flap { height:110px; background:linear-gradient(135deg,#ede1c9,#ddcba3); clip-path:polygon(0 0,100% 0,50% 100%); transform-origin:top center; z-index:4; backface-visibility:hidden; -webkit-backface-visibility:hidden; box-shadow:0 2px 6px rgba(0,0,0,.15); }
+  .letter-envelope-scene.js-anim .envelope-anim-flap,
+  .letter-envelope-scene.js-anim .envelope-anim-body { display:block; }
+  .letter-envelope-scene.js-anim .envelope-anim-flap { transition:transform .65s cubic-bezier(.5,0,.3,1), opacity .3s ease .5s; }
+  .letter-envelope-scene.js-anim .envelope-anim-body { transition:opacity .5s ease .4s; }
+  .letter-envelope-scene.js-anim.is-opening .envelope-anim-flap { transform:rotateX(178deg); opacity:0; }
+  .letter-envelope-scene.js-anim.is-opening .envelope-anim-body { opacity:0; }
+  .letter-envelope-scene.js-anim .letter-reveal { position:relative; z-index:3; transform:translateY(40px) scale(.85); opacity:0; transition:transform .8s cubic-bezier(.2,.7,.2,1) .55s, opacity .6s ease .55s; }
+  .letter-envelope-scene.js-anim.is-pulled .letter-reveal { transform:translateY(0) scale(1); opacity:1; z-index:5; }
 </style>
 </head>
 <body>
@@ -426,16 +467,19 @@ function ourthology_pending_memory_preview_html(array $row): string
     <?php endforeach; ?>
 
     <?php foreach ($pendingLetters as $lt): ?>
-      <div class="req-card">
+      <div class="req-card envelope-req-card">
         <span class="req-when"><?= htmlspecialchars(human_time_ago($lt['received_at']), ENT_QUOTES) ?></span>
-        <p style="margin:0;font-size:14px;">
-          A letter from <strong><?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?></strong><?= $lt['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(already opened)</span>' : '' ?>
-        </p>
-        <form method="post" action="/letter.php" style="margin-top:8px;">
+        <form method="post" action="/letter.php">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="open">
           <input type="hidden" name="letter_id" value="<?= (int) $lt['letter_id'] ?>">
-          <button type="submit" class="btn-primary btn-small">Open letter</button>
+          <button type="submit" class="envelope-row" aria-label="Open letter from <?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?>">
+            <span class="envelope-row-flap" aria-hidden="true"></span>
+            <span class="envelope-row-return" aria-hidden="true"><b>From</b><?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?></span>
+            <span class="envelope-row-stamp" aria-hidden="true"></span>
+            <span class="envelope-row-addressee"><?= htmlspecialchars((string) $me['first_name'], ENT_QUOTES) ?></span>
+            <span class="envelope-row-sub"><?= $lt['status'] === 'read' ? 'Already opened — tap to reopen' : 'A letter for you — tap to open' ?></span>
+          </button>
         </form>
       </div>
     <?php endforeach; ?>
@@ -547,36 +591,11 @@ function ourthology_pending_memory_preview_html(array $row): string
               <div class="postcard-read-message"><?= $openPostcard['message'] !== '' ? nl2br(htmlspecialchars($openPostcard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
               <div class="postcard-back-address">
                 <div class="postcard-stamp" aria-hidden="true">
-                <svg viewBox="-2 -6 118 84" aria-hidden="true">
-                        <defs>
-                          <path id="pmArc" d="M 53 36 A 25 25 0 0 1 103 36"/>
-                        </defs>
-                        <rect x="2" y="3" width="54" height="64" rx="2" fill="#9A2A2A" stroke="#FBF8F1" stroke-width="2.5" stroke-dasharray="3.6 3.2"/>
-                        <g transform="translate(15,13) scale(0.92)">
-                          <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
-                          <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
-                          <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1.1" stroke-linecap="round"/>
-                          <line x1="16" y1="17" x2="16" y2="23.2" stroke="#FBF8F1" stroke-width="2.4" stroke-linecap="round"/>
-                          <line x1="16" y1="23.2" x2="12.6" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
-                          <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
-                        </g>
-                        <text x="29" y="60" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="7" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
-                        <g opacity="0.74">
-                          <circle cx="78" cy="36" r="25" fill="none" stroke="#29456e" stroke-width="1.6"/>
-                          <circle cx="78" cy="36" r="19" fill="none" stroke="#29456e" stroke-width="1"/>
-                          <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
-                            <textPath href="#pmArc" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
-                          </text>
-                          <text x="78" y="39" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="6.2" fill="#29456e" letter-spacing="0.4"><?= htmlspecialchars(date('d M Y', strtotime($openPostcard['received_at'])), ENT_QUOTES) ?></text>
-                          <line x1="78" y1="7" x2="78" y2="1" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                          <line x1="60" y1="13" x2="57" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                          <line x1="96" y1="13" x2="99" y2="8" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
-                        </g>
-                      </svg>
+                <?= ourthology_postcard_stamp_svg((int) $openPostcard['postmark_angle'], date('d M Y', strtotime($openPostcard['received_at']))) ?>
               </div>
                 <div class="postcard-address-lines">
-                  <span class="postcard-address-line is-filled">To: <?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span>
-                  <span class="postcard-address-line is-filled">From: <?= htmlspecialchars(person_display_name(["first_name" => $openPostcard['sender_first'], "surname" => $openPostcard['sender_surname']]), ENT_QUOTES) ?></span>
+                  <span class="postcard-address-line is-filled">To: <?= htmlspecialchars($openPostcard['to_line'] !== null && $openPostcard['to_line'] !== '' ? $openPostcard['to_line'] : person_display_name($me), ENT_QUOTES) ?></span>
+                  <span class="postcard-address-line is-filled">From: <?= htmlspecialchars($openPostcard['from_line'] !== null && $openPostcard['from_line'] !== '' ? $openPostcard['from_line'] : person_display_name(["first_name" => $openPostcard['sender_first'], "surname" => $openPostcard['sender_surname']]), ENT_QUOTES) ?></span>
                 </div>
               </div>
             </div>
@@ -626,8 +645,11 @@ function ourthology_pending_memory_preview_html(array $row): string
   <?php endif; ?>
   <?php if ($openLetter): ?>
   <div class="postcard-overlay" id="letterReadOverlay">
-    <div class="postcard-box" style="max-width:560px;">
+    <div class="postcard-box letter-envelope-scene" id="letterEnvelopeScene" style="max-width:560px;">
       <button type="button" class="postcard-close" id="letterReadClose" aria-label="Close">×</button>
+      <div class="envelope-anim-flap" aria-hidden="true"></div>
+      <div class="envelope-anim-body" aria-hidden="true"></div>
+      <div class="letter-reveal">
       <div class="letterhead">
         <svg class="letter-brand-mark" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
           <circle cx="16" cy="16" r="15" fill="#FBF8F1"/>
@@ -664,6 +686,7 @@ function ourthology_pending_memory_preview_html(array $row): string
         </div>
         <?php endif; ?>
       </div>
+      </div>
     </div>
   </div>
   <script>
@@ -682,6 +705,20 @@ function ourthology_pending_memory_preview_html(array $row): string
       });
       document.getElementById("letterReadClose").addEventListener("click", close);
       document.addEventListener("keydown", onEsc);
+
+      // Phase 54: "run an animation that opens the envelope and pulls
+      // the letter out" -- .js-anim switches the scene from its default
+      // (letter fully visible, envelope pieces display:none -- see the
+      // CSS) into the animated start state, then these two timers step
+      // it through opening the flap and pulling the letter up into
+      // view. Skipped for prefers-reduced-motion, where the letter just
+      // appears immediately exactly as it would with JS disabled.
+      var scene = document.getElementById("letterEnvelopeScene");
+      if (scene && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        scene.classList.add("js-anim");
+        setTimeout(function () { scene.classList.add("is-opening"); }, 220);
+        setTimeout(function () { scene.classList.add("is-pulled"); }, 560);
+      }
     })();
   </script>
   <?php endif; ?>

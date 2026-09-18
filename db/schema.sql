@@ -50,23 +50,6 @@ CREATE TABLE users (
   -- tour (Phase 19) — NULL means "hasn't seen it yet," checked on
   -- timeline.php to decide whether to show it.
   tour_completed_at DATETIME NULL,
-  -- Phase 40: "notify me about pending memory approvals" (Account
-  -- Settings). notify_email_enc is app-layer encrypted (libsodium
-  -- crypto_secretbox -- see includes/crypto.php), never a plaintext
-  -- email, so a database-only read (a backup, a compromised DB
-  -- credential without the separate above-webroot secrets file) never
-  -- recovers the address. Sized for a nonce (24 bytes) + MAC (16
-  -- bytes) + a generously long email address.
-  notify_email_enc    VARBINARY(400) NULL,
-  notify_pending_tags TINYINT(1) NOT NULL DEFAULT 0,
-  -- Phase 48: "email me when someone sends me a postcard" -- same
-  -- shared notify_email_enc address, its own independent opt-in.
-  -- Phase 53: this same column now also gates letter emails (see
-  -- includes/notifications.php's ourthology_notify_letter_received()) --
-  -- deliberately reused rather than adding a second checkbox, per Phil's
-  -- own request that "the Account Settings tick box... cover postcards
-  -- AND letters" (edit_person.php's label was updated to say so).
-  notify_postcards    TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -312,6 +295,18 @@ CREATE TABLE postcard_recipients (
 CREATE INDEX idx_postcard_sender ON postcards(sender_person_id);
 CREATE INDEX idx_pr_recipient_status ON postcard_recipients(recipient_person_id, status);
 
+-- Phase 48: postcard email opt-in, its own preference alongside
+-- notify_pending_tags (Phase 40; note that ALTER, like this one, is
+-- applied directly against the live database rather than folded back
+-- into the users table above -- see phase48_migration.sql).
+-- Phase 53: this same column now also gates letter emails (see
+-- includes/notifications.php's ourthology_notify_letter_received()) --
+-- deliberately reused rather than adding a second checkbox, per Phil's
+-- own request that "the Account Settings tick box... cover postcards AND
+-- letters" (edit_person.php's label was updated to say so).
+ALTER TABLE users
+  ADD COLUMN notify_postcards TINYINT(1) NOT NULL DEFAULT 0 AFTER notify_pending_tags;
+
 -- ---------------------------------------------------------------------
 -- Phase 53: letters. A longer-form, single-recipient alternative to a
 -- postcard, offered from the same compose pop-up. Its body is rich text
@@ -380,3 +375,38 @@ CREATE TABLE letter_images (
 CREATE INDEX idx_letter_sender ON letters(sender_person_id);
 CREATE INDEX idx_letter_recipient_status ON letters(recipient_person_id, status);
 CREATE INDEX idx_letter_image_uploader ON letter_images(uploader_person_id, letter_id);
+
+-- ---------------------------------------------------------------------
+-- Phase 54: "place the postmark at a jaunty angle that changes each time
+-- a new postcard is made" -- rolled once per postcard (random_int(-18,
+-- 22)) in create_postcard() and stored here so the SAME angle renders on
+-- every future read, rather than re-randomizing (and thus visibly
+-- "jumping") on each page load. The not-yet-sent compose preview on
+-- timeline.php still rolls a fresh angle per page view, since there is
+-- nothing to persist until the postcard is actually created.
+--
+-- to_line/from_line: "make it possible for me to edit the To and From...
+-- I might want to contract my name or the recipient's" -- free text
+-- (capped to 80 chars, trimmed) captured at send time and stored
+-- alongside the postcard. NULL (not empty string) when left blank, so
+-- the read view's existing fallback to the computed sender/recipient
+-- display name still applies exactly as it did before Phase 54.
+-- ---------------------------------------------------------------------
+ALTER TABLE postcards
+  ADD COLUMN postmark_angle SMALLINT NOT NULL DEFAULT 0 AFTER audience,
+  ADD COLUMN to_line VARCHAR(80) NULL AFTER postmark_angle,
+  ADD COLUMN from_line VARCHAR(80) NULL AFTER to_line;
+
+-- ---------------------------------------------------------------------
+-- Phase 54: "if the recipient saves the postcard/letter to their
+-- timeline, show a little mini postcard/envelope symbol on their
+-- timeline" -- set only at the moment a postcard or letter is actually
+-- saved (save_postcard_to_timeline() / save_letter_copy_to_timeline() in
+-- includes/postcards.php / includes/letters.php), never on an ordinary
+-- memory, and left NULL for every timeline_entries row that didn't come
+-- from either. Read back by fetch_entries_for_person() in
+-- includes/entries.php and rendered as a small corner badge on the
+-- timeline card (renderRail() in timeline.php).
+-- ---------------------------------------------------------------------
+ALTER TABLE timeline_entries
+  ADD COLUMN origin ENUM('postcard','letter') NULL DEFAULT NULL AFTER entry_type;
