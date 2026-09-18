@@ -484,8 +484,24 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   /* Phase 49: the front's photo now sits "matted" on a card-coloured
      backdrop -- like a printed photo tucked onto a postcard -- instead
      of bleeding edge to edge. */
-  .postcard-face-front { padding:12px; box-sizing:border-box; background:linear-gradient(135deg, #dce9ee, #eef1e4); }
-  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden; background:#fff; box-shadow:0 8px 20px -10px rgba(26,23,20,0.5); }
+  /* Phase 50: a thick WHITE border on the front (like a printed photo
+     tucked onto the card) and a diagonal striped "airmail" border on the
+     back -- closer to Phil's reference postcard than Phase 49's plainer
+     coloured-gradient mat. */
+  .postcard-face-front { padding:16px; box-sizing:border-box; background:#fff; }
+  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:2px; overflow:hidden; background:#fff; }
+  .postcard-face-back {
+    border-width:9px;
+    border-style:solid;
+    border-image-source: repeating-linear-gradient(-45deg,
+      #9a2a2a 0, #9a2a2a 10px,
+      #fff 10px, #fff 20px,
+      #29456e 20px, #29456e 30px,
+      #fff 30px, #fff 40px);
+    border-image-slice: 30;
+    border-image-repeat: round;
+    border-radius:0;
+  }
   .postcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; }
   .postcard-drop-zone.is-dragover { background:var(--paper-2); }
   .postcard-face-front.has-image .postcard-drop-zone { display:none; }

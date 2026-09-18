@@ -132,8 +132,9 @@ $outgoing = fetch_outgoing_pending_for_user($pdo, $myUserId);
 $pendingTags = fetch_pending_memory_tags_for_user($pdo, $myUserId);
 $outgoingTags = fetch_outgoing_memory_tags_for_user($pdo, $myUserId);
 $pendingPostcards = fetch_pending_postcards_for_person($pdo, $myPersonId);
+$outgoingPostcards = fetch_outgoing_postcards_for_person($pdo, $myPersonId);
 $incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards);
-$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags);
+$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards);
 
 $openPostcard = $openPostcardRowId !== null
     ? fetch_postcard_recipient_row($pdo, (int) $openPostcardRowId, $myPersonId)
@@ -247,8 +248,24 @@ function ourthology_pending_memory_preview_html(array $row): string
   /* Phase 49: matches timeline.php's compose card byte-for-byte for
      every class shared between the two -- see that file for the
      rationale (matted photo front, two-column back). */
-  .postcard-face-front { padding:12px; box-sizing:border-box; background:linear-gradient(135deg, #dce9ee, #eef1e4); }
-  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden; background:#fff; box-shadow:0 8px 20px -10px rgba(26,23,20,0.5); }
+  /* Phase 50: a thick WHITE border on the front (like a printed photo
+     tucked onto the card) and a diagonal striped "airmail" border on the
+     back -- closer to Phil's reference postcard than Phase 49's plainer
+     coloured-gradient mat. */
+  .postcard-face-front { padding:16px; box-sizing:border-box; background:#fff; }
+  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:2px; overflow:hidden; background:#fff; }
+  .postcard-face-back {
+    border-width:9px;
+    border-style:solid;
+    border-image-source: repeating-linear-gradient(-45deg,
+      #9a2a2a 0, #9a2a2a 10px,
+      #fff 10px, #fff 20px,
+      #29456e 20px, #29456e 30px,
+      #fff 30px, #fff 40px);
+    border-image-slice: 30;
+    border-image-repeat: round;
+    border-radius:0;
+  }
   .postcard-read-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
 
   .postcard-back-toolbar { flex:0 0 auto; display:flex; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--paper-2); }
@@ -427,6 +444,21 @@ function ourthology_pending_memory_preview_html(array $row): string
           <input type="hidden" name="id" value="<?= (int) $t['id'] ?>">
           <button type="submit" name="action" value="withdraw" class="btn-primary btn-small ghost" style="margin:0;">Withdraw</button>
         </form>
+      </div>
+    <?php endforeach; ?>
+
+    <?php foreach ($outgoingPostcards as $pc): ?>
+      <div class="req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($pc['sent_at']), ENT_QUOTES) ?></span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="display:block;width:56px;height:56px;border-radius:6px;overflow:hidden;border:1px solid var(--line);flex:none;">
+            <img src="/postcard_media.php?id=<?= (int) $pc['postcard_id'] ?>&thumb=1" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;">
+          </span>
+          <p style="margin:0;font-size:14px;flex:1 1 auto;">
+            Postcard sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $pc['recipient_first'], 'surname' => $pc['recipient_surname']]), ENT_QUOTES) ?></strong>
+            <?= $pc['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(opened, not yet decided)</span>' : ' <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>' ?>
+          </p>
+        </div>
       </div>
     <?php endforeach; ?>
 

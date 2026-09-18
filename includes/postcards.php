@@ -172,6 +172,32 @@ function fetch_postcard_recipient_row(PDO $pdo, int $recipientRowId, int $person
     return $stmt->fetch() ?: null;
 }
 
+/**
+ * Postcards $personId SENT that are still waiting on at least one
+ * recipient (status 'pending' or 'read') -- one row per still-unresolved
+ * recipient, not per postcard, so an "everyone" send shows exactly which
+ * people haven't actioned it yet and each one drops off the list
+ * independently as they save or discard their copy. Mirrors
+ * fetch_outgoing_memory_tags_for_user()'s per-recipient granularity in
+ * memory_tags.php rather than collapsing multi-recipient sends into one
+ * row.
+ */
+function fetch_outgoing_postcards_for_person(PDO $pdo, int $senderPersonId): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT pr.id AS recipient_row_id, pr.status, pr.created_at AS sent_at,
+                pc.id AS postcard_id,
+                rp.first_name AS recipient_first, rp.surname AS recipient_surname
+         FROM postcard_recipients pr
+         JOIN postcards pc ON pc.id = pr.postcard_id
+         JOIN persons rp ON rp.id = pr.recipient_person_id
+         WHERE pc.sender_person_id = :pid AND pr.status IN ('pending','read')
+         ORDER BY pr.created_at DESC"
+    );
+    $stmt->execute(['pid' => $senderPersonId]);
+    return $stmt->fetchAll();
+}
+
 /** Marks a still-pending postcard 'read' (no-op if it's already past that). */
 function mark_postcard_read(PDO $pdo, int $recipientRowId): void
 {
