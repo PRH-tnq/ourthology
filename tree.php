@@ -271,6 +271,20 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .edit-popup-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
   .edit-popup-close:hover { background:var(--paper-2); }
 
+  /* Phase 47: "Invite this person" -- a ready-to-send email draft
+     shown in its own pop-up (same fixed-overlay pattern as the edit
+     pop-up above), instead of just a bare claim link the inviter had
+     to write their own message around. The instructions live outside
+     the copyable textarea on purpose, so "Copy this" only ever puts
+     the actual email draft on the clipboard, never the instructions. */
+  .invite-draft-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.55); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .invite-draft-box { position:relative; width:min(96vw, 560px); max-height:92vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:20px 22px; }
+  .invite-draft-note { font-size:13px; color:var(--ink-soft); margin:0 0 12px; }
+  .invite-draft-text { width:100%; box-sizing:border-box; font-family:"Newsreader",Georgia,serif; font-size:13.5px; line-height:1.5; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; resize:vertical; }
+  .invite-draft-actions { display:flex; align-items:center; gap:10px; margin-top:12px; }
+  .invite-draft-copy-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
+  .invite-draft-copy-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
+
   /* Print: a family tree is wide, so print it landscape and let the full
      diagram scale to the page rather than printing whatever's currently
      scrolled into view — override the on-screen overflow:auto/fixed pixel
@@ -280,7 +294,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      context on a printed page. */
   @media print {
     @page { size: landscape; margin: 10mm; }
-    .nav, .flash, .flash-label, .birthday-banner, #unclaimedSection { display:none !important; }
+    .nav, .flash, .flash-label, .invite-draft-overlay, .birthday-banner, #unclaimedSection { display:none !important; }
     .tree-wrap { overflow:visible; border:none; box-shadow:none; background:transparent; padding:0; cursor:default; }
     .tree-wrap svg { width:100% !important; height:auto !important; }
   }
@@ -325,8 +339,77 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     </div>
 
     <?php if ($flashLink): ?>
-      <p class="flash-label" style="margin-top:16px;font-weight:600;">Invite link for <?= htmlspecialchars(person_display_name($personsById[$flashFor] ?? []), ENT_QUOTES) ?>:</p>
-      <p class="flash"><?= htmlspecialchars($flashLink, ENT_QUOTES) ?></p>
+      <?php
+        // Phase 47: build a ready-to-send email draft around the link
+        // instead of just showing the bare URL -- addressed to the
+        // invitee by name, signed by the inviter, both already on hand
+        // from fetch_family_graph() / current_user_with_person().
+        $inviteePerson = $personsById[$flashFor] ?? [];
+        $inviteeName = person_display_name($inviteePerson);
+        $inviteeFirst = trim((string) ($inviteePerson['first_name'] ?? '')) ?: $inviteeName;
+        $inviterName = person_display_name(['first_name' => $me['first_name'], 'surname' => $me['surname']]);
+        $inviteSubject = 'Join our family tree on ourthology.com';
+        $inviteBody = "Hi {$inviteeFirst},\n\n"
+            . "{$inviterName} has started building our family's tree on ourthology.com and would like you to be part of it.\n\n"
+            . "You can claim your own profile here:\n{$flashLink}\n\n"
+            . "Once you follow the link, you'll be able to add your own memories and photos, and see how you connect to the rest of the family.\n\n"
+            . "— {$inviterName}";
+        $inviteDraftText = "Subject: {$inviteSubject}\n\n{$inviteBody}";
+      ?>
+      <div class="invite-draft-overlay" id="inviteDraftOverlay">
+        <div class="invite-draft-box" role="dialog" aria-modal="true" aria-labelledby="inviteDraftTitle">
+          <button type="button" class="edit-popup-close" id="inviteDraftClose" aria-label="Close">×</button>
+          <p class="flash-label" id="inviteDraftTitle" style="margin-top:0;font-weight:600;">Invite <?= htmlspecialchars($inviteeName, ENT_QUOTES) ?></p>
+          <p class="invite-draft-note">Copy this into your normal email system and send it to <?= htmlspecialchars($inviteeFirst, ENT_QUOTES) ?>.</p>
+          <textarea id="inviteDraftText" class="invite-draft-text" readonly rows="12"><?= htmlspecialchars($inviteDraftText, ENT_QUOTES) ?></textarea>
+          <div class="invite-draft-actions">
+            <button type="button" id="inviteDraftCopyBtn" class="invite-draft-copy-btn" data-copy-label="Copy this" data-copied-label="Copied!">Copy this</button>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          var overlay = document.getElementById('inviteDraftOverlay');
+          if (!overlay) return;
+          function closeInviteDraft() {
+            overlay.remove();
+            document.removeEventListener('keydown', onEscape);
+          }
+          function onEscape(evt) {
+            if (evt.key === 'Escape') closeInviteDraft();
+          }
+          overlay.addEventListener('click', function (evt) {
+            if (evt.target === overlay) closeInviteDraft();
+          });
+          document.getElementById('inviteDraftClose').addEventListener('click', closeInviteDraft);
+          document.addEventListener('keydown', onEscape);
+
+          var copyBtn = document.getElementById('inviteDraftCopyBtn');
+          var textEl = document.getElementById('inviteDraftText');
+          function showCopied() {
+            copyBtn.textContent = copyBtn.dataset.copiedLabel || 'Copied!';
+            setTimeout(function () {
+              copyBtn.textContent = copyBtn.dataset.copyLabel || 'Copy this';
+            }, 1600);
+          }
+          function fallbackCopy() {
+            textEl.focus();
+            textEl.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            showCopied();
+          }
+          copyBtn.addEventListener('click', function () {
+            // textEl.value is the draft ONLY -- the instructions paragraph
+            // above it is a separate element and is never included here.
+            var text = textEl.value;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(showCopied, fallbackCopy);
+            } else {
+              fallbackCopy();
+            }
+          });
+        })();
+      </script>
     <?php endif; ?>
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
@@ -557,7 +640,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
                   <?= csrf_field() ?>
                   <input type="hidden" name="action" value="get_link">
                   <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
-                  <button type="submit" class="linklet">get invite link</button>
+                  <button type="submit" class="linklet">Invite this person</button>
                 </form>
               <?php endif; ?>
               · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
