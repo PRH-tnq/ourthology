@@ -177,7 +177,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=25">
+<link rel="stylesheet" href="/styles.css?v=26">
 <style>
   :root {
     --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
@@ -329,7 +329,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
         <a href="/add_relative.php" id="tourAddRelative">+ Add a relative</a>
         <a href="/edit_person.php">Edit a person</a>
         <a href="/link_existing.php">Link to existing account</a>
-        <a href="/calendar.php">Family calendar</a>
+        <a href="/calendar.php" id="tourCalendarLink">Family calendar</a>
         <a href="/pending.php" id="tourPendingLink" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
         <button type="button" id="printTreeBtn" class="linklet-btn" onclick="window.print()">Print tree</button>
       </div>

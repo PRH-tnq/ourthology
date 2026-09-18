@@ -13,6 +13,7 @@
  *
  *   window.OURTHOLOGY_TOUR_PAGE        -- "timeline" | "tree" | "add_entry"
  *                                          | "add_relative" | "edit_person"
+ *                                          | "calendar"
  *   window.OURTHOLOGY_AUTOSTART_TOUR   -- true only on timeline.php, for a
  *                                          brand-new owner who hasn't seen
  *                                          the tour yet
@@ -26,6 +27,18 @@
  * tracks its live position (or, for a few steps, is centered with nothing
  * highlighted, or shows a small illustrative diagram instead) -- unchanged
  * in spirit from the original single-page version.
+ *
+ * Phase 57: a few steps live *inside* the postcard/letter composer on
+ * timeline.php, which is normal page markup (a <template> cloned into the
+ * DOM by its own inline script) rather than a real navigable page -- so
+ * a step can't just point at it the way a step points at a real link.
+ * Each such step names an 'action' (see TOUR_ACTIONS below); the engine
+ * runs it right before placing that step, the same way it already clicks
+ * an edit_person.php tab via 'tab'. Every action is idempotent (it checks
+ * the composer's current state before doing anything), since the exact
+ * same step can be placed more than once -- a window resize re-runs
+ * place(), and a tour resumed mid-flow re-enters at whatever step was
+ * saved.
  */
 (function () {
   "use strict";
@@ -43,6 +56,7 @@
     edit_person: window.OURTHOLOGY_MY_PERSON_ID
       ? "/edit_person.php?person_id=" + encodeURIComponent(String(window.OURTHOLOGY_MY_PERSON_ID)) + "&tab=profile"
       : null,
+    calendar: "/calendar.php",
   };
 
   var TOUR_STEPS = JSON.parse(stepsEl.textContent);
@@ -266,6 +280,44 @@
     if (btn && !btn.classList.contains("is-active")) { btn.click(); }
   }
 
+  // Phase 57: named steps into the postcard/letter composer on
+  // timeline.php. Each function checks the composer's current state
+  // before acting (so re-running it -- a resize, a resumed tour -- is a
+  // safe no-op) and returns true only when it actually changed something,
+  // which is what tells place() below whether it needs to wait out an
+  // animation before measuring the target's position.
+  var TOUR_ACTIONS = {
+    open_postcard_composer: function () {
+      var btn = document.getElementById("sendPostcardBtn");
+      if (btn && !document.getElementById("postcardComposeOverlay")) { btn.click(); return true; }
+      return false;
+    },
+    flip_postcard: function () {
+      var btn = document.querySelector(".postcard-face-front .postcard-flip-btn");
+      var inner = document.querySelector(".postcard-flip-inner");
+      if (btn && inner && !inner.classList.contains("is-flipped")) { btn.click(); return true; }
+      return false;
+    },
+    switch_to_letter: function () {
+      var btn = document.getElementById("switchToLetterBtn");
+      var letterPanel = document.getElementById("letterModePanel");
+      if (btn && letterPanel && letterPanel.style.display !== "block") { btn.click(); return true; }
+      return false;
+    },
+    close_postcard_composer: function () {
+      var btn = document.getElementById("postcardComposeClose");
+      if (btn) { btn.click(); return true; }
+      return false;
+    },
+  };
+
+  // Only the flip genuinely animates (.postcard-flip-inner's 0.7s CSS
+  // transition) -- measuring the target immediately after toggling its
+  // class would catch it mid-turn and the highlight/tooltip would jump
+  // once the transition finished. Every other action is an instant style/
+  // DOM change, safe to measure right away.
+  var ACTION_SETTLE_MS = { flip_postcard: 760 };
+
   function place() {
     var s = TOUR_STEPS[step];
     titleEl.textContent = s.title;
@@ -280,6 +332,21 @@
 
     clickTabIfNeeded(s);
 
+    var acted = false;
+    if (s.action && TOUR_ACTIONS[s.action]) { acted = TOUR_ACTIONS[s.action](); }
+
+    var settleMs = acted ? (ACTION_SETTLE_MS[s.action] || 0) : 0;
+    if (settleMs) {
+      var thisStep = step;
+      setTimeout(function () {
+        if (step === thisStep) { positionForStep(s); }
+      }, settleMs);
+    } else {
+      positionForStep(s);
+    }
+  }
+
+  function positionForStep(s) {
     var target = s.target ? document.querySelector(s.target) : null;
     if (!target) {
       highlight.hidden = true;

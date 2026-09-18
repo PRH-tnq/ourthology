@@ -4,9 +4,9 @@ declare(strict_types=1);
 /**
  * Phase 28: the onboarding tour's content, in one place so every page it
  * can appear on (timeline.php, tree.php, add_entry.php, add_relative.php,
- * edit_person.php -- see includes/tour_engine.php and the shared /tour.js
- * for how those pages all run the same walkthrough) can never drift onto
- * different scripts.
+ * edit_person.php, and -- Phase 57 -- calendar.php -- see includes/
+ * tour_engine.php and the shared /tour.js for how those pages all run the
+ * same walkthrough) can never drift onto different scripts.
  *
  * Phase 42: reworked end to end from Phil's own "Edit the tour" notes --
  * bigger, clearer arrows on the timeline river; a real walkthrough of the
@@ -17,6 +17,14 @@ declare(strict_types=1);
  * the old single "that's the tour" card. Adapted from Phil's original
  * "Welcome training script" walkthrough, keeping its warm, plain-language
  * voice throughout.
+ *
+ * Phase 57: "add the calendar to the tour, and the letters and postcards
+ * -- open each up during the tour and explain all the features and how
+ * to use them." Added a full walkthrough of the postcard/letter composer
+ * (opened for real on timeline.php via each step's 'action' -- see
+ * below) in place of the old single "Send a postcard" step pointing at
+ * its button, and a new tree.php -> calendar.php -> tree.php leg
+ * alongside the existing tree.php -> add_relative.php -> tree.php one.
  *
  * Each step:
  *   'page'   -- which page it belongs on. The engine navigates there for
@@ -56,6 +64,17 @@ declare(strict_types=1);
  *                            the highlighted target towards another
  *                            element, for "this lands over there" (a new
  *                            memory dropping onto the timeline).
+ *   'action' -- optional. Names a step in timeline.php's postcard/letter
+ *               composer for the engine to run before spotlighting the
+ *               step's target -- opening it, flipping the postcard,
+ *               switching to the letter panel, or closing it back up
+ *               (see TOUR_ACTIONS in /tour.js for the exact list). The
+ *               composer is ordinary in-page markup cloned from a
+ *               <template> by timeline.php's own script, not a separate
+ *               page, so a step can't just navigate to it the way a step
+ *               navigates to add_entry.php or add_relative.php -- this is
+ *               how the tour instead opens it for real and walks through
+ *               it live, rather than just pointing at the button.
  */
 function ourthology_tour_steps(): array
 {
@@ -143,10 +162,65 @@ function ourthology_tour_steps(): array
             'page' => 'timeline',
             'target' => '#sendPostcardBtn',
             'title' => 'Send a postcard',
-            'body' => "Not every memory needs to go on the record. Send a postcard — a photo and a short note — to any family member or a group you pick. It's yours to keep light: nothing joins anyone's timeline unless you choose to keep your own copy when you send it, or they choose to save theirs after reading it. Otherwise it's just a quick hello, not a permanent record.",
+            'body' => "Not every memory needs to go on the record. Send a postcard — a photo and a short note — to any family member or a group you pick. It's yours to keep light: nothing joins anyone's timeline unless you choose to keep your own copy when you send it, or they choose to save theirs after reading it. Otherwise it's just a quick hello, not a permanent record. Let's open it and see how it works.",
         ],
         [
             'page' => 'timeline',
+            'action' => 'open_postcard_composer',
+            'target' => '.postcard-audience',
+            'title' => 'Choose who sees it',
+            'body' => "Send it to everyone in your family in one go, or choose people individually — tick as many as you like from the list.",
+        ],
+        [
+            'page' => 'timeline',
+            'target' => '.postcard-face-front',
+            'title' => 'Add a photo',
+            'body' => "Drop a photo straight in, or click to choose one from your device. This is the front of the card — flip it over whenever you're ready to write.",
+            'arrows' => [
+                ['type' => 'point', 'text' => 'flips it over', 'ax' => 0.9, 'ay' => 0.05, 'ldx' => -20, 'ldy' => -40],
+            ],
+        ],
+        [
+            'page' => 'timeline',
+            'action' => 'flip_postcard',
+            'target' => '.postcard-back-message',
+            'title' => 'Write your message',
+            'body' => "Up to 2,000 characters — plenty for a quick hello, or a longer catch-up if you're in the mood.",
+        ],
+        [
+            'page' => 'timeline',
+            'target' => '.postcard-address-lines',
+            'title' => 'Make it personal',
+            'body' => "Both of these fill in automatically, but they're yours to change — write \"Mum\" instead of a full name, or sign off however feels right to you.",
+        ],
+        [
+            'page' => 'timeline',
+            'target' => '.postcard-back-footer',
+            'title' => 'Keep a copy, then send',
+            'body' => "Tick the box if you'd like this postcard on your own timeline too — otherwise it's just between you and whoever you send it to, exactly like a real one. Then send it on its way.",
+        ],
+        [
+            'page' => 'timeline',
+            'action' => 'switch_to_letter',
+            'target' => '.letter-recipient-row',
+            'title' => 'Need more room? Send a letter instead',
+            'body' => "Same idea, more space — a proper heading, a longer story, and a single recipient rather than a group. Pick who it's going to here.",
+        ],
+        [
+            'page' => 'timeline',
+            'target' => '#letterBodyEditor',
+            'title' => 'Write it, add a photo if you like',
+            'body' => "\"Dear ___,\" fills in from your pick above, and you can shorten or change it right there, the same as a postcard's names. Write as much as you'd like below, and drop in a photo from the toolbar whenever you like.",
+        ],
+        [
+            'page' => 'timeline',
+            'target' => '.letter-footer',
+            'title' => 'Sign off and send',
+            'body' => "\"Best regards, ___\" is editable too. Tick the box to keep your own copy, then send — just like a postcard, it stays private until they choose to save it too.",
+        ],
+        [
+            'page' => 'timeline',
+            'action' => 'close_postcard_composer',
             'target' => null,
             'title' => 'On to your family tree',
             'body' => "Everyone in your family has their own timeline, just like this one. You can open any of them from your family tree — let's take a look at that now.",
@@ -230,6 +304,40 @@ function ourthology_tour_steps(): array
             'title' => 'Keep an eye on Pending',
             'body' => "When someone tags you in a memory, or wants to connect a relative to your tree, it shows up here. Accept a tag and it joins your own timeline too — or decline if it isn't you. Prefer email? Turn on notifications from your profile and we'll let you know automatically.",
         ],
+        [
+            'page' => 'tree',
+            'target' => '#tourCalendarLink',
+            'title' => 'A family calendar too',
+            'body' => "Birthdays fill in on their own — nothing to set up — and anyone in the family can add other dates worth marking, anniversaries and memorials included. Let's take a look.",
+        ],
+
+        // ----------------------------------------------------------- calendar
+        [
+            'page' => 'calendar',
+            'target' => '.cal-upcoming',
+            'title' => 'Birthdays, right away',
+            'body' => "As soon as a birth date is on file for someone, their birthday's here — nothing to add by hand. Anything happening in the next month shows up here first, nearest one at the top.",
+        ],
+        [
+            'page' => 'calendar',
+            'target' => '.cal-add-card',
+            'title' => 'Add your own key dates',
+            'body' => "Anniversaries, memorials, the first day of the school holidays — anyone in the family can add one. Give it a name and a date, and it'll come back every year from then on.",
+        ],
+        [
+            'page' => 'calendar',
+            'target' => '.cal-year',
+            'title' => 'The whole year at a glance',
+            'body' => "Every month is here, birthdays and key dates side by side. This month is outlined so it's easy to find, and — added a date by mistake? — anyone can remove a key date with the Remove link next to it.",
+        ],
+        [
+            'page' => 'calendar',
+            'target' => '#printCalendarBtn',
+            'title' => 'Print it out',
+            'body' => "Handy for the fridge door, or to bring to a family gathering — this prints cleanly as a simple month-by-month list.",
+        ],
+
+        // ---------------------------------------------------------------- tree
         [
             'page' => 'tree',
             'target' => null,

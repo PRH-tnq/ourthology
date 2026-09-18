@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/calendar.php';
+require_once __DIR__ . '/includes/tour_engine.php';
 
 /**
  * Phase 56: the family calendar -- birthdays (auto-populated from
@@ -130,7 +131,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=25">
+<link rel="stylesheet" href="/styles.css?v=26">
 <style>
   body { align-items: flex-start; }
   .wide { max-width: min(95vw, 1100px); }
@@ -219,7 +220,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
         <a href="/timeline.php">My timeline</a>
         <a href="/tree.php">My tree</a>
         <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
-        <button type="button" class="linklet-btn" onclick="window.print()">Print calendar</button>
+        <button type="button" id="printCalendarBtn" class="linklet-btn" onclick="window.print()">Print calendar</button>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
@@ -325,5 +326,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
       <?php endforeach; ?>
     </div>
   </div>
+
+  <?php ourthology_render_tour('calendar', $myPersonId); ?>
 </body>
 </html>

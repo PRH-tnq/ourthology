@@ -5,16 +5,16 @@ require_once __DIR__ . '/tour_steps.php';
 
 /**
  * Phase 42: renders the onboarding tour's shared markup, per-page config,
- * and engine script include -- identical on all five pages the tour can
+ * and engine script include -- identical on every page the tour can
  * appear on (timeline.php, tree.php, add_entry.php, add_relative.php,
- * edit_person.php). Before this, each page hand-duplicated ~140 lines of
- * markup and engine JS; now every page just calls this once, near the end
- * of <body>. See includes/tour_steps.php for the step content and
- * /tour.js for the engine itself.
+ * edit_person.php, and -- Phase 57 -- calendar.php). Before this, each
+ * page hand-duplicated ~140 lines of markup and engine JS; now every page
+ * just calls this once, near the end of <body>. See includes/tour_steps.php
+ * for the step content and /tour.js for the engine itself.
  *
  * $page       -- this page's own name, matching a 'page' value used in
  *                includes/tour_steps.php: "timeline", "tree", "add_entry",
- *                "add_relative", or "edit_person".
+ *                "add_relative", "edit_person", or "calendar".
  * $myPersonId -- the signed-in user's own person id. Needed so a step that
  *                jumps to edit_person.php can link to their own profile,
  *                even from a page (like tree.php) that isn't viewing it.
@@ -57,6 +57,6 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
     window.OURTHOLOGY_AUTOSTART_TOUR = <?= $autostart ? 'true' : 'false' ?>;
     window.OURTHOLOGY_MY_PERSON_ID = <?= $myPersonId ?>;
     </script>
-    <script src="/tour.js?v=2"></script>
+    <script src="/tour.js?v=3"></script>
     <?php
 }

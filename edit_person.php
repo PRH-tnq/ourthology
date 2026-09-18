@@ -592,7 +592,7 @@ if ($postedProfile) {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Edit person — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=25">
+<link rel="stylesheet" href="/styles.css?v=26">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion for the profile-photo upload below. Pinned to the one
      version this library has ever published. If this fails to load, the
