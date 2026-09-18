@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
+require_once __DIR__ . '/includes/postcards.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -54,6 +55,23 @@ $canManage = $isOwner || person_is_editable_by($target, (int) $me['user_id']);
 
 $notice = null;
 $errors = [];
+
+// Phase 48: postcard.php (a separate file -- it owns every postcard
+// mutation, same as add_entry.php owns every timeline-entry one)
+// redirects back here with one of these flashes after a send
+// succeeds or fails. Reuses this page's own $notice/$errors render
+// slot below rather than inventing a second one.
+if (!empty($_SESSION['flash_postcard_sent'])) {
+    $notice = (string) $_SESSION['flash_postcard_sent'];
+}
+if (!empty($_SESSION['flash_postcard_error'])) {
+    $errors[] = (string) $_SESSION['flash_postcard_error'];
+}
+unset($_SESSION['flash_postcard_sent'], $_SESSION['flash_postcard_error']);
+// The compose pop-up's recipient checkboxes -- always resolved for the
+// ACTUAL logged-in user, regardless of whose timeline is currently
+// being viewed (sending is a personal action, not scoped to $target).
+$postcardRecipientOptions = fetch_postcard_recipient_options($pdo, $myGroup, $myPersonId);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -361,7 +379,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <title><?= htmlspecialchars($targetName, ENT_QUOTES) ?> — timeline — ourthology.com</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css?v=25">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
@@ -440,6 +458,46 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      among plain nav links, kept here so it's not just a plain-looking pill. */
   .nav .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
   .nav .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
+
+  /* Phase 48: "Send a postcard" -- a compose pop-up styled like a
+     physical postcard, front (photo) and back (handwritten note) as two
+     faces of a 3D-flipped card. Same fixed-overlay convention as this
+     app's other pop-ups; pending.php's read-only version of this same
+     card reuses every one of these classes byte-for-byte. */
+  .postcard-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.6); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; overflow:auto; }
+  .postcard-box { position:relative; width:min(96vw, 640px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
+  .postcard-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
+  .postcard-close:hover { background:var(--paper-2); }
+
+  .postcard-audience { margin:0 0 14px; }
+  .postcard-audience .radio-row { display:flex; align-items:center; gap:8px; font-size:14px; margin-bottom:6px; cursor:pointer; }
+  .postcard-recipient-list { display:none; flex-wrap:wrap; gap:6px 16px; margin:6px 0 4px 24px; max-height:130px; overflow:auto; }
+  .postcard-recipient-list.is-open { display:flex; }
+  .postcard-recipient-list label { display:flex; align-items:center; gap:6px; font-size:13.5px; cursor:pointer; }
+
+  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; }
+  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
+  .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
+  .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
+  .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
+
+  .postcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; }
+  .postcard-drop-zone.is-dragover { background:var(--paper-2); }
+  .postcard-face-front.has-image .postcard-drop-zone { display:none; }
+  .postcard-front-preview { position:absolute; inset:0; display:none; width:100%; height:100%; object-fit:cover; }
+  .postcard-face-front.has-image .postcard-front-preview { display:block; }
+  .postcard-change-photo { display:none; position:absolute; bottom:8px; right:8px; z-index:1; font-size:11.5px; padding:5px 10px; border-radius:999px; background:rgba(26,23,20,0.65); color:#fff; border:none; cursor:pointer; }
+  .postcard-face-front.has-image .postcard-change-photo { display:block; }
+
+  .postcard-back-message { flex:1 1 auto; width:100%; box-sizing:border-box; border:none; resize:none; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; background:repeating-linear-gradient(to bottom, transparent, transparent 34px, var(--line) 35px); outline:none; }
+  .postcard-read-message { flex:1 1 auto; width:100%; box-sizing:border-box; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+  .postcard-back-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; border-top:1px solid var(--line); background:var(--paper-2); }
+  .postcard-back-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
+  .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
+  .postcard-flip-btn:hover { background:var(--paper-2); }
+  .postcard-stamp { position:absolute; top:14px; right:16px; width:42px; height:52px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.45; }
+  .postcard-send-btn { width:auto; margin:0; padding:9px 20px; }
+  .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -672,6 +730,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <a href="/tree.php" id="tourMyTree">My tree</a>
           <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
           <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
+          <button type="button" id="sendPostcardBtn" class="linklet-btn">Send a postcard</button>
           <span class="whoami">
             Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
             <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
@@ -2062,6 +2121,150 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
     render();
   })();
+  </script>
+
+  <template id="postcardComposeTemplate">
+    <div class="postcard-overlay" id="postcardComposeOverlay">
+      <div class="postcard-box">
+        <button type="button" class="postcard-close" id="postcardComposeClose" aria-label="Close">×</button>
+        <h3 style="margin:0 0 14px;">Send a postcard</h3>
+        <?php if (!$postcardRecipientOptions): ?>
+          <p class="notice">Nobody else in your family has claimed a profile yet — a postcard needs someone actually signed up to receive it.</p>
+        <?php else: ?>
+          <form method="post" action="/postcard.php" enctype="multipart/form-data">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="send">
+
+            <div class="postcard-audience">
+              <label class="radio-row"><input type="radio" name="audience" value="everyone"> Everyone in my family</label>
+              <label class="radio-row"><input type="radio" name="audience" value="selected" checked> Choose people</label>
+              <div class="postcard-recipient-list is-open">
+                <?php foreach ($postcardRecipientOptions as $opt): ?>
+                  <label><input type="checkbox" name="recipient_ids[]" value="<?= (int) $opt['id'] ?>"> <?= htmlspecialchars(person_display_name($opt), ENT_QUOTES) ?></label>
+                <?php endforeach; ?>
+              </div>
+            </div>
+
+            <div class="postcard-flip-scene">
+              <div class="postcard-flip-inner">
+                <div class="postcard-face postcard-face-front">
+                  <div class="postcard-drop-zone">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Drop a photo here, or click to choose one</span>
+                  </div>
+                  <img class="postcard-front-preview" alt="">
+                  <button type="button" class="postcard-change-photo">Change photo</button>
+                  <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;right:8px;z-index:1;">Write a message →</button>
+                  <input type="file" name="image" class="postcard-image-input" accept="image/*" hidden>
+                </div>
+                <div class="postcard-face postcard-face-back">
+                  <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;left:8px;z-index:1;">← Back to photo</button>
+                  <div class="postcard-stamp" aria-hidden="true"></div>
+                  <textarea class="postcard-back-message" name="message" placeholder="Write your message here…" maxlength="2000"></textarea>
+                  <div class="postcard-back-footer">
+                    <label><input type="checkbox" name="record_to_timeline" value="1"> Also add this to my own timeline</label>
+                    <button type="submit" class="btn-primary postcard-send-btn">Send</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        <?php endif; ?>
+      </div>
+    </div>
+  </template>
+  <script>
+    // Phase 48: compose pop-up -- cloned from the <template> above (its
+    // recipient checkboxes are already server-rendered, so there's no
+    // client-side HTML building or JSON payload needed) and wired up the
+    // same way tree.php's invite-draft pop-up is: overlay-click / × /
+    // Escape all close it, appended fresh each open so state never lingers
+    // between opens.
+    (function () {
+      var openBtn = document.getElementById("sendPostcardBtn");
+      var tpl = document.getElementById("postcardComposeTemplate");
+      if (!openBtn || !tpl) return;
+
+      function closeOverlay() {
+        var existing = document.getElementById("postcardComposeOverlay");
+        if (existing) existing.remove();
+        document.removeEventListener("keydown", onEscape);
+      }
+      function onEscape(evt) {
+        if (evt.key === "Escape") closeOverlay();
+      }
+
+      function wireForm(root) {
+        var audienceRadios = root.querySelectorAll('input[name="audience"]');
+        var recipientList = root.querySelector(".postcard-recipient-list");
+        audienceRadios.forEach(function (r) {
+          r.addEventListener("change", function () {
+            if (recipientList) recipientList.classList.toggle("is-open", r.value === "selected" && r.checked);
+          });
+        });
+
+        var fileInput = root.querySelector(".postcard-image-input");
+        var frontFace = root.querySelector(".postcard-face-front");
+        var previewImg = root.querySelector(".postcard-front-preview");
+        var dropZone = root.querySelector(".postcard-drop-zone");
+        var changeBtn = root.querySelector(".postcard-change-photo");
+        if (fileInput && frontFace && previewImg && dropZone) {
+          function showPreview(files) {
+            if (!files || !files[0] || files[0].type.indexOf("image/") !== 0) return;
+            var reader = new FileReader();
+            reader.onload = function (e) {
+              previewImg.src = e.target.result;
+              frontFace.classList.add("has-image");
+            };
+            reader.readAsDataURL(files[0]);
+          }
+          dropZone.addEventListener("click", function () { fileInput.click(); });
+          if (changeBtn) changeBtn.addEventListener("click", function (evt) { evt.stopPropagation(); fileInput.click(); });
+          fileInput.addEventListener("change", function () { showPreview(fileInput.files); });
+          ["dragover", "dragenter"].forEach(function (evtName) {
+            frontFace.addEventListener(evtName, function (evt) {
+              evt.preventDefault();
+              dropZone.classList.add("is-dragover");
+            });
+          });
+          ["dragleave", "dragend"].forEach(function (evtName) {
+            frontFace.addEventListener(evtName, function () { dropZone.classList.remove("is-dragover"); });
+          });
+          frontFace.addEventListener("drop", function (evt) {
+            evt.preventDefault();
+            dropZone.classList.remove("is-dragover");
+            var files = evt.dataTransfer ? evt.dataTransfer.files : null;
+            if (files && files[0]) {
+              try {
+                var dt = new DataTransfer();
+                dt.items.add(files[0]);
+                fileInput.files = dt.files;
+              } catch (e) { /* older browser -- preview still shows, the drop just won't carry into the form submit */ }
+              showPreview(files);
+            }
+          });
+        }
+
+        var flipInner = root.querySelector(".postcard-flip-inner");
+        if (flipInner) {
+          root.querySelectorAll(".postcard-flip-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () { flipInner.classList.toggle("is-flipped"); });
+          });
+        }
+      }
+
+      openBtn.addEventListener("click", function () {
+        closeOverlay();
+        document.body.appendChild(tpl.content.cloneNode(true));
+        var overlay = document.getElementById("postcardComposeOverlay");
+        overlay.addEventListener("click", function (evt) {
+          if (evt.target === overlay) closeOverlay();
+        });
+        document.getElementById("postcardComposeClose").addEventListener("click", closeOverlay);
+        document.addEventListener("keydown", onEscape);
+        wireForm(overlay);
+      });
+    })();
   </script>
 
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>

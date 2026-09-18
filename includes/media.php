@@ -650,3 +650,143 @@ function person_has_pending_tag_awaiting_approval(PDO $pdo, int $timelineEntryId
     $stmt->execute(['eid' => $timelineEntryId, 'pid' => $personId]);
     return (bool) $stmt->fetchColumn();
 }
+
+// --- Postcards (Phase 48) ----------------------------------------------
+//
+// A postcard's front image is validated and stored the same
+// real-content-sniffing, HEIC-safety-netted way as any other upload here,
+// but images-only and under its own postcards/<senderPersonId>/
+// subfolder -- kept apart from a person's own timeline media (and NOT
+// counted in person_media_bytes_used()'s quota SUM, since it isn't
+// really theirs to keep yet) until an actual, independent copy is made
+// via store_postcard_copy_as_media() below -- which IS a normal media
+// row from that point on, and so counts against quota completely
+// normally, no extra bookkeeping needed anywhere else.
+
+const POSTCARD_IMAGE_MAX_BYTES = 15 * 1024 * 1024; // 15MB -- one photo, generous enough for a phone's full-res shot
+const POSTCARD_IMAGE_ALLOWED = [
+    'jpg'  => ['image/jpeg'],
+    'jpeg' => ['image/jpeg'],
+    'png'  => ['image/png'],
+    'gif'  => ['image/gif'],
+    'webp' => ['image/webp'],
+];
+
+/**
+ * Validates and stores a postcard's front-image upload. Mirrors
+ * store_uploaded_media() above (same real-content sniffing, same
+ * HEIC/HEIF server-side safety net) but images-only and written to its
+ * own postcards/<senderPersonId>/ subfolder rather than a person's normal
+ * media dir -- see the block comment just above.
+ */
+function store_postcard_image(array $file, int $senderPersonId): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException(match ($file['error'] ?? null) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'That photo is too large for this server to accept.',
+            UPLOAD_ERR_NO_FILE => 'Drop a photo onto the front of the postcard first.',
+            default => 'Upload failed — please try again.',
+        });
+    }
+    if (!is_uploaded_file($file['tmp_name'])) {
+        throw new RuntimeException('Upload failed — please try again.');
+    }
+    if ($file['size'] > POSTCARD_IMAGE_MAX_BYTES) {
+        throw new RuntimeException('That photo is larger than the 15MB limit.');
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $detectedMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+
+    $dir = ourthology_media_dir() . '/postcards/' . $senderPersonId;
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+
+    if (ourthology_looks_like_heic($file['tmp_name'], $detectedMime)) {
+        $destination = ourthology_convert_heic_to_jpeg($file['tmp_name'], $dir);
+        if ($destination === null) {
+            throw new RuntimeException('That looks like an iPhone/Samsung HEIC photo, and it couldn\'t be converted automatically — please convert it to JPEG first and try again.');
+        }
+        $filename = basename($destination);
+        $detectedMime = 'image/jpeg';
+    } else {
+        $extension = null;
+        foreach (POSTCARD_IMAGE_ALLOWED as $ext => $mimes) {
+            if (in_array($detectedMime, $mimes, true)) {
+                $extension = $ext;
+                break;
+            }
+        }
+        if ($extension === null) {
+            throw new RuntimeException('Postcard photos must be a JPEG, PNG, GIF, or WEBP image.');
+        }
+
+        $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+        $destination = $dir . '/' . $filename;
+
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            throw new RuntimeException('Could not save the photo — please try again.');
+        }
+    }
+    chmod($destination, 0640);
+
+    $byteSize = @filesize($destination);
+    $byteSize = $byteSize !== false ? $byteSize : $file['size'];
+
+    $dims = @getimagesize($destination);
+    [$width, $height] = $dims ?: [null, null];
+
+    return [
+        'file_path' => 'postcards/' . $senderPersonId . '/' . $filename,
+        'mime_type' => $detectedMime,
+        'byte_size' => $byteSize,
+        'width'     => $width,
+        'height'    => $height,
+    ];
+}
+
+/**
+ * Copies an already-stored file (by its path relative to
+ * ourthology_media_dir(), e.g. a postcard's own image_path) into a real
+ * media-row-ready file under $ownerPersonId's normal timeline media
+ * folder -- used when a postcard's photo needs to become an actual,
+ * independent media row: the sender's own "record to my timeline" copy,
+ * or a recipient's "save to my timeline" copy. A genuine on-disk copy,
+ * not a shared reference, so each resulting media row (and, later,
+ * delete_media_file() on any one of them) can never affect another.
+ */
+function store_postcard_copy_as_media(string $sourceRelativePath, string $mimeType, int $ownerPersonId): array
+{
+    $source = ourthology_media_dir() . '/' . $sourceRelativePath;
+    if (!is_file($source)) {
+        throw new RuntimeException('That postcard photo is no longer available.');
+    }
+
+    $dir = ourthology_media_dir() . '/' . $ownerPersonId;
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+
+    $extension = pathinfo($source, PATHINFO_EXTENSION) ?: 'jpg';
+    $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+    $destination = $dir . '/' . $filename;
+
+    if (!@copy($source, $destination)) {
+        throw new RuntimeException('Could not save the photo — please try again.');
+    }
+    chmod($destination, 0640);
+
+    $byteSize = @filesize($destination);
+    $dims = @getimagesize($destination);
+    [$width, $height] = $dims ?: [null, null];
+
+    return [
+        'file_path' => $ownerPersonId . '/' . $filename,
+        'mime_type' => $mimeType,
+        'byte_size' => $byteSize !== false ? $byteSize : 0,
+        'width'     => $width,
+        'height'    => $height,
+    ];
+}

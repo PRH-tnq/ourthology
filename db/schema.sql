@@ -59,6 +59,9 @@ CREATE TABLE users (
   -- bytes) + a generously long email address.
   notify_email_enc    VARBINARY(400) NULL,
   notify_pending_tags TINYINT(1) NOT NULL DEFAULT 0,
+  -- Phase 48: "email me when someone sends me a postcard" -- same
+  -- shared notify_email_enc address, its own independent opt-in.
+  notify_postcards    TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -247,3 +250,59 @@ CREATE INDEX idx_rel_status ON relationships(status);
 CREATE INDEX idx_part_status ON partnerships(status);
 CREATE INDEX idx_tags_status ON memory_tags(status);
 CREATE INDEX idx_tags_person ON memory_tags(person_id, status);
+
+-- ---------------------------------------------------------------------
+-- Phase 48: postcards. A sender addresses a photo + message to one,
+-- several, or "everyone" (resolved to every claimed person in their
+-- family group AT SEND TIME -- a snapshot, not live membership, so a
+-- later-joining member never retroactively receives an old postcard).
+-- Its image is deliberately NOT a media row and lives outside
+-- timeline_entries entirely -- see includes/media.php's
+-- store_postcard_image()/store_postcard_copy_as_media() -- until either
+-- the sender (record_to_timeline at send time) or a recipient (save vs.
+-- discard, after reading) chooses to keep an actual, independent copy of
+-- it as a real timeline_entries + media row they own.
+-- ---------------------------------------------------------------------
+CREATE TABLE postcards (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sender_person_id    INT UNSIGNED NOT NULL,
+  created_by_user_id  INT UNSIGNED NOT NULL,
+  family_group_id     INT UNSIGNED NOT NULL,
+  image_path          VARCHAR(255) NOT NULL,
+  image_mime_type     VARCHAR(100) NOT NULL,
+  image_byte_size     INT UNSIGNED NOT NULL,
+  image_width         INT UNSIGNED NULL,
+  image_height        INT UNSIGNED NULL,
+  message             TEXT NOT NULL,
+  audience            ENUM('everyone','selected') NOT NULL DEFAULT 'selected',
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_postcard_sender FOREIGN KEY (sender_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_postcard_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- postcard_recipients: one row per person a postcard was addressed to --
+-- this app's Pending-queue row for it (fetch_pending_postcards_for_person()
+-- in includes/postcards.php), mirroring memory_tags' own
+-- pending/resolved shape but with an extra step: 'pending' (never
+-- opened) -> 'read' (opened, not yet decided) -> 'saved' (kept, with
+-- timeline_entry_id pointing at the resulting copy) or 'discarded'
+-- (closed without keeping it -- nothing deleted, just marked closed).
+-- ---------------------------------------------------------------------
+CREATE TABLE postcard_recipients (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  postcard_id           INT UNSIGNED NOT NULL,
+  recipient_person_id   INT UNSIGNED NOT NULL,
+  status                ENUM('pending','read','saved','discarded') NOT NULL DEFAULT 'pending',
+  timeline_entry_id     INT UNSIGNED NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at               DATETIME NULL,
+  resolved_at           DATETIME NULL,
+  UNIQUE KEY uniq_postcard_recipient (postcard_id, recipient_person_id),
+  CONSTRAINT fk_pr_postcard FOREIGN KEY (postcard_id) REFERENCES postcards(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pr_recipient FOREIGN KEY (recipient_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_pr_entry FOREIGN KEY (timeline_entry_id) REFERENCES timeline_entries(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_postcard_sender ON postcards(sender_person_id);
+CREATE INDEX idx_pr_recipient_status ON postcard_recipients(recipient_person_id, status);

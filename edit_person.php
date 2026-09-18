@@ -373,15 +373,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $submittedEmail = trim((string) ($_POST['notify_email'] ?? ''));
             $wantsNotify = !empty($_POST['notify_pending_tags']);
+            // Phase 48: its own toggle, sharing the same notify_email_enc
+            // address as notify_pending_tags above rather than a second
+            // address field -- Phil didn't ask for postcard notices to go
+            // somewhere different, and one address is simpler to manage.
+            $wantsPostcardNotify = !empty($_POST['notify_postcards']);
             if ($submittedEmail !== '' && !filter_var($submittedEmail, FILTER_VALIDATE_EMAIL)) {
                 $errors[] = 'Enter a valid email address.';
-            } elseif ($wantsNotify && $submittedEmail === '') {
-                $errors[] = 'Add an email address to turn on pending-approval emails.';
+            } elseif (($wantsNotify || $wantsPostcardNotify) && $submittedEmail === '') {
+                $errors[] = 'Add an email address to turn on notification emails.';
             } else {
                 try {
                     $encrypted = $submittedEmail !== '' ? ourthology_encrypt_notify_email($submittedEmail) : null;
-                    $pdo->prepare('UPDATE users SET notify_email_enc = :email, notify_pending_tags = :notify WHERE id = :uid')
-                        ->execute(['email' => $encrypted, 'notify' => $wantsNotify ? 1 : 0, 'uid' => $myUserId]);
+                    $pdo->prepare('UPDATE users SET notify_email_enc = :email, notify_pending_tags = :notify, notify_postcards = :notifypc WHERE id = :uid')
+                        ->execute(['email' => $encrypted, 'notify' => $wantsNotify ? 1 : 0, 'notifypc' => $wantsPostcardNotify ? 1 : 0, 'uid' => $myUserId]);
                     $_SESSION['flash_edit_notice'] = 'Notification settings saved.';
                     header('Location: /edit_person.php?person_id=' . $personId . '&tab=account' . $popupQS);
                     exit;
@@ -441,6 +446,7 @@ $storageSummary = $person !== null ? person_storage_summary($pdo, $personId, $pe
 $postedNotify = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_notification_settings' && $errors;
 $notifyEmail = null;
 $notifyPendingTags = false;
+$notifyPostcards = false;
 if ($postedNotify) {
     // Same convention as $postedProfile above: an error on this action
     // redisplays what was just typed, not what's still saved -- otherwise
@@ -449,13 +455,15 @@ if ($postedNotify) {
     // like it refers to nothing.
     $notifyEmail = trim((string) ($_POST['notify_email'] ?? ''));
     $notifyPendingTags = !empty($_POST['notify_pending_tags']);
+    $notifyPostcards = !empty($_POST['notify_postcards']);
 } elseif ($personId === $myPersonId) {
-    $notifyStmt = $pdo->prepare('SELECT notify_email_enc, notify_pending_tags FROM users WHERE id = :uid');
+    $notifyStmt = $pdo->prepare('SELECT notify_email_enc, notify_pending_tags, notify_postcards FROM users WHERE id = :uid');
     $notifyStmt->execute(['uid' => $myUserId]);
     $notifyRow = $notifyStmt->fetch();
     if ($notifyRow) {
         $notifyEmail = ourthology_decrypt_notify_email($notifyRow['notify_email_enc']);
         $notifyPendingTags = (bool) $notifyRow['notify_pending_tags'];
+        $notifyPostcards = (bool) $notifyRow['notify_postcards'];
     }
 }
 
@@ -1131,9 +1139,13 @@ if ($postedProfile) {
               <input type="hidden" name="tab" value="account">
               <label for="notify_email" style="display:block;font-size:12px;font-weight:700;color:var(--ink-soft);margin-bottom:4px;">Notification email</label>
               <input type="email" id="notify_email" name="notify_email" value="<?= htmlspecialchars($notifyEmail ?? '', ENT_QUOTES) ?>" placeholder="you@example.com" style="margin-bottom:10px;">
-              <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:0 0 12px;">
+              <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:0 0 8px;">
                 <input type="checkbox" name="notify_pending_tags" value="1" style="margin-top:2px;" <?= $notifyPendingTags ? 'checked' : '' ?>>
                 <span>Email me when a memory is pending my approval</span>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:0 0 12px;">
+                <input type="checkbox" name="notify_postcards" value="1" style="margin-top:2px;" <?= $notifyPostcards ? 'checked' : '' ?>>
+                <span>Email me when someone sends me a postcard</span>
               </label>
               <button type="submit" class="btn-primary" style="margin-top:0;">Save Notification Settings</button>
             </form>

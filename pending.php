@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php'; // fetch_entry_media() — the memory preview below (Phase 32)
+require_once __DIR__ . '/includes/postcards.php';
 
 require_login();
 $me = current_user_with_person();
@@ -17,9 +18,21 @@ if ($me === null) {
 }
 $pdo = ourthology_pdo();
 $myUserId = (int) $me['user_id'];
+$myPersonId = (int) $me['person_id'];
 
 $notice = null;
 $errors = [];
+
+// Phase 48: postcard.php (open/save/discard) redirects back here with
+// one of these flashes -- $postcardNotice reuses this page's own
+// $notice render slot below, and $openPostcard (resolved further down,
+// once $myPersonId's ownership can be checked) drives the read pop-up.
+$openPostcardRowId = $_SESSION['flash_open_postcard'] ?? null;
+unset($_SESSION['flash_open_postcard']);
+if (!empty($_SESSION['flash_postcard_notice'])) {
+    $notice = (string) $_SESSION['flash_postcard_notice'];
+}
+unset($_SESSION['flash_postcard_notice']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -118,8 +131,13 @@ $pending = fetch_pending_for_user($pdo, $myUserId);
 $outgoing = fetch_outgoing_pending_for_user($pdo, $myUserId);
 $pendingTags = fetch_pending_memory_tags_for_user($pdo, $myUserId);
 $outgoingTags = fetch_outgoing_memory_tags_for_user($pdo, $myUserId);
-$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags);
+$pendingPostcards = fetch_pending_postcards_for_person($pdo, $myPersonId);
+$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards);
 $outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags);
+
+$openPostcard = $openPostcardRowId !== null
+    ? fetch_postcard_recipient_row($pdo, (int) $openPostcardRowId, $myPersonId)
+    : null;
 
 // Phase 32: a memory-tag request is a judgment call ("does this actually
 // belong on my timeline too?"), so both lists below get the tagged
@@ -201,6 +219,9 @@ function ourthology_pending_memory_preview_html(array $row): string
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pending requests — ourthology.com</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css?v=25">
 <style>
   .req-card { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:14px; background:#fff; }
@@ -209,6 +230,25 @@ function ourthology_pending_memory_preview_html(array $row): string
   .btn-small.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); margin:0; }
   h3.section-title { margin:24px 0 4px; font-size:15px; }
   h3.section-title:first-of-type { margin-top:16px; }
+
+  /* Phase 48: same postcard flip-card, byte-for-byte, as timeline.php's
+     compose pop-up -- this page only ever shows it read-only (the
+     recipient looking at what they were sent), never editable. */
+  .postcard-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.6); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; overflow:auto; }
+  .postcard-box { position:relative; width:min(96vw, 640px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
+  .postcard-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
+  .postcard-close:hover { background:var(--paper-2); }
+  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; }
+  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
+  .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
+  .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
+  .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
+  .postcard-read-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .postcard-read-message { flex:1 1 auto; width:100%; box-sizing:border-box; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+  .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
+  .postcard-flip-btn:hover { background:var(--paper-2); }
+  .postcard-stamp { position:absolute; top:14px; right:16px; width:42px; height:52px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.45; }
+  .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
 <body>
@@ -297,6 +337,26 @@ function ourthology_pending_memory_preview_html(array $row): string
       </div>
     <?php endforeach; ?>
 
+    <?php foreach ($pendingPostcards as $pc): ?>
+      <div class="req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($pc['received_at']), ENT_QUOTES) ?></span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="display:block;width:56px;height:56px;border-radius:6px;overflow:hidden;border:1px solid var(--line);flex:none;">
+            <img src="/postcard_media.php?id=<?= (int) $pc['postcard_id'] ?>&thumb=1" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;">
+          </span>
+          <p style="margin:0;font-size:14px;flex:1 1 auto;">
+            A postcard from <strong><?= htmlspecialchars(person_display_name(['first_name' => $pc['sender_first'], 'surname' => $pc['sender_surname']]), ENT_QUOTES) ?></strong><?= $pc['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(already opened)</span>' : '' ?>
+          </p>
+        </div>
+        <form method="post" action="/postcard.php" style="margin-top:8px;">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="open">
+          <input type="hidden" name="recipient_row_id" value="<?= (int) $pc['recipient_row_id'] ?>">
+          <button type="submit" class="btn-primary btn-small">Open postcard</button>
+        </form>
+      </div>
+    <?php endforeach; ?>
+
     <h3 class="section-title">Sent by you, waiting on them (<?= $outgoingCount ?>)</h3>
     <?php if (!$outgoingCount): ?>
       <p style="color:var(--ink-faint);font-size:14px;margin:4px 0 0;">Nothing outstanding.</p>
@@ -358,6 +418,65 @@ function ourthology_pending_memory_preview_html(array $row): string
 
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
   </div>
+  <?php if ($openPostcard): ?>
+  <div class="postcard-overlay" id="postcardReadOverlay">
+    <div class="postcard-box">
+      <button type="button" class="postcard-close" id="postcardReadClose" aria-label="Close">×</button>
+      <h3 style="margin:0 0 14px;">A postcard from <?= htmlspecialchars(person_display_name(["first_name" => $openPostcard['sender_first'], "surname" => $openPostcard['sender_surname']]), ENT_QUOTES) ?></h3>
+      <div class="postcard-flip-scene">
+        <div class="postcard-flip-inner">
+          <div class="postcard-face postcard-face-front">
+            <img class="postcard-read-photo" src="/postcard_media.php?id=<?= (int) $openPostcard['postcard_id'] ?>" alt="">
+            <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;right:8px;z-index:1;">Read the message →</button>
+          </div>
+          <div class="postcard-face postcard-face-back">
+            <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;left:8px;z-index:1;">← Back to photo</button>
+            <div class="postcard-stamp" aria-hidden="true"></div>
+            <div class="postcard-read-message"><?= $openPostcard['message'] !== '' ? nl2br(htmlspecialchars($openPostcard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
+          </div>
+        </div>
+      </div>
+      <?php if (in_array($openPostcard['status'], ['pending', 'read'], true)): ?>
+      <div class="postcard-read-footer">
+        <form method="post" action="/postcard.php" style="display:inline;">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="discard">
+          <input type="hidden" name="recipient_row_id" value="<?= (int) $openPostcard['recipient_row_id'] ?>">
+          <button type="submit" class="btn-primary btn-small ghost">Discard</button>
+        </form>
+        <form method="post" action="/postcard.php" style="display:inline;">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="save">
+          <input type="hidden" name="recipient_row_id" value="<?= (int) $openPostcard['recipient_row_id'] ?>">
+          <button type="submit" class="btn-primary btn-small">Save to my timeline</button>
+        </form>
+      </div>
+      <?php endif; ?>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var overlay = document.getElementById("postcardReadOverlay");
+      if (!overlay) return;
+      function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onEsc);
+      }
+      function onEsc(evt) {
+        if (evt.key === "Escape") close();
+      }
+      overlay.addEventListener("click", function (evt) {
+        if (evt.target === overlay) close();
+      });
+      document.getElementById("postcardReadClose").addEventListener("click", close);
+      document.addEventListener("keydown", onEsc);
+      var inner = overlay.querySelector(".postcard-flip-inner");
+      overlay.querySelectorAll(".postcard-flip-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () { inner.classList.toggle("is-flipped"); });
+      });
+    })();
+  </script>
+  <?php endif; ?>
   <?php if (($_GET['goto'] ?? '') === 'waiting-on-you'): ?>
   <script>
     // Phase 40: a pending-approval notification email links here with
