@@ -554,16 +554,26 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-address-lines { display:flex; flex-direction:column; gap:12px; margin-top:auto; }
   /* Phase 54: "let me edit the To and From lines" -- these used to be
      read-only spans filled in from the recipient/sender's real names;
-     now they're real inputs the sender can shorten ("Mum" instead of a
-     full name), prefilled with a sensible default and posted as
-     to_line/from_line (see postcard.php's send action + create_postcard()
-     in includes/postcards.php). pending.php's read view keeps the old
-     read-only .postcard-address-line/.is-filled styling for the same
-     spot -- it never needs to be editable there. */
+     now they're editable, prefilled with a sensible default and posted
+     as to_line/from_line (see postcard.php's send action +
+     create_postcard() in includes/postcards.php). pending.php's read
+     view keeps the old read-only .postcard-address-line/.is-filled
+     styling for the same spot -- it never needs to be editable there.
+     Phase 55: these started life as real <input>s, but Phil found the
+     "From" text rendered mirrored after flipping the card from photo to
+     message side -- a native form control painted inside the nested
+     rotateY(180deg)+rotateY(180deg) flip-card transform, which some
+     browsers/GPUs don't compose correctly for OS-drawn widgets (regular
+     text nodes are unaffected, which is why the textarea/message side
+     never showed it). Swapped for plain contenteditable spans, exactly
+     the technique the letter body editor already uses (see
+     #letterBodyEditor below) -- ordinary DOM text, no native widget, so
+     there's nothing for a 3D transform to mis-render. Synced into the
+     real to_line/from_line hidden inputs on submit (wireForm() below). */
   .postcard-address-field { display:flex; align-items:baseline; gap:6px; border-bottom:1px solid var(--line); padding-bottom:4px; }
   .postcard-address-label { flex:0 0 auto; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); font-family:inherit; }
-  .postcard-address-field input { flex:1 1 auto; min-width:0; border:none; outline:none; background:transparent; font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding:0; }
-  .postcard-address-field input::placeholder { color:var(--ink-faint); font-family:'Caveat',cursive; opacity:.8; }
+  .postcard-address-input { flex:1 1 auto; min-width:0; outline:none; font-family:'Caveat',cursive; font-size:16px; color:#2b2620; white-space:nowrap; overflow:hidden; }
+  .postcard-address-input:empty::before { content:attr(data-placeholder); color:var(--ink-faint); font-family:'Caveat',cursive; opacity:.8; }
 
   .postcard-back-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; border-top:1px solid var(--line); background:var(--paper-2); }
   .postcard-back-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
@@ -596,6 +606,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .letter-recipient-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 14px; font-size:13.5px; }
   .letter-recipient-row select { width:auto; flex:1 1 220px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; font-family:inherit; font-size:13.5px; }
   .letter-salutation { font-family:'Caveat',cursive; font-size:24px; color:#2b2620; margin:0 0 6px; }
+  /* Phase 55: "let me edit the To and From names" on letters too -- the
+     greeting/closing names are contenteditable spans right inside the
+     "Dear ___," / "Best regards, ___" sentence (matching the postcard
+     address fields' contenteditable technique -- see the CSS comment
+     above .postcard-address-field), synced into hidden to_line/from_line
+     inputs on submit (wireLetterForm() below). */
+  .letter-name-editable { display:inline-block; min-width:20px; outline:none; border-bottom:1px dashed transparent; }
+  .letter-name-editable:hover, .letter-name-editable:focus { border-bottom-color:var(--line); }
+  .letter-name-editable:empty::before { content:attr(data-placeholder); color:var(--ink-faint); opacity:.8; }
   .letter-body-editor { min-height:220px; max-height:420px; overflow:auto; padding:10px 2px; font-family:'Caveat',cursive; font-size:21px; line-height:1.55; color:#2b2620; outline:none; }
   .letter-body-editor:empty::before { content:attr(data-placeholder); color:var(--ink-faint); font-family:'Caveat',cursive; font-size:21px; }
   .letter-body-editor img { max-width:100%; border-radius:6px; margin:8px 0; display:block; }
@@ -2295,14 +2314,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                       <?= ourthology_postcard_stamp_svg($previewPostmarkAngle, date('d M Y')) ?>
                     </div>
                       <div class="postcard-address-lines">
-                        <label class="postcard-address-field">
+                        <div class="postcard-address-field">
                           <span class="postcard-address-label">To</span>
-                          <input type="text" name="to_line" maxlength="80" placeholder="e.g. Mum, The Smiths…" autocomplete="off">
-                        </label>
-                        <label class="postcard-address-field">
+                          <span class="postcard-address-input" id="postcardToLine" contenteditable="true" data-placeholder="e.g. Mum, The Smiths…"></span>
+                          <input type="hidden" name="to_line" id="postcardToLineField">
+                        </div>
+                        <div class="postcard-address-field">
                           <span class="postcard-address-label">From</span>
-                          <input type="text" name="from_line" maxlength="80" value="<?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?>" autocomplete="off">
-                        </label>
+                          <span class="postcard-address-input" id="postcardFromLine" contenteditable="true" data-placeholder="Your name"><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span>
+                          <input type="hidden" name="from_line" id="postcardFromLineField">
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2325,6 +2346,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="send">
             <input type="hidden" name="body_html" id="letterBodyHtmlField">
+            <input type="hidden" name="to_line" id="letterToLineField">
+            <input type="hidden" name="from_line" id="letterFromLineField">
 
             <div class="letterhead">
               <svg class="letter-brand-mark" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
@@ -2350,13 +2373,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                   <?php endforeach; ?>
                 </select>
               </div>
-              <p class="letter-salutation">Dear <span id="letterSalutationName"><?= htmlspecialchars((string) ($postcardRecipientOptions[0]['first_name'] ?? ''), ENT_QUOTES) ?></span>,</p>
+              <p class="letter-salutation">Dear <span class="letter-name-editable" id="letterSalutationName" contenteditable="true" data-placeholder="name"><?= htmlspecialchars((string) ($postcardRecipientOptions[0]['first_name'] ?? ''), ENT_QUOTES) ?></span>,</p>
               <div class="letter-toolbar">
                 <button type="button" class="letter-insert-photo" id="letterInsertPhotoBtn">Insert a photo</button>
                 <input type="file" id="letterImageInput" accept="image/*" hidden>
               </div>
               <div class="letter-body-editor" id="letterBodyEditor" contenteditable="true" data-placeholder="Write your letter here…"></div>
-              <p class="letter-closing">Best regards,<br><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></p>
+              <p class="letter-closing">Best regards,<br><span class="letter-name-editable" id="letterClosingName" contenteditable="true" data-placeholder="your name"><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span></p>
               <div class="letter-footer">
                 <label><input type="checkbox" name="record_to_timeline" value="1"> Also add this to my own timeline</label>
                 <button type="submit" class="btn-primary letter-send-btn">Send letter</button>
@@ -2447,6 +2470,35 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           });
         }
 
+        // Phase 55: To/From are contenteditable spans now (see the CSS
+        // comment above .postcard-address-field for why) -- keep them
+        // acting like a plain single-line <input> (no Enter-inserted
+        // line breaks, paste drops formatting) and copy their text into
+        // the real to_line/from_line hidden fields the form actually
+        // posts.
+        var postcardForm = root.querySelector("#postcardModePanel form");
+        var toLineEditable = root.querySelector("#postcardToLine");
+        var fromLineEditable = root.querySelector("#postcardFromLine");
+        var toLineField = root.querySelector("#postcardToLineField");
+        var fromLineField = root.querySelector("#postcardFromLineField");
+        [toLineEditable, fromLineEditable].forEach(function (el) {
+          if (!el) return;
+          el.addEventListener("keydown", function (evt) {
+            if (evt.key === "Enter") evt.preventDefault();
+          });
+          el.addEventListener("paste", function (evt) {
+            evt.preventDefault();
+            var text = (evt.clipboardData || window.clipboardData).getData("text/plain");
+            document.execCommand("insertText", false, text);
+          });
+        });
+        if (postcardForm) {
+          postcardForm.addEventListener("submit", function () {
+            if (toLineField) toLineField.value = (toLineEditable ? toLineEditable.textContent : "").trim();
+            if (fromLineField) fromLineField.value = (fromLineEditable ? fromLineEditable.textContent : "").trim();
+          });
+        }
+
         // Phase 53: "need a longer form of message? send a letter
         // instead" -- swaps which panel is visible inside the SAME
         // pop-up rather than opening a second one, so the × / overlay-
@@ -2481,6 +2533,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var form = root.querySelector("#letterForm");
         var select = root.querySelector("#letterRecipientSelect");
         var salutationName = root.querySelector("#letterSalutationName");
+        var closingName = root.querySelector("#letterClosingName");
+        var toLineField = root.querySelector("#letterToLineField");
+        var fromLineField = root.querySelector("#letterFromLineField");
         var editor = root.querySelector("#letterBodyEditor");
         var hiddenBody = root.querySelector("#letterBodyHtmlField");
         var insertBtn = root.querySelector("#letterInsertPhotoBtn");
@@ -2488,13 +2543,37 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var csrfInput = form ? form.querySelector('input[name="csrf_token"]') : null;
         if (!form || !select || !editor) return;
 
+        // Phase 55: the recipient picker still auto-fills "Dear X," when
+        // it changes -- but only until the sender actually types their
+        // own shortened name in there, otherwise switching recipients
+        // would silently overwrite an edit they just made.
+        var salutationTouched = false;
         function updateSalutation() {
+          if (salutationTouched || !salutationName) return;
           var opt = select.options[select.selectedIndex];
           var first = opt ? opt.getAttribute("data-first-name") : "";
-          if (salutationName) salutationName.textContent = first || "there";
+          salutationName.textContent = first || "there";
         }
         select.addEventListener("change", updateSalutation);
         updateSalutation();
+
+        // Same contenteditable-as-a-plain-single-line-field treatment the
+        // postcard's To/From fields use (see wireForm() above): no
+        // Enter-inserted line breaks, paste drops formatting.
+        [salutationName, closingName].forEach(function (el) {
+          if (!el) return;
+          el.addEventListener("keydown", function (evt) {
+            if (evt.key === "Enter") evt.preventDefault();
+          });
+          el.addEventListener("paste", function (evt) {
+            evt.preventDefault();
+            var text = (evt.clipboardData || window.clipboardData).getData("text/plain");
+            document.execCommand("insertText", false, text);
+          });
+        });
+        if (salutationName) {
+          salutationName.addEventListener("input", function () { salutationTouched = true; });
+        }
 
         var savedRange = null;
         function saveSelectionIfInEditor() {
@@ -2563,6 +2642,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
         form.addEventListener("submit", function () {
           if (hiddenBody) hiddenBody.value = editor.innerHTML;
+          if (toLineField) toLineField.value = (salutationName ? salutationName.textContent : "").trim();
+          if (fromLineField) fromLineField.value = (closingName ? closingName.textContent : "").trim();
         });
       }
 

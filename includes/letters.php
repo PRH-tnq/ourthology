@@ -15,12 +15,17 @@ require_once __DIR__ . '/media.php';
  * browser) that can carry any number of inline photos, not just one, on
  * a single "page" rather than a flipped front/back card.
  *
- * The greeting and closing ("Best regards, <sender>") are NEVER stored --
- * both are generated at render time from sender_person_id/
- * recipient_person_id, exactly like a postcard's sender/recipient names
- * are joined in rather than frozen as text (see fetch_pending_letters_
- * for_person() etc. below). letters.body_html holds only the free-form
- * message the sender actually typed.
+ * The greeting and closing ("Best regards, <sender>") used to be
+ * generated purely at render time from sender_person_id/
+ * recipient_person_id (see fetch_pending_letters_for_person() etc.
+ * below). Phase 55 made the "Dear ___," / "Best regards, ___" names on
+ * the compose panel directly editable ("I might want to contract my name
+ * or the recipient's", same request postcards already got in Phase 54),
+ * so whatever's showing there when the letter is sent -- the
+ * auto-filled default, or a shortened name the sender typed over it --
+ * is captured into to_line/from_line and preferred over the computed
+ * name everywhere the letter is rendered afterward. letters.body_html
+ * still holds only the free-form message the sender actually typed.
  *
  * A letter's inline images are their own letter_images rows (NOT media
  * rows -- same reasoning as a postcard's image in includes/media.php's
@@ -174,15 +179,17 @@ function create_letter(
     int $familyGroupId,
     int $recipientPersonId,
     string $rawBodyHtml,
-    bool $recordToOwnTimeline
+    bool $recordToOwnTimeline,
+    ?string $toLine = null,
+    ?string $fromLine = null
 ): int {
     $bodyHtml = ourthology_sanitize_letter_body_html($rawBodyHtml);
 
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO letters (sender_person_id, created_by_user_id, family_group_id, recipient_person_id, body_html)
-             VALUES (:sender, :uid, :gid, :rid, :body)'
+            'INSERT INTO letters (sender_person_id, created_by_user_id, family_group_id, recipient_person_id, body_html, to_line, from_line)
+             VALUES (:sender, :uid, :gid, :rid, :body, :toln, :froml)'
         );
         $stmt->execute([
             'sender' => $senderPersonId,
@@ -190,6 +197,8 @@ function create_letter(
             'gid'    => $familyGroupId,
             'rid'    => $recipientPersonId,
             'body'   => $bodyHtml,
+            'toln'   => $toLine !== null && $toLine !== '' ? $toLine : null,
+            'froml'  => $fromLine !== null && $fromLine !== '' ? $fromLine : null,
         ]);
         $letterId = (int) $pdo->lastInsertId();
 
@@ -203,7 +212,7 @@ function create_letter(
         }
 
         if ($recordToOwnTimeline) {
-            save_letter_copy_to_timeline($pdo, $letterId, $bodyHtml, $recipientPersonId, $senderPersonId, $senderPersonId, $senderUserId);
+            save_letter_copy_to_timeline($pdo, $letterId, $bodyHtml, $recipientPersonId, $senderPersonId, $senderPersonId, $senderUserId, $toLine, $fromLine);
         }
 
         $pdo->commit();
@@ -226,15 +235,23 @@ function create_letter(
  * above, or the recipient's own "save" mutation in letter.php), so
  * nesting here would either throw or silently misbehave depending on the
  * PDO driver. Returns the new timeline_entries id.
+ *
+ * Phase 55: $toLine/$fromLine are the letter's own editable greeting/
+ * closing names, when the sender set them -- preferred over the computed
+ * recipient-first-name/sender-display-name exactly like the live read
+ * view does, so a saved copy's "Dear ___," / "Best regards, ___" always
+ * matches what the letter actually showed when it was read.
  */
-function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml, int $recipientPersonId, int $senderPersonId, int $ownerPersonId, int $ownerUserId): int
+function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml, int $recipientPersonId, int $senderPersonId, int $ownerPersonId, int $ownerUserId, ?string $toLine = null, ?string $fromLine = null): int
 {
     $senderRow = person_row($pdo, $senderPersonId);
     $recipientRow = person_row($pdo, $recipientPersonId);
     $senderName = $senderRow !== null ? person_display_name($senderRow) : '';
     $recipientFirst = (string) ($recipientRow['first_name'] ?? '');
 
-    $plainBody = ourthology_letter_plain_text($bodyHtml, $recipientFirst, $senderName);
+    $greetName = $toLine !== null && $toLine !== '' ? $toLine : $recipientFirst;
+    $closeName = $fromLine !== null && $fromLine !== '' ? $fromLine : $senderName;
+    $plainBody = ourthology_letter_plain_text($bodyHtml, $greetName, $closeName);
     $title = $ownerPersonId === $senderPersonId
         ? 'Letter to ' . ($recipientRow !== null ? person_display_name($recipientRow) : 'a family member')
         : 'Letter from ' . ($senderName !== '' ? $senderName : 'a family member');
@@ -289,7 +306,17 @@ function fetch_pending_letters_for_person(PDO $pdo, int $personId): array
     return $stmt->fetchAll();
 }
 
-/** Letters $senderPersonId sent that are still waiting on their one recipient -- "Sent by you, waiting on them", mirroring fetch_outgoing_postcards_for_person(). */
+/**
+ * Letters $senderPersonId sent that are still waiting on their one
+ * recipient -- "Sent by you, waiting on them", mirroring
+ * fetch_outgoing_postcards_for_person().
+ *
+ * Phase 55: only status='pending' counts as "waiting" now -- a letter
+ * drops off the sender's list the moment the recipient opens it
+ * (mark_letter_read() flips it to 'read'), not once they've also saved
+ * or discarded it. See fetch_outgoing_postcards_for_person()'s own doc
+ * comment for the same change on the postcard side.
+ */
 function fetch_outgoing_letters_for_person(PDO $pdo, int $senderPersonId): array
 {
     $stmt = $pdo->prepare(
@@ -297,7 +324,7 @@ function fetch_outgoing_letters_for_person(PDO $pdo, int $senderPersonId): array
                 rp.first_name AS recipient_first, rp.surname AS recipient_surname
          FROM letters l
          JOIN persons rp ON rp.id = l.recipient_person_id
-         WHERE l.sender_person_id = :pid AND l.status IN ('pending','read')
+         WHERE l.sender_person_id = :pid AND l.status = 'pending'
          ORDER BY l.created_at DESC"
     );
     $stmt->execute(['pid' => $senderPersonId]);
@@ -309,7 +336,7 @@ function fetch_letter_for_recipient(PDO $pdo, int $letterId, int $recipientPerso
 {
     $stmt = $pdo->prepare(
         "SELECT l.id AS letter_id, l.status, l.body_html, l.timeline_entry_id, l.created_at,
-                l.sender_person_id, l.recipient_person_id,
+                l.sender_person_id, l.recipient_person_id, l.to_line, l.from_line,
                 sp.first_name AS sender_first, sp.surname AS sender_surname
          FROM letters l
          JOIN persons sp ON sp.id = l.sender_person_id
@@ -338,7 +365,9 @@ function save_letter_to_timeline(PDO $pdo, array $letterRow, int $personId, int 
             (int) $letterRow['recipient_person_id'],
             (int) $letterRow['sender_person_id'],
             $personId,
-            $userId
+            $userId,
+            $letterRow['to_line'] ?? null,
+            $letterRow['from_line'] ?? null
         );
         $pdo->prepare("UPDATE letters SET status = 'saved', timeline_entry_id = :eid, resolved_at = NOW() WHERE id = :id")
             ->execute(['eid' => $entryId, 'id' => $letterRow['letter_id']]);

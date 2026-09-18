@@ -410,3 +410,19 @@ ALTER TABLE postcards
 -- ---------------------------------------------------------------------
 ALTER TABLE timeline_entries
   ADD COLUMN origin ENUM('postcard','letter') NULL DEFAULT NULL AFTER entry_type;
+
+-- ---------------------------------------------------------------------
+-- Phase 55: "let me edit the To and From names on the letter or postcard
+-- too, I might want to contract my name or the recipient's" -- letters
+-- get the same editable-address-names postcards got in Phase 54. Unlike
+-- postcards.to_line (which starts genuinely blank), the letter compose
+-- panel's "Dear ___," / "Best regards, ___" names are always auto-filled
+-- with a computed default before the sender ever touches them, so these
+-- columns end up populated (with either that default or a shortened
+-- name) on essentially every letter, not just customized ones -- see
+-- create_letter()/save_letter_copy_to_timeline() in includes/letters.php
+-- and letter.php's send action.
+-- ---------------------------------------------------------------------
+ALTER TABLE letters
+  ADD COLUMN to_line VARCHAR(80) NULL AFTER body_html,
+  ADD COLUMN from_line VARCHAR(80) NULL AFTER to_line;

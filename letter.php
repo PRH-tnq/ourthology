@@ -43,6 +43,15 @@ if ($action === 'send') {
     $recipientId = filter_var($_POST['recipient_id'] ?? '', FILTER_VALIDATE_INT);
     $bodyHtml = (string) ($_POST['body_html'] ?? '');
     $recordToOwnTimeline = !empty($_POST['record_to_timeline']);
+    // Phase 55: "let me edit the To and From names" on letters too, same
+    // as postcards got in Phase 54 -- the editable "Dear ___," / "Best
+    // regards, ___" names, capped/trimmed. Both fields are always
+    // auto-filled with a computed default before the sender ever touches
+    // them (unlike a postcard's blank "To"), so this is null only if
+    // somehow posted genuinely empty -- otherwise whatever's showing
+    // (default or shortened) is what gets frozen into to_line/from_line.
+    $toLine = mb_substr(trim((string) ($_POST['to_line'] ?? '')), 0, 80);
+    $fromLine = mb_substr(trim((string) ($_POST['from_line'] ?? '')), 0, 80);
 
     $options = fetch_postcard_recipient_options($pdo, $myGroup, $myPersonId);
     $validIds = array_map(fn($p) => (int) $p['id'], $options);
@@ -61,7 +70,7 @@ if ($action === 'send') {
     }
 
     try {
-        $letterId = create_letter($pdo, $myPersonId, $myUserId, $myGroup, (int) $recipientId, $bodyHtml, $recordToOwnTimeline);
+        $letterId = create_letter($pdo, $myPersonId, $myUserId, $myGroup, (int) $recipientId, $bodyHtml, $recordToOwnTimeline, $toLine, $fromLine);
     } catch (RuntimeException $e) {
         $_SESSION['flash_letter_error'] = $e->getMessage();
         header('Location: /timeline.php');

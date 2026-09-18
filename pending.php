@@ -552,7 +552,7 @@ function ourthology_pending_memory_preview_html(array $row): string
           </span>
           <p style="margin:0;font-size:14px;flex:1 1 auto;">
             Postcard sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $pc['recipient_first'], 'surname' => $pc['recipient_surname']]), ENT_QUOTES) ?></strong>
-            <?= $pc['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(opened, not yet decided)</span>' : ' <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>' ?>
+            <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>
           </p>
         </div>
       </div>
@@ -563,7 +563,7 @@ function ourthology_pending_memory_preview_html(array $row): string
         <span class="req-when"><?= htmlspecialchars(human_time_ago($lt['sent_at']), ENT_QUOTES) ?></span>
         <p style="margin:0;font-size:14px;">
           Letter sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $lt['recipient_first'], 'surname' => $lt['recipient_surname']]), ENT_QUOTES) ?></strong>
-          <?= $lt['status'] === 'read' ? ' <span style="color:var(--ink-faint);font-size:12px;">(opened, not yet decided)</span>' : ' <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>' ?>
+          <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>
         </p>
       </div>
     <?php endforeach; ?>
@@ -666,9 +666,17 @@ function ourthology_pending_memory_preview_html(array $row): string
         </div>
       </div>
       <div class="letter-sheet">
-        <p class="letter-salutation">Dear <?= htmlspecialchars((string) $me['first_name'], ENT_QUOTES) ?>,</p>
+        <?php
+          // Phase 55: prefer the sender's own editable to_line/from_line
+          // (they may have shortened either name) over the computed
+          // recipient-first-name/sender-display-name, same fallback
+          // pattern postcards' to_line/from_line already use.
+          $letterGreetName = ($openLetter['to_line'] ?? '') !== '' ? $openLetter['to_line'] : (string) $me['first_name'];
+          $letterCloseName = ($openLetter['from_line'] ?? '') !== '' ? $openLetter['from_line'] : person_display_name(['first_name' => $openLetter['sender_first'], 'surname' => $openLetter['sender_surname']]);
+        ?>
+        <p class="letter-salutation">Dear <?= htmlspecialchars((string) $letterGreetName, ENT_QUOTES) ?>,</p>
         <div class="letter-body-read"><?= $openLetter['body_html'] !== '' ? $openLetter['body_html'] : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
-        <p class="letter-closing">Best regards,<br><?= htmlspecialchars(person_display_name(['first_name' => $openLetter['sender_first'], 'surname' => $openLetter['sender_surname']]), ENT_QUOTES) ?></p>
+        <p class="letter-closing">Best regards,<br><?= htmlspecialchars((string) $letterCloseName, ENT_QUOTES) ?></p>
         <?php if (in_array($openLetter['status'], ['pending', 'read'], true)): ?>
         <div class="letter-read-footer">
           <form method="post" action="/letter.php" style="display:inline;">

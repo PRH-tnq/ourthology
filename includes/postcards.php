@@ -190,13 +190,20 @@ function fetch_postcard_recipient_row(PDO $pdo, int $recipientRowId, int $person
 
 /**
  * Postcards $personId SENT that are still waiting on at least one
- * recipient (status 'pending' or 'read') -- one row per still-unresolved
- * recipient, not per postcard, so an "everyone" send shows exactly which
- * people haven't actioned it yet and each one drops off the list
- * independently as they save or discard their copy. Mirrors
+ * recipient -- one row per still-unresolved recipient, not per postcard,
+ * so an "everyone" send shows exactly which people haven't actioned it
+ * yet and each one drops off the list independently. Mirrors
  * fetch_outgoing_memory_tags_for_user()'s per-recipient granularity in
  * memory_tags.php rather than collapsing multi-recipient sends into one
  * row.
+ *
+ * Phase 55: "when a user opens a postcard I've sent them, immediately
+ * delete it from my pending list" -- only status='pending' counts as
+ * "waiting on them" now. Previously this also included 'read' (opened
+ * but not yet saved/discarded), so a recipient who'd already looked at
+ * it still showed up here as outstanding; now a row drops off the
+ * sender's list the moment mark_postcard_read() flips it to 'read',
+ * rather than waiting for the recipient to also save or discard it.
  */
 function fetch_outgoing_postcards_for_person(PDO $pdo, int $senderPersonId): array
 {
@@ -207,7 +214,7 @@ function fetch_outgoing_postcards_for_person(PDO $pdo, int $senderPersonId): arr
          FROM postcard_recipients pr
          JOIN postcards pc ON pc.id = pr.postcard_id
          JOIN persons rp ON rp.id = pr.recipient_person_id
-         WHERE pc.sender_person_id = :pid AND pr.status IN ('pending','read')
+         WHERE pc.sender_person_id = :pid AND pr.status = 'pending'
          ORDER BY pr.created_at DESC"
     );
     $stmt->execute(['pid' => $senderPersonId]);
