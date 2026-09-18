@@ -243,11 +243,25 @@ function ourthology_pending_memory_preview_html(array $row): string
   .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
   .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
   .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
+
+  /* Phase 49: matches timeline.php's compose card byte-for-byte for
+     every class shared between the two -- see that file for the
+     rationale (matted photo front, two-column back). */
+  .postcard-face-front { padding:12px; box-sizing:border-box; background:linear-gradient(135deg, #dce9ee, #eef1e4); }
+  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden; background:#fff; box-shadow:0 8px 20px -10px rgba(26,23,20,0.5); }
   .postcard-read-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
-  .postcard-read-message { flex:1 1 auto; width:100%; box-sizing:border-box; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+
+  .postcard-back-toolbar { flex:0 0 auto; display:flex; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--paper-2); }
+  .postcard-back-content { flex:1 1 auto; display:flex; min-height:0; }
+  .postcard-read-message { flex:1 1 58%; width:auto; min-width:0; box-sizing:border-box; padding:16px 18px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+  .postcard-back-address { flex:0 0 40%; box-sizing:border-box; border-left:1px dashed var(--line); padding:14px 16px; display:flex; flex-direction:column; }
+  .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:40px; height:50px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.5; margin-bottom:16px; }
+  .postcard-address-lines { display:flex; flex-direction:column; gap:14px; margin-top:auto; }
+  .postcard-address-line { border-bottom:1px solid var(--line); height:1px; }
+  .postcard-address-line.is-filled { height:auto; border-bottom:1px solid var(--line); font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
   .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
   .postcard-flip-btn:hover { background:var(--paper-2); }
-  .postcard-stamp { position:absolute; top:14px; right:16px; width:42px; height:52px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.45; }
   .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
@@ -426,13 +440,25 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="postcard-flip-scene">
         <div class="postcard-flip-inner">
           <div class="postcard-face postcard-face-front">
-            <img class="postcard-read-photo" src="/postcard_media.php?id=<?= (int) $openPostcard['postcard_id'] ?>" alt="">
+            <div class="postcard-photo-mat">
+              <img class="postcard-read-photo" src="/postcard_media.php?id=<?= (int) $openPostcard['postcard_id'] ?>" alt="">
+            </div>
             <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;right:8px;z-index:1;">Read the message →</button>
           </div>
           <div class="postcard-face postcard-face-back">
-            <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;left:8px;z-index:1;">← Back to photo</button>
-            <div class="postcard-stamp" aria-hidden="true"></div>
-            <div class="postcard-read-message"><?= $openPostcard['message'] !== '' ? nl2br(htmlspecialchars($openPostcard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
+            <div class="postcard-back-toolbar">
+              <button type="button" class="postcard-flip-btn">← Back to photo</button>
+            </div>
+            <div class="postcard-back-content">
+              <div class="postcard-read-message"><?= $openPostcard['message'] !== '' ? nl2br(htmlspecialchars($openPostcard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
+              <div class="postcard-back-address">
+                <div class="postcard-stamp" aria-hidden="true"></div>
+                <div class="postcard-address-lines">
+                  <span class="postcard-address-line is-filled">To: <?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span>
+                  <span class="postcard-address-line is-filled">From: <?= htmlspecialchars(person_display_name(["first_name" => $openPostcard['sender_first'], "surname" => $openPostcard['sender_surname']]), ENT_QUOTES) ?></span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

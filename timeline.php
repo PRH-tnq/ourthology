@@ -481,6 +481,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
   .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
 
+  /* Phase 49: the front's photo now sits "matted" on a card-coloured
+     backdrop -- like a printed photo tucked onto a postcard -- instead
+     of bleeding edge to edge. */
+  .postcard-face-front { padding:12px; box-sizing:border-box; background:linear-gradient(135deg, #dce9ee, #eef1e4); }
+  .postcard-photo-mat { position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden; background:#fff; box-shadow:0 8px 20px -10px rgba(26,23,20,0.5); }
   .postcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; }
   .postcard-drop-zone.is-dragover { background:var(--paper-2); }
   .postcard-face-front.has-image .postcard-drop-zone { display:none; }
@@ -489,13 +494,26 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-change-photo { display:none; position:absolute; bottom:8px; right:8px; z-index:1; font-size:11.5px; padding:5px 10px; border-radius:999px; background:rgba(26,23,20,0.65); color:#fff; border:none; cursor:pointer; }
   .postcard-face-front.has-image .postcard-change-photo { display:block; }
 
-  .postcard-back-message { flex:1 1 auto; width:100%; box-sizing:border-box; border:none; resize:none; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; background:repeating-linear-gradient(to bottom, transparent, transparent 34px, var(--line) 35px); outline:none; }
-  .postcard-read-message { flex:1 1 auto; width:100%; box-sizing:border-box; padding:18px 20px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+  /* Phase 49: the back is now the classic two-column postcard layout --
+     ruled message on the left, a stamp + address lines on the right,
+     divided by a rule -- with the flip button moved into its own
+     toolbar strip instead of floating on top of the message text
+     (previously overlapping the first line or two of whatever was
+     typed). */
+  .postcard-back-toolbar { flex:0 0 auto; display:flex; align-items:center; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--paper-2); }
+  .postcard-back-content { flex:1 1 auto; display:flex; min-height:0; }
+  .postcard-back-message { flex:1 1 58%; width:auto; min-width:0; box-sizing:border-box; border:none; resize:none; padding:16px 18px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; background:repeating-linear-gradient(to bottom, transparent, transparent 34px, var(--line) 35px); outline:none; }
+  .postcard-read-message { flex:1 1 58%; width:auto; min-width:0; box-sizing:border-box; padding:16px 18px; font-family:'Caveat',cursive; font-size:22px; line-height:1.5; color:#2b2620; overflow:auto; }
+  .postcard-back-address { flex:0 0 40%; box-sizing:border-box; border-left:1px dashed var(--line); padding:14px 16px; display:flex; flex-direction:column; }
+  .postcard-stamp { position:static; align-self:flex-end; flex:0 0 auto; width:40px; height:50px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.5; margin-bottom:16px; }
+  .postcard-address-lines { display:flex; flex-direction:column; gap:14px; margin-top:auto; }
+  .postcard-address-line { border-bottom:1px solid var(--line); height:1px; }
+  .postcard-address-line.is-filled { height:auto; border-bottom:1px solid var(--line); font-family:'Caveat',cursive; font-size:16px; color:#2b2620; padding-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
   .postcard-back-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 16px; border-top:1px solid var(--line); background:var(--paper-2); }
   .postcard-back-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
   .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
   .postcard-flip-btn:hover { background:var(--paper-2); }
-  .postcard-stamp { position:absolute; top:14px; right:16px; width:42px; height:52px; border:2px dashed var(--ink-faint); border-radius:4px; opacity:0.45; }
   .postcard-send-btn { width:auto; margin:0; padding:9px 20px; }
   .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
@@ -2148,19 +2166,32 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <div class="postcard-flip-scene">
               <div class="postcard-flip-inner">
                 <div class="postcard-face postcard-face-front">
-                  <div class="postcard-drop-zone">
-                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span>Drop a photo here, or click to choose one</span>
+                  <div class="postcard-photo-mat">
+                    <div class="postcard-drop-zone">
+                      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span>Drop a photo here, or click to choose one</span>
+                    </div>
+                    <img class="postcard-front-preview" alt="">
                   </div>
-                  <img class="postcard-front-preview" alt="">
                   <button type="button" class="postcard-change-photo">Change photo</button>
                   <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;right:8px;z-index:1;">Write a message →</button>
                   <input type="file" name="image" class="postcard-image-input" accept="image/*" hidden>
                 </div>
                 <div class="postcard-face postcard-face-back">
-                  <button type="button" class="postcard-flip-btn" style="position:absolute;top:8px;left:8px;z-index:1;">← Back to photo</button>
-                  <div class="postcard-stamp" aria-hidden="true"></div>
-                  <textarea class="postcard-back-message" name="message" placeholder="Write your message here…" maxlength="2000"></textarea>
+                  <div class="postcard-back-toolbar">
+                    <button type="button" class="postcard-flip-btn">← Back to photo</button>
+                  </div>
+                  <div class="postcard-back-content">
+                    <textarea class="postcard-back-message" name="message" placeholder="Write your message here…" maxlength="2000"></textarea>
+                    <div class="postcard-back-address">
+                      <div class="postcard-stamp" aria-hidden="true"></div>
+                      <div class="postcard-address-lines" aria-hidden="true">
+                        <span class="postcard-address-line"></span>
+                        <span class="postcard-address-line"></span>
+                        <span class="postcard-address-line"></span>
+                      </div>
+                    </div>
+                  </div>
                   <div class="postcard-back-footer">
                     <label><input type="checkbox" name="record_to_timeline" value="1"> Also add this to my own timeline</label>
                     <button type="submit" class="btn-primary postcard-send-btn">Send</button>
