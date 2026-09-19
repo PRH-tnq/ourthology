@@ -145,15 +145,20 @@ function current_user_with_person(): ?array
  */
 function ourthology_my_identities(PDO $pdo, int $userId): array
 {
+    // Two distinct placeholders for the same value -- native prepared
+    // statements (PDO::ATTR_EMULATE_PREPARES is off, includes/db.php)
+    // reject a named marker reused twice in one query ("Invalid parameter
+    // number"), the same reason signup.php's own claim update uses
+    // uid1/uid2 rather than reusing :uid.
     $stmt = $pdo->prepare(
         'SELECT p.id AS person_id, p.first_name, p.middle_name, p.surname, p.family_group_id,
                 (p.id = u.person_id) AS is_home
          FROM persons p
-         JOIN users u ON u.id = :uid
-         WHERE p.claimed_by_user_id = :uid
+         JOIN users u ON u.id = :uid1
+         WHERE p.claimed_by_user_id = :uid2
          ORDER BY is_home DESC, p.id ASC'
     );
-    $stmt->execute(['uid' => $userId]);
+    $stmt->execute(['uid1' => $userId, 'uid2' => $userId]);
     return $stmt->fetchAll();
 }
 

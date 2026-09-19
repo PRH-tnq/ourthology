@@ -151,13 +151,11 @@ function ourthology_antecedent_target(array $plan): ?int
  * grandchildren already on the master tree would otherwise have to leave
  * them behind. Still deliberately excludes anyone connected only by
  * partnership at any point in that line (a child's own partner, a
- * grandchild's own partner, etc.) -- per Phil, in the same message: no
- * partner ever gets brought across or invited on a peripheral tree, only
- * this one blood line, to keep it from getting complicated (see
- * ourthology_is_peripheral_group() below). A descendant's OTHER recorded
- * parent, if they have one, is simply never brought across either way, so
- * a mirrored descendant always ends up with exactly one mirrored parent --
- * whichever ancestor in this same line it descends from.
+ * grandchild's own partner, etc.) -- only this one blood line is offered.
+ * A descendant's OTHER recorded parent, if they have one, is simply never
+ * brought across either way, so a mirrored descendant always ends up with
+ * exactly one mirrored parent -- whichever ancestor in this same line it
+ * descends from.
  *
  * Each descendant carries 'parent_master_id' (the master-tree id of
  * whichever ancestor in this same set is their direct parent -- $personId
@@ -237,26 +235,6 @@ function ourthology_descendant_label(int $depth): string
         return 'grandchild';
     }
     return str_repeat('great-', $depth - 2) . 'grandchild';
-}
-
-/**
- * True iff $groupId is itself a peripheral tree (the "child" side of a
- * peripheral_tree_links pair), as opposed to a master tree or an ordinary
- * tree that's never been part of one. Used to switch off anything that
- * would let a peripheral tree grow a partner of its own -- per Phil,
- * post-launch: "on the peripheral tree do not give the option for a
- * partner to be invited... that will get too complicated" (a partner
- * added there could, in turn, want their OWN peripheral tree off of this
- * one, nested arbitrarily deep, which this app doesn't attempt to
- * support). See add_relative.php, link_existing.php and edit_person.php
- * for where this gates the three ways a new partnership can otherwise be
- * created.
- */
-function ourthology_is_peripheral_group(PDO $pdo, int $groupId): bool
-{
-    $stmt = $pdo->prepare('SELECT 1 FROM peripheral_tree_links WHERE peripheral_family_group_id = :gid LIMIT 1');
-    $stmt->execute(['gid' => $groupId]);
-    return (bool) $stmt->fetchColumn();
 }
 
 /**

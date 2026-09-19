@@ -23,13 +23,6 @@ $myPersonId = (int) $me['person_id'];
 $myUserId = (int) $me['user_id'];
 $myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
 
-// Phase 58, post-launch: no inviting a new partner while working on a
-// peripheral tree (see includes/peripheral.php's own comment on
-// ourthology_is_peripheral_group()). Computed once up front since it
-// gates both the "Add a partner" form's own POST handler below and
-// whether that form is even shown further down the page.
-$onPeripheralTree = ourthology_is_peripheral_group($pdo, $myGroup);
-
 ourthology_start_session();
 
 $flashNotice = $_SESSION['flash_edit_notice'] ?? null;
@@ -210,13 +203,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($otherId === false || (int) $otherId === $personId || !person_in_group($pdo, (int) $otherId, $myGroup)) {
             $errors[] = 'Choose someone else in your family tree to record as their partner.';
-        } elseif ($onPeripheralTree) {
-            // Phase 58, post-launch (per Phil): no inviting a new partner
-            // while working on a peripheral tree -- this is the third of
-            // three places a new partnership can be created (see
-            // add_relative.php's own comment on
-            // ourthology_is_peripheral_group() for why).
-            $errors[] = "You can't add a partner on a peripheral family tree — keep it to your own descendants here so it doesn't get complicated.";
         } else {
             try {
                 create_confirmed_partnership($pdo, $personId, (int) $otherId, $kind, $myUserId);
@@ -992,7 +978,7 @@ if ($postedProfile) {
       <?php endforeach; ?>
       </div>
 
-      <?php if ($canEdit && $partnerCandidates && !$onPeripheralTree): ?>
+      <?php if ($canEdit && $partnerCandidates): ?>
       <div class="edit-block">
         <form method="post" class="add-partner-row">
           <?= csrf_field() ?>
@@ -1181,6 +1167,16 @@ if ($postedProfile) {
             </form>
           <?php endif; ?>
         </div>
+        <?php if ($personId === $myPersonId): ?>
+        <div class="account-col" id="deleteMyAccountBlock">
+          <h3 style="margin:4px 0 4px;color:var(--error);">Delete my account</h3>
+          <p style="font-size:12px;color:var(--ink-faint);margin:0 0 8px;">
+            Permanently remove your profile and leave ourthology.com. There are several confirmation
+            steps before anything is actually deleted.
+          </p>
+          <a href="/delete_account.php" class="btn-danger">Delete my account…</a>
+        </div>
+        <?php endif; ?>
       </div>
       </div>
 

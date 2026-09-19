@@ -553,3 +553,20 @@ ALTER TABLE timeline_entries
   ADD CONSTRAINT fk_entry_copied_from FOREIGN KEY (copied_from_entry_id) REFERENCES timeline_entries(id);
 
 CREATE INDEX idx_entries_copied_from ON timeline_entries(copied_from_entry_id);
+
+-- ---------------------------------------------------------------------
+-- Phase 59: account deletion ("I may want to delete my profile and
+-- leave the site"). Deleting your own account disables and scrubs the
+-- users row (see ourthology_delete_own_account() in
+-- includes/account_deletion.php) rather than hard-deleting it -- dozens
+-- of OTHER people's relationships, partnerships, memories, postcards
+-- etc. reference users(id) with no ON DELETE CASCADE, and hard-deleting
+-- the row would either violate those constraints or require touching
+-- everyone else's shared family history just to remove one departing
+-- account. The person row(s) it pointed at ARE fully erased, though --
+-- which has to happen after users.person_id no longer points at them,
+-- to satisfy fk_users_person. That ordering requires person_id to be
+-- nullable.
+-- ---------------------------------------------------------------------
+ALTER TABLE users
+  MODIFY COLUMN person_id INT UNSIGNED NULL;

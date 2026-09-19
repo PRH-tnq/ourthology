@@ -16,6 +16,12 @@ if (current_user_id() !== null) {
     exit;
 }
 
+// Phase 59: delete_account.php lands here (already logged out) once an
+// account deletion completes — a plain query flag rather than a session
+// flash, since logout_user() clears the whole session right before this
+// redirect.
+$accountDeleted = ($_GET['deleted'] ?? '') === '1';
+
 $errors = [];
 $email  = '';
 
@@ -80,6 +86,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
       </div>
     </div>
+
+    <?php if ($accountDeleted): ?>
+      <p class="foot-link" style="margin-top:0;">Your account has been deleted. Take care.</p>
+    <?php endif; ?>
 
     <?php if ($errors): ?>
       <div class="error">

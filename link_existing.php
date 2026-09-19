@@ -54,16 +54,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = "You're only connected to this family by marriage or partnership, so you can't link an existing person as your own parent or child here — that would merge two separate families together. Add a new relative from your tree page instead, and we'll set you up with a family tree of your own for it.";
     }
 
-    // Phase 58, post-launch (per Phil): no inviting a new partner while
-    // working on a peripheral tree -- see add_relative.php's own comment
-    // on ourthology_is_peripheral_group() for why. This is the second of
-    // three places a new partnership can be created (add_relative.php's
-    // own "spouse" relationship option is the first); edit_person.php's
-    // "Add a partner" quick-connect is the third.
-    if (!$errors && $direction === 'partner' && ourthology_is_peripheral_group($pdo, $myGroup)) {
-        $errors[] = "You can't add a partner on a peripheral family tree — keep it to your own descendants here so it doesn't get complicated. Add a partner on your original tree instead.";
-    }
-
     $target = null;
     if (!$errors) {
         $stmt = $pdo->prepare('SELECT u.id AS user_id, p.id AS person_id, p.family_group_id, p.first_name, p.surname

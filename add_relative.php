@@ -43,21 +43,6 @@ if ($existingPerson !== null) {
     // when the person already exists in the tree.
     unset($RELATIONSHIP_OPTIONS['other']);
 }
-// Phase 58, post-launch (per Phil): no inviting a new partner while
-// working on a peripheral tree -- a partner added there could, in turn,
-// want their OWN peripheral tree off of this one, nested arbitrarily
-// deep, which this app doesn't attempt to support. 'spouse', 'sibling-
-// in-law' and 'child-in-law' are the only relationship types that ever
-// create a brand-new partnership (see resolve_relationship() in
-// includes/graph.php); removing them here hides them from the picker AND
-// blocks a direct submission, since the same $RELATIONSHIP_OPTIONS array
-// gates what's accepted below. 'parent-in-law' is untouched -- it gives
-// an already-existing partner a new blood parent, it doesn't create a
-// new partnership, and it's already covered by this page's own in-law-
-// antecedent check further down regardless of which tree this is.
-if (ourthology_is_peripheral_group($pdo, $myGroup)) {
-    unset($RELATIONSHIP_OPTIONS['spouse'], $RELATIONSHIP_OPTIONS['sibling-in-law'], $RELATIONSHIP_OPTIONS['child-in-law']);
-}
 $VIA_NEEDED = relationship_via_needed();
 
 $anchors = $graph['persons'];
