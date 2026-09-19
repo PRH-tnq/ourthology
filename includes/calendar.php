@@ -132,6 +132,11 @@ function ourthology_calendar_key_dates(array $eventRows): array
             'title'       => (string) $e['title'],
             'month'       => $month,
             'day'         => $day,
+            // Phase 62: the raw year on file (not the computed "years"
+            // count below) -- carried through so calendar.php's edit
+            // form can pre-fill the "Year (optional)" field with what
+            // was actually stored, rather than the derived age/count.
+            'event_year'  => $e['event_year'] !== null ? (int) $e['event_year'] : null,
             'next_date'   => $occ['date'],
             'days_away'   => $occ['days_away'],
             'years'       => $years,
@@ -187,4 +192,41 @@ function delete_calendar_event(PDO $pdo, int $eventId, int $familyGroupId): void
 {
     $pdo->prepare('DELETE FROM calendar_events WHERE id = :id AND family_group_id = :gid')
         ->execute(['id' => $eventId, 'gid' => $familyGroupId]);
+}
+
+/**
+ * Phase 62: edits a key date already on the calendar -- same ownership-
+ * scoped guard as delete_calendar_event() above (the family_group_id in
+ * the WHERE clause IS the check, so nobody can edit another family's
+ * event by guessing an id), and the same "anyone in the family can tidy
+ * up" policy that function's own doc comment explains -- there's no
+ * per-adder lock on editing either. $eventYear is null to clear a
+ * previously-set year, same convention create_calendar_event() uses.
+ * Returns true if a row actually changed -- false means the id didn't
+ * exist or didn't belong to this family group, which the caller
+ * (calendar.php) turns into its own message rather than silently
+ * reporting success for an edit that didn't happen.
+ */
+function update_calendar_event(
+    PDO $pdo,
+    int $eventId,
+    int $familyGroupId,
+    string $title,
+    int $month,
+    int $day,
+    ?int $eventYear
+): bool {
+    $stmt = $pdo->prepare(
+        'UPDATE calendar_events SET title = :title, event_month = :month, event_day = :day, event_year = :year
+         WHERE id = :id AND family_group_id = :gid'
+    );
+    $stmt->execute([
+        'title' => $title,
+        'month' => $month,
+        'day'   => $day,
+        'year'  => $eventYear,
+        'id'    => $eventId,
+        'gid'   => $familyGroupId,
+    ]);
+    return $stmt->rowCount() > 0;
 }

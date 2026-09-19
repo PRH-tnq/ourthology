@@ -70,6 +70,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             create_calendar_event($pdo, $myGroup, $myPersonId, $myUserId, $title, (int) $month, (int) $day, $year);
             $_SESSION['flash_calendar_notice'] = "Added \"{$title}\" to the family calendar.";
         }
+    } elseif ($action === 'edit') {
+        // Phase 62: "make it possible to edit calendar items that have
+        // been added" -- same validation as 'add' above (deliberately
+        // duplicated rather than shared, since the two error-message
+        // sets already read naturally standalone and a shared helper
+        // would need its own indirection for one three-line block).
+        $eventId = filter_var($_POST['event_id'] ?? '', FILTER_VALIDATE_INT);
+        $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 120);
+        $month = filter_var($_POST['month'] ?? '', FILTER_VALIDATE_INT);
+        $day = filter_var($_POST['day'] ?? '', FILTER_VALIDATE_INT);
+        $yearRaw = trim((string) ($_POST['year'] ?? ''));
+        $year = $yearRaw === '' ? null : filter_var($yearRaw, FILTER_VALIDATE_INT);
+
+        $error = null;
+        if ($eventId === false) {
+            $error = "Couldn't find that date to update.";
+        } elseif ($title === '') {
+            $error = 'Give this date a name.';
+        } elseif ($month === false || $day === false || !checkdate((int) $month, (int) $day, 2000)) {
+            $error = "That's not a real date.";
+        } elseif ($yearRaw !== '' && ($year === false || $year < 1000 || $year > (int) date('Y'))) {
+            $error = 'The year looks off -- leave it blank if it doesn\'t matter.';
+        }
+
+        if ($error !== null) {
+            $_SESSION['flash_calendar_error'] = $error;
+        } else {
+            $updated = update_calendar_event($pdo, (int) $eventId, $myGroup, $title, (int) $month, (int) $day, $year);
+            $_SESSION['flash_calendar_notice'] = $updated
+                ? "Updated \"{$title}\"."
+                : "Couldn't find that date to update.";
+        }
     } elseif ($action === 'delete') {
         $eventId = filter_var($_POST['event_id'] ?? '', FILTER_VALIDATE_INT);
         if ($eventId !== false) {
@@ -186,11 +218,20 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-entry-body { flex:1 1 auto; min-width:0; }
   .cal-entry-title { color:var(--ink); }
   .cal-entry-meta { display:block; font-size:11.5px; color:var(--ink-faint); margin-top:1px; }
-  .cal-entry-remove { flex:0 0 auto; }
+  .cal-entry-remove { flex:0 0 auto; display:flex; align-items:center; gap:8px; }
   .cal-entry-remove button { font-size:11px; }
 
+  /* ---------- Phase 62: inline "Edit" form for a key date ---------- */
+  .cal-entry-edit { display:none; padding:10px 8px 14px; margin:0 0 4px; border-bottom:1px solid var(--line); }
+  .cal-entry-edit.is-open { display:block; }
+  .cal-entry-edit .cal-add-row { gap:8px; }
+  .cal-entry-edit .cal-add-field select, .cal-entry-edit .cal-add-field input { padding:7px 9px; font-size:13px; }
+  .cal-entry-edit .cal-add-field.year input { width:90px; }
+  .cal-entry-edit .btn-primary { width:auto; margin:0; padding:7px 16px; font-size:13px; }
+  .cal-edit-cancel { font-size:12px; }
+
   @media print {
-    .nav, .flash, .cal-add-card, .cal-entry-remove, .whoami { display:none !important; }
+    .nav, .flash, .cal-add-card, .cal-entry-remove, .cal-entry-edit, .whoami { display:none !important; }
     body { padding:0; }
     .cal-year { grid-template-columns:repeat(3, 1fr); }
     .cal-month { break-inside:avoid; border-color:#999; }
@@ -311,6 +352,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
                 </span>
                 <?php if ($e['kind'] === 'key_date'): ?>
                   <span class="cal-entry-remove">
+                    <button type="button" class="linklet cal-edit-toggle" data-target="calEdit<?= (int) $e['id'] ?>">Edit</button>
                     <form method="post" onsubmit="return confirm('Remove this date from the family calendar?');">
                       <?= csrf_field() ?>
                       <input type="hidden" name="action" value="delete">
@@ -320,12 +362,69 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
                   </span>
                 <?php endif; ?>
               </div>
+              <?php if ($e['kind'] === 'key_date'): ?>
+                <div class="cal-entry-edit" id="calEdit<?= (int) $e['id'] ?>">
+                  <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="event_id" value="<?= (int) $e['id'] ?>">
+                    <div class="cal-add-row">
+                      <div class="cal-add-field grow">
+                        <label for="calEditTitle<?= (int) $e['id'] ?>">What is it?</label>
+                        <input type="text" id="calEditTitle<?= (int) $e['id'] ?>" name="title" maxlength="120" value="<?= htmlspecialchars($e['title'], ENT_QUOTES) ?>" required>
+                      </div>
+                      <div class="cal-add-field">
+                        <label for="calEditMonth<?= (int) $e['id'] ?>">Month</label>
+                        <select id="calEditMonth<?= (int) $e['id'] ?>" name="month" required>
+                          <?php foreach ($monthNames as $mNum => $mName): ?>
+                            <option value="<?= $mNum ?>"<?= $mNum === $e['month'] ? ' selected' : '' ?>><?= htmlspecialchars($mName, ENT_QUOTES) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </div>
+                      <div class="cal-add-field">
+                        <label for="calEditDay<?= (int) $e['id'] ?>">Day</label>
+                        <select id="calEditDay<?= (int) $e['id'] ?>" name="day" required>
+                          <?php for ($d = 1; $d <= 31; $d++): ?>
+                            <option value="<?= $d ?>"<?= $d === $e['day'] ? ' selected' : '' ?>><?= $d ?></option>
+                          <?php endfor; ?>
+                        </select>
+                      </div>
+                      <div class="cal-add-field year">
+                        <label for="calEditYear<?= (int) $e['id'] ?>">Year (optional)</label>
+                        <input type="number" id="calEditYear<?= (int) $e['id'] ?>" name="year" min="1000" max="<?= (int) date('Y') ?>" value="<?= $e['event_year'] !== null ? (int) $e['event_year'] : '' ?>">
+                      </div>
+                      <button type="submit" class="btn-primary">Save changes</button>
+                      <button type="button" class="linklet cal-edit-cancel" data-target="calEdit<?= (int) $e['id'] ?>">Cancel</button>
+                    </div>
+                  </form>
+                </div>
+              <?php endif; ?>
             <?php endforeach; ?>
           <?php endif; ?>
         </div>
       <?php endforeach; ?>
     </div>
   </div>
+
+  <script>
+    // Phase 62: "Edit" reveals the matching .cal-entry-edit form inline
+    // (event-delegated rather than one listener per row, since a full
+    // year's worth of key dates could mean dozens of these); "Cancel"
+    // hides it again without submitting. No fetch/AJAX -- Save still
+    // does a plain POST + redirect, same as every other mutation here.
+    document.addEventListener("click", function (evt) {
+      var btn = evt.target.closest(".cal-edit-toggle, .cal-edit-cancel");
+      if (!btn) return;
+      var target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      var opening = !target.classList.contains("is-open");
+      target.classList.toggle("is-open", opening);
+      if (opening) {
+        var titleField = target.querySelector('input[name="title"]');
+        if (titleField) titleField.focus();
+      }
+    });
+  </script>
 
   <?php ourthology_render_tour('calendar', $myPersonId); ?>
 </body>

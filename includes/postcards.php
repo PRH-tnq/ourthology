@@ -302,6 +302,17 @@ function discard_postcard(PDO $pdo, int $recipientRowId): void
  * texts around its rim, "OURTHOLOGY P.O." over the top and "YOU'RE
  * WELCOME" under the bottom, each on its own semicircular <path> so they
  * both read right-side up.
+ *
+ * Phase 61: the two arc paths use different radii on purpose, not a
+ * mistake -- text-on-a-path always draws on one particular side of its
+ * baseline (SVG has no reliably-supported way to flip that), and for
+ * this circle's geometry that side is "outward" along the top arc but
+ * "inward" along the bottom one. pmArcTop's baseline sits ON the r=25
+ * ring itself so its outward-drawing text lands just outside it; pmArc-
+ * Bottom's baseline is pushed out to r=31 so its inward-drawing text
+ * still lands outside the ring too, rather than inside it -- both texts
+ * end up occupying the same outward band around the circle, the way
+ * real postmark rim text does.
  */
 function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
 {
@@ -311,7 +322,7 @@ function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
         <svg viewBox="-2 -6 118 84" aria-hidden="true">
           <defs>
             <path id="pmArcTop" d="M 53 36 A 25 25 0 0 1 103 36"/>
-            <path id="pmArcBottom" d="M 53 36 A 25 25 0 0 0 103 36"/>
+            <path id="pmArcBottom" d="M 47 36 A 31 31 0 0 0 109 36"/>
             <clipPath id="stampBody"><rect x="6.5" y="7.5" width="45" height="55"/></clipPath>
           </defs>
 
