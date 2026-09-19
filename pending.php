@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php'; // fetch_entry_media() — the memory preview below (Phase 32)
 require_once __DIR__ . '/includes/postcards.php';
 require_once __DIR__ . '/includes/letters.php';
+require_once __DIR__ . '/includes/cards.php';
 
 require_login();
 $me = current_user_with_person();
@@ -43,6 +44,16 @@ if (!empty($_SESSION['flash_letter_notice'])) {
     $notice = (string) $_SESSION['flash_letter_notice'];
 }
 unset($_SESSION['flash_letter_notice']);
+
+// Phase 67: same pattern again, one flash pair for greeting cards --
+// card.php (open/save/discard) redirects back here just like postcard.php/
+// letter.php do.
+$openCardId = $_SESSION['flash_open_card'] ?? null;
+unset($_SESSION['flash_open_card']);
+if (!empty($_SESSION['flash_card_notice'])) {
+    $notice = (string) $_SESSION['flash_card_notice'];
+}
+unset($_SESSION['flash_card_notice']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -145,8 +156,16 @@ $pendingPostcards = fetch_pending_postcards_for_person($pdo, $myPersonId);
 $outgoingPostcards = fetch_outgoing_postcards_for_person($pdo, $myPersonId);
 $pendingLetters = fetch_pending_letters_for_person($pdo, $myPersonId);
 $outgoingLetters = fetch_outgoing_letters_for_person($pdo, $myPersonId);
-$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards) + count($pendingLetters);
-$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards) + count($outgoingLetters);
+// Phase 67: greeting cards -- fetch_pending_cards_for_person() already
+// filters out anything whose deliver_on hasn't arrived yet (see that
+// function's own doc comment), so $pendingCards here only ever holds
+// cards actually due; $outgoingCards is deliberately NOT gated the same
+// way -- a card is "sent, waiting on them" from the moment it's sent,
+// whether or not they could open it yet.
+$pendingCards = fetch_pending_cards_for_person($pdo, $myPersonId);
+$outgoingCards = fetch_outgoing_cards_for_person($pdo, $myPersonId);
+$incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards) + count($pendingLetters) + count($pendingCards);
+$outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards) + count($outgoingLetters) + count($outgoingCards);
 
 // Phase 65: "record a list of postcards and letters a user has sent,
 // recording when and to who" -- a permanent, chronological history, newest
@@ -160,6 +179,9 @@ $outgoingCount = count($outgoing['relationships']) + count($outgoing['partnershi
 // worth a fancier merge than usort().
 $sentPostcards = fetch_sent_postcards_for_person($pdo, $myPersonId);
 $sentLetters = fetch_sent_letters_for_person($pdo, $myPersonId);
+// Phase 67: cards join this same merged history -- a third type
+// alongside postcard/letter, same shape (type/sent_at/recipient).
+$sentCards = fetch_sent_greeting_cards_for_person($pdo, $myPersonId);
 $sentHistory = [];
 foreach ($sentPostcards as $pc) {
     $sentHistory[] = [
@@ -175,8 +197,15 @@ foreach ($sentLetters as $lt) {
         'recipient' => person_display_name(['first_name' => $lt['recipient_first'], 'surname' => $lt['recipient_surname']]),
     ];
 }
+foreach ($sentCards as $gc) {
+    $sentHistory[] = [
+        'type'      => 'card',
+        'sent_at'   => $gc['sent_at'],
+        'recipient' => person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]),
+    ];
+}
 usort($sentHistory, fn(array $a, array $b): int => strcmp($b['sent_at'], $a['sent_at']));
-$sentHistoryTotal = count_sent_postcards_for_person($pdo, $myPersonId) + count_sent_letters_for_person($pdo, $myPersonId);
+$sentHistoryTotal = count_sent_postcards_for_person($pdo, $myPersonId) + count_sent_letters_for_person($pdo, $myPersonId) + count_sent_greeting_cards_for_person($pdo, $myPersonId);
 $sentHistoryShown = array_slice($sentHistory, 0, 40);
 
 $openPostcard = $openPostcardRowId !== null
@@ -184,6 +213,9 @@ $openPostcard = $openPostcardRowId !== null
     : null;
 $openLetter = $openLetterRowId !== null
     ? fetch_letter_for_recipient($pdo, (int) $openLetterRowId, $myPersonId)
+    : null;
+$openCard = $openCardId !== null
+    ? fetch_card_for_recipient($pdo, (int) $openCardId, $myPersonId)
     : null;
 
 // Phase 32: a memory-tag request is a judgment call ("does this actually
@@ -427,6 +459,36 @@ function ourthology_pending_memory_preview_html(array $row): string
   .letter-envelope-scene.js-anim.is-opening .envelope-anim-body { opacity:0; }
   .letter-envelope-scene.js-anim .letter-reveal { position:relative; z-index:3; transform:translateY(40px) scale(.85); opacity:0; transition:transform .8s cubic-bezier(.2,.7,.2,1) .55s, opacity .6s ease .55s; }
   .letter-envelope-scene.js-anim.is-pulled .letter-reveal { transform:translateY(0) scale(1); opacity:1; z-index:5; }
+
+  /* Phase 67: the greeting card read view -- reuses the envelope-opening
+     intro animation above (letter-envelope-scene, envelope-anim-flap,
+     envelope-anim-body, letter-reveal) byte-for-byte, just wrapping a taller, card-shaped
+     scene instead of a single flat letter sheet. Read-only: no editing,
+     no drop zone -- the front cover starts already "open" (.is-open, no
+     animation) so the inside message is what a recipient sees first,
+     with a small toggle to peek at the front cover/photo instead. Class
+     names match timeline.php's own composer (gcard-*) for everything
+     that isn't specific to editing. */
+  .gcard-read-box { position:relative; width:min(92vw, 380px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
+  .gcard-title { margin:0 0 12px; }
+  .gcard-scene { position:relative; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
+  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; perspective:1800px; }
+  .gcard-cover.is-open { transform:rotateY(-150deg); }
+  .gcard-cover-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; overflow:hidden; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); }
+  .gcard-cover-front { background:#fff; }
+  .gcard-cover-back { transform:rotateY(180deg); background:#fdfaf6; }
+  .gcard-read-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .gcard-cover-message { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:34px 14px 16px; box-sizing:border-box; text-align:center; background:linear-gradient(to top, rgba(20,16,10,0.65), rgba(20,16,10,0) 90%); }
+  .gcard-cover-message-text { display:inline-block; max-width:100%; font-family:"Fraunces", Georgia, serif; font-size:24px; font-weight:700; line-height:1.2; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,0.55); }
+  .gcard-inside { position:absolute; inset:0; z-index:1; display:flex; flex-direction:column; border:2px solid var(--accent); border-radius:12px; background:#fdfaf6; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); padding:20px 18px 16px; box-sizing:border-box; overflow:auto; }
+  .gcard-field { margin:0 0 13px; }
+  .gcard-field-label { display:block; font-size:15px; font-family:'Caveat',cursive; color:var(--ink-faint); margin-bottom:2px; }
+  .gcard-field-value { display:block; width:100%; box-sizing:border-box; border-bottom:1px dashed var(--line); padding-bottom:4px; font-family:'Caveat',cursive; font-size:19px; line-height:1.3; color:#2b2620; white-space:pre-wrap; }
+  .gcard-field-message { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; }
+  .gcard-message-value { flex:1 1 auto; border-bottom:none; font-size:18px; line-height:1.5; overflow:auto; }
+  .gcard-closing-value { border-bottom:none; font-size:20px; text-align:right; }
+  .gcard-peek-toggle { position:absolute; top:8px; right:8px; z-index:6; }
+  .gcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
 <body>
@@ -555,6 +617,23 @@ function ourthology_pending_memory_preview_html(array $row): string
       </div>
     <?php endforeach; ?>
 
+    <?php foreach ($pendingCards as $gc): ?>
+      <div class="req-card envelope-req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($gc['received_at']), ENT_QUOTES) ?></span>
+        <form method="post" action="/card.php">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="open">
+          <input type="hidden" name="card_id" value="<?= (int) $gc['card_id'] ?>">
+          <button type="submit" class="envelope-row" aria-label="Open <?= htmlspecialchars(strtolower((string) $gc['occasion']), ENT_QUOTES) ?> card from <?= htmlspecialchars(person_display_name(['first_name' => $gc['sender_first'], 'surname' => $gc['sender_surname']]), ENT_QUOTES) ?>">
+            <span class="envelope-row-flap" aria-hidden="true"></span>
+            <span class="envelope-row-return" aria-hidden="true"><b>From</b><?= htmlspecialchars(person_display_name(['first_name' => $gc['sender_first'], 'surname' => $gc['sender_surname']]), ENT_QUOTES) ?></span>
+            <span class="envelope-row-addressee"><?= htmlspecialchars((string) $gc['occasion'], ENT_QUOTES) ?> card</span>
+            <span class="envelope-row-sub"><?= $gc['status'] === 'read' ? 'Already opened — tap to reopen' : 'A card for you — tap to open' ?></span>
+          </button>
+        </form>
+      </div>
+    <?php endforeach; ?>
+
     <h3 class="section-title">Sent by you, waiting on them (<?= $outgoingCount ?>)</h3>
     <?php if (!$outgoingCount): ?>
       <p style="color:var(--ink-faint);font-size:14px;margin:4px 0 0;">Nothing outstanding.</p>
@@ -638,6 +717,20 @@ function ourthology_pending_memory_preview_html(array $row): string
         </p>
       </div>
     <?php endforeach; ?>
+
+    <?php foreach ($outgoingCards as $gc): ?>
+      <div class="req-card">
+        <span class="req-when"><?= htmlspecialchars(human_time_ago($gc['sent_at']), ENT_QUOTES) ?></span>
+        <p style="margin:0;font-size:14px;">
+          Card sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]), ENT_QUOTES) ?></strong>
+          <?php if ($gc['deliver_on'] > date('Y-m-d')): ?>
+            <span style="color:var(--ink-faint);font-size:12px;">(will land in their Pending queue on <?= htmlspecialchars(date('d M Y', strtotime($gc['deliver_on'])), ENT_QUOTES) ?>)</span>
+          <?php else: ?>
+            <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>
+          <?php endif; ?>
+        </p>
+      </div>
+    <?php endforeach; ?>
     </div>
 
     <div class="pending-col-right">
@@ -648,7 +741,7 @@ function ourthology_pending_memory_preview_html(array $row): string
         <ul class="sent-history-list">
           <?php foreach ($sentHistoryShown as $h): ?>
             <li class="sent-history-row">
-              <span class="sent-history-what"><?= $h['type'] === 'postcard' ? 'Postcard' : 'Letter' ?> to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
+              <span class="sent-history-what"><?= $h['type'] === 'postcard' ? 'Postcard' : ($h['type'] === 'letter' ? 'Letter' : 'Card') ?> to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
               <span class="sent-history-date"><?= htmlspecialchars(date('d M Y', strtotime($h['sent_at'])), ENT_QUOTES) ?></span>
             </li>
           <?php endforeach; ?>
@@ -814,6 +907,106 @@ function ourthology_pending_memory_preview_html(array $row): string
       // view. Skipped for prefers-reduced-motion, where the letter just
       // appears immediately exactly as it would with JS disabled.
       var scene = document.getElementById("letterEnvelopeScene");
+      if (scene && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        scene.classList.add("js-anim");
+        setTimeout(function () { scene.classList.add("is-opening"); }, 220);
+        setTimeout(function () { scene.classList.add("is-pulled"); }, 560);
+      }
+    })();
+  </script>
+  <?php endif; ?>
+  <?php if ($openCard): ?>
+  <div class="postcard-overlay" id="cardReadOverlay">
+    <div class="gcard-read-box letter-envelope-scene" id="cardEnvelopeScene">
+      <button type="button" class="postcard-close" id="cardReadClose" aria-label="Close">×</button>
+      <div class="envelope-anim-flap" aria-hidden="true"></div>
+      <div class="envelope-anim-body" aria-hidden="true"></div>
+      <div class="letter-reveal">
+        <h3 class="gcard-title"><?= htmlspecialchars((string) $openCard['occasion'], ENT_QUOTES) ?> card from <?= htmlspecialchars(person_display_name(['first_name' => $openCard['sender_first'], 'surname' => $openCard['sender_surname']]), ENT_QUOTES) ?></h3>
+        <div class="gcard-scene">
+          <button type="button" class="postcard-flip-btn gcard-peek-toggle" id="cardPeekToggleBtn">View cover &rarr;</button>
+          <div class="gcard-cover is-open" id="cardReadCover">
+            <div class="gcard-cover-face gcard-cover-front">
+              <img class="gcard-read-photo" src="/card_media.php?id=<?= (int) $openCard['card_id'] ?>" alt="">
+              <div class="gcard-cover-message"><span class="gcard-cover-message-text"><?= htmlspecialchars((string) $openCard['cover_message'], ENT_QUOTES) ?></span></div>
+            </div>
+            <div class="gcard-cover-face gcard-cover-back" aria-hidden="true"></div>
+          </div>
+          <div class="gcard-inside">
+            <?php
+              $cardToName = ($openCard['to_line'] ?? '') !== '' ? $openCard['to_line'] : (string) $me['first_name'];
+              $cardGreeting = ($openCard['greeting_line'] ?? '') !== '' ? $openCard['greeting_line'] : (string) $openCard['occasion'];
+            ?>
+            <div class="gcard-field">
+              <span class="gcard-field-label">To</span>
+              <span class="gcard-field-value"><?= htmlspecialchars((string) $cardToName, ENT_QUOTES) ?></span>
+            </div>
+            <div class="gcard-field">
+              <span class="gcard-field-label">Greeting</span>
+              <span class="gcard-field-value"><?= htmlspecialchars((string) $cardGreeting, ENT_QUOTES) ?></span>
+            </div>
+            <div class="gcard-field gcard-field-message">
+              <span class="gcard-field-label">Message</span>
+              <div class="gcard-field-value gcard-message-value"><?= $openCard['message'] !== '' ? nl2br(htmlspecialchars((string) $openCard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
+            </div>
+            <?php if (($openCard['from_line'] ?? '') !== ''): ?>
+            <div class="gcard-field">
+              <span class="gcard-field-value gcard-closing-value"><?= htmlspecialchars((string) $openCard['from_line'], ENT_QUOTES) ?></span>
+            </div>
+            <?php endif; ?>
+          </div>
+        </div>
+        <?php if (in_array($openCard['status'], ['pending', 'read'], true)): ?>
+        <div class="gcard-read-footer">
+          <form method="post" action="/card.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="discard">
+            <input type="hidden" name="card_id" value="<?= (int) $openCard['card_id'] ?>">
+            <button type="submit" class="btn-primary btn-small ghost">Discard</button>
+          </form>
+          <form method="post" action="/card.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="card_id" value="<?= (int) $openCard['card_id'] ?>">
+            <button type="submit" class="btn-primary btn-small">Save to my timeline</button>
+          </form>
+        </div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var overlay = document.getElementById("cardReadOverlay");
+      if (!overlay) return;
+      function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onEsc);
+      }
+      function onEsc(evt) {
+        if (evt.key === "Escape") close();
+      }
+      overlay.addEventListener("click", function (evt) {
+        if (evt.target === overlay) close();
+      });
+      document.getElementById("cardReadClose").addEventListener("click", close);
+      document.addEventListener("keydown", onEsc);
+
+      var cover = document.getElementById("cardReadCover");
+      var toggleBtn = document.getElementById("cardPeekToggleBtn");
+      if (cover && toggleBtn) {
+        toggleBtn.addEventListener("click", function () {
+          var nowOpen = cover.classList.toggle("is-open");
+          toggleBtn.innerHTML = nowOpen ? "View cover &rarr;" : "&larr; Back to message";
+        });
+      }
+
+      // Same "run the envelope-open animation" treatment letters get
+      // above -- .js-anim switches the scene from its default (card
+      // fully visible, envelope pieces display:none) into the animated
+      // start state, then these two timers step through opening the
+      // flap and pulling the card up into view.
+      var scene = document.getElementById("cardEnvelopeScene");
       if (scene && !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
         scene.classList.add("js-anim");
         setTimeout(function () { scene.classList.add("is-opening"); }, 220);

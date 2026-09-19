@@ -104,6 +104,9 @@ $unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']
 // to the "Your tree" heading below (see graph_upcoming_birthdays() in
 // includes/graph.php for the date math).
 $upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
+// Phase 67: per-person rows for the banner's "Send a card" links -- see
+// ourthology_birthday_banner_rows()'s own doc comment in graph.php.
+$birthdayCardRows = ourthology_birthday_banner_rows($upcomingBirthdays);
 
 // Phase 28: the onboarding tour (see includes/tour_steps.php) walks onto
 // this page partway through — this page never starts it (that only ever
@@ -257,6 +260,14 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      notice. */
   .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; }
   .birthday-banner strong { color:#8A5A0A; font-weight:700; }
+  /* Phase 67: one pill per upcoming birthday (see timeline.php's own copy
+     of this comment) plus a "Send a card" link per pill -- this page has
+     no card composer of its own, so the link just hands off to
+     timeline.php, which reopens the same composer for the same person
+     (see timeline.php's ?send_card_to= handling). */
+  .birthday-banner-group { display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
+  .birthday-send-card-btn { flex:none; font-size:12px; font-weight:700; padding:5px 11px; margin-left:2px; border-radius:999px; border:1px solid #8A5A0A; color:#FBF8F1; background:#C2790F; cursor:pointer; font-family:inherit; text-decoration:none; white-space:nowrap; }
+  .birthday-send-card-btn:hover { background:#A9670C; }
 
   /* Tree diagram — styled to match the original prototype's family-tree
      view: a soft paper-toned well, no boxes around people (just stacked
@@ -351,7 +362,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
      context on a printed page. */
   @media print {
     @page { size: landscape; margin: 10mm; }
-    .nav, .flash, .flash-label, .invite-draft-overlay, .birthday-banner, #unclaimedSection { display:none !important; }
+    .nav, .flash, .flash-label, .invite-draft-overlay, .birthday-banner, .birthday-banner-group, #unclaimedSection { display:none !important; }
     .tree-wrap { overflow:visible; border:none; box-shadow:none; background:transparent; padding:0; cursor:default; }
     .tree-wrap svg { width:100% !important; height:auto !important; }
   }
@@ -505,9 +516,15 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
       <h3 style="margin-bottom:4px;">Your tree (<?= count($graph['persons']) ?> <?= count($graph['persons']) === 1 ? 'person' : 'people' ?>)</h3>
-      <?php if ($upcomingBirthdays): ?>
-        <div class="birthday-banner" role="status">
-          <span aria-hidden="true">🎂</span> <?= htmlspecialchars(ourthology_birthday_banner_text($upcomingBirthdays), ENT_QUOTES) ?>
+      <?php if ($birthdayCardRows): ?>
+        <div class="birthday-banner-group">
+          <?php foreach ($birthdayCardRows as $row): ?>
+            <div class="birthday-banner" role="status">
+              <span aria-hidden="true">🎂</span>
+              <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
+              <a class="birthday-send-card-btn" href="/timeline.php?send_card_to=<?= (int) $row['person_id'] ?>">🎉 Send a card</a>
+            </div>
+          <?php endforeach; ?>
         </div>
       <?php endif; ?>
     </div>

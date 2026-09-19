@@ -258,10 +258,34 @@ function graph_people_within_generations(array $graph, int $anchorId, int $minTi
  * date on file is skipped -- there's nothing to count down to. Used by
  * tree.php to show a reminder banner starting a week out.
  */
+/**
+ * Phase 67: the "next occurrence of this month/day, on or after $today"
+ * math graph_upcoming_birthdays() below already did inline -- pulled out
+ * on its own so card.php can reuse the exact same date logic to compute a
+ * greeting card's deliver_on (the day before the recipient's own next
+ * birthday) server-side, rather than trusting a date posted by the
+ * client. Guards a Feb 29 birthday on a non-leap year by falling back to
+ * Feb 28 rather than letting DateTime silently roll it over into March.
+ */
+function ourthology_next_annual_occurrence(int $month, int $day, ?DateTimeImmutable $today = null): DateTimeImmutable
+{
+    $today ??= new DateTimeImmutable('today');
+    $occurrence = static function (int $year) use ($month, $day): DateTimeImmutable {
+        if (!checkdate($month, $day, $year)) {
+            return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-02-28', $year));
+        }
+        return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-%02d-%02d', $year, $month, $day));
+    };
+    $next = $occurrence((int) $today->format('Y'));
+    if ($next < $today) {
+        $next = $occurrence(((int) $today->format('Y')) + 1);
+    }
+    return $next;
+}
+
 function graph_upcoming_birthdays(array $persons, int $withinDays = 7): array
 {
     $today = new DateTimeImmutable('today');
-    $todayYear = (int) $today->format('Y');
     $upcoming = [];
 
     foreach ($persons as $p) {
@@ -276,20 +300,7 @@ function graph_upcoming_birthdays(array $persons, int $withinDays = 7): array
         $month = (int) $born->format('m');
         $day = (int) $born->format('d');
 
-        // This year's occurrence, guarding a Feb 29 birthday on a
-        // non-leap year by falling back to Feb 28 rather than letting
-        // DateTime silently roll it over into March.
-        $occurrence = static function (int $year) use ($month, $day): DateTimeImmutable {
-            if (!checkdate($month, $day, $year)) {
-                return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-02-28', $year));
-            }
-            return DateTimeImmutable::createFromFormat('!Y-m-d', sprintf('%04d-%02d-%02d', $year, $month, $day));
-        };
-
-        $next = $occurrence($todayYear);
-        if ($next < $today) {
-            $next = $occurrence($todayYear + 1);
-        }
+        $next = ourthology_next_annual_occurrence($month, $day, $today);
 
         $daysAway = (int) $today->diff($next)->format('%r%a');
         if ($daysAway < 0 || $daysAway > $withinDays) {
@@ -325,6 +336,44 @@ function ourthology_birthday_banner_text(array $upcoming): string
         $parts[] = "{$name} turns {$b['turning_age']} {$when} ({$dateLabel})";
     }
     return implode(" \u{00B7} ", $parts);
+}
+
+/**
+ * Phase 67: "add an option in that banner to 'send a card'" -- needs a
+ * per-person action, which ourthology_birthday_banner_text() above can't
+ * offer since it collapses every upcoming birthday into one joined
+ * string with no hooks back to any individual person. This is the same
+ * $upcoming list graph_upcoming_birthdays() returns, reshaped one row per
+ * birthday with everything a "Send a card" button/composer needs:
+ * who it's for, the same human "today"/"tomorrow"/"in N days" phrasing,
+ * and sensible defaults for the card's front-cover message and inside
+ * greeting line. Kept separate from (rather than replacing)
+ * ourthology_birthday_banner_text() so nothing already calling that one
+ * needs to change.
+ */
+function ourthology_birthday_banner_rows(array $upcoming): array
+{
+    $rows = [];
+    foreach ($upcoming as $b) {
+        $name = person_display_name($b['person']);
+        $when = match (true) {
+            $b['days_away'] === 0 => 'today',
+            $b['days_away'] === 1 => 'tomorrow',
+            default => 'in ' . $b['days_away'] . ' days',
+        };
+        $rows[] = [
+            'person_id'      => (int) $b['person']['id'],
+            'name'           => $name,
+            'first_name'     => (string) ($b['person']['first_name'] ?? $name),
+            'turning_age'    => $b['turning_age'],
+            'when'           => $when,
+            'date_label'     => $b['next_birthday']->format('D j M'),
+            'text'           => "{$name} turns {$b['turning_age']} {$when} ({$b['next_birthday']->format('D j M')})",
+            'cover_default'  => 'Happy Birthday!',
+            'greeting_default' => 'Happy Birthday',
+        ];
+    }
+    return $rows;
 }
 
 /**

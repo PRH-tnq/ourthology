@@ -411,6 +411,12 @@ ALTER TABLE postcards
 ALTER TABLE timeline_entries
   ADD COLUMN origin ENUM('postcard','letter') NULL DEFAULT NULL AFTER entry_type;
 
+-- Phase 67: a saved greeting card gets its own real timeline_entries copy
+-- exactly like a saved postcard/letter (see save_card_to_timeline() in
+-- includes/cards.php) -- widened to admit that third origin value.
+ALTER TABLE timeline_entries
+  MODIFY COLUMN origin ENUM('postcard','letter','card') NULL DEFAULT NULL;
+
 -- ---------------------------------------------------------------------
 -- Phase 55: "let me edit the To and From names on the letter or postcard
 -- too, I might want to contract my name or the recipient's" -- letters
@@ -426,6 +432,66 @@ ALTER TABLE timeline_entries
 ALTER TABLE letters
   ADD COLUMN to_line VARCHAR(80) NULL AFTER body_html,
   ADD COLUMN from_line VARCHAR(80) NULL AFTER to_line;
+
+-- ---------------------------------------------------------------------
+-- Phase 67: greeting_cards -- "send a card", triggered from the birthday
+-- reminder banner (see ourthology_birthday_banner_rows() in
+-- includes/graph.php) rather than composed freely like a postcard/letter.
+-- Modeled on letters (one row per card, addressed to exactly one
+-- recipient) rather than postcards' multi-recipient junction table --
+-- a card is always for one specific person's one specific occasion.
+--
+-- deliver_on gates when the RECIPIENT can see it (see
+-- fetch_pending_cards_for_person() in includes/cards.php, which filters
+-- WHERE deliver_on <= CURDATE()) -- the card sits in the sender's own
+-- "sent" history immediately on send, but the recipient's own pending
+-- queue only picks it up once today reaches deliver_on. Computed
+-- server-side at send time, from the recipient's own persons.born, as
+-- "the day before their next birthday" (see card.php's send action and
+-- ourthology_next_annual_occurrence() in includes/graph.php) -- never
+-- trusted from the client, so there's no way to post an arbitrary early
+-- delivery date.
+--
+-- cover_message is the front-of-card overlay text ("Happy Birthday!");
+-- to_line/greeting_line/message/from_line are the inside spread's four
+-- editable spaces ("To....../Greeting....../message....../lots of love,
+-- ___"). occasion is a short free-text label (default 'Birthday') kept
+-- mostly for the sender's own sent-history line -- the fields themselves
+-- are fully editable, so nothing here actually enforces "birthday" vs
+-- any other occasion once the card's been opened up to write in.
+-- ---------------------------------------------------------------------
+CREATE TABLE greeting_cards (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sender_person_id      INT UNSIGNED NOT NULL,
+  created_by_user_id    INT UNSIGNED NOT NULL,
+  family_group_id       INT UNSIGNED NOT NULL,
+  recipient_person_id   INT UNSIGNED NOT NULL,
+  occasion              VARCHAR(60) NOT NULL DEFAULT 'Birthday',
+  image_path            VARCHAR(255) NOT NULL,
+  image_mime_type       VARCHAR(100) NOT NULL,
+  image_byte_size       INT UNSIGNED NOT NULL,
+  image_width           INT UNSIGNED NULL,
+  image_height          INT UNSIGNED NULL,
+  cover_message         VARCHAR(120) NOT NULL,
+  to_line               VARCHAR(80) NULL,
+  greeting_line         VARCHAR(80) NULL,
+  message               TEXT NOT NULL,
+  from_line             VARCHAR(80) NULL,
+  postmark_angle        SMALLINT NOT NULL DEFAULT 0,
+  deliver_on            DATE NOT NULL,
+  status                ENUM('pending','read','saved','discarded') NOT NULL DEFAULT 'pending',
+  timeline_entry_id     INT UNSIGNED NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  read_at               DATETIME NULL,
+  resolved_at           DATETIME NULL,
+  CONSTRAINT fk_card_sender FOREIGN KEY (sender_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_card_recipient FOREIGN KEY (recipient_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_card_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_card_entry FOREIGN KEY (timeline_entry_id) REFERENCES timeline_entries(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_card_sender ON greeting_cards(sender_person_id);
+CREATE INDEX idx_card_recipient_status_deliver ON greeting_cards(recipient_person_id, status, deliver_on);
 
 -- ---------------------------------------------------------------------
 -- Phase 56: the family calendar -- "add in a family calendar feature and

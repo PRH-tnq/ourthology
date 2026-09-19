@@ -8,7 +8,7 @@ require_once __DIR__ . '/media.php';
 /**
  * Phase 48: "send a postcard" -- a lightweight, personal alternative to a
  * tagged memory. A sender picks a photo, writes a message, and addresses
- * it to one person, several, or everyone claimed in their family group;
+ * it to one person, several, or everyone living in their family group;
  * it shows up in each recipient's Pending queue exactly like a
  * relationship/partnership/memory-tag request (fetch_pending_for_user()
  * in graph.php, fetch_pending_memory_tags_for_user() in memory_tags.php).
@@ -20,15 +20,29 @@ require_once __DIR__ . '/media.php';
  * until someone actually saves a copy of it -- see
  * store_postcard_image()/store_postcard_copy_as_media() in media.php for
  * why, and postcard_media.php for how it's served in the meantime.
+ *
+ * Phase 66: "ensure that everyone who is not dead can be sent a postcard
+ * by anyone" -- fetch_postcard_recipient_options() below used to require
+ * claimed_by_user_id IS NOT NULL, so an unclaimed person (someone added to
+ * the tree who hasn't signed up yet, or never will -- a baby, an elderly
+ * relative someone's filling in on their behalf) couldn't be addressed at
+ * all. Postcards and letters already sit in postcard_recipients/letters
+ * against a person_id, not a user_id -- the pending queue only shows up
+ * once someone is actually logged in as that person, exactly like an
+ * unclaimed person's profile only they can eventually claim -- so there's
+ * nothing claim-status-specific about being able to receive one. Now the
+ * only thing that excludes someone is being recorded as deceased, same
+ * "can't be claimed (recorded as deceased)" rule tree.php's own invite
+ * list already applies.
  */
 
-/** Every claimed person in $familyGroupId except $excludePersonId -- the pool a sender may address a postcard to. Ordered by first name for a stable picker list. */
+/** Every living person in $familyGroupId except $excludePersonId -- the pool a sender may address a postcard (or letter) to, claimed or not. Ordered by first name for a stable picker list. */
 function fetch_postcard_recipient_options(PDO $pdo, int $familyGroupId, int $excludePersonId): array
 {
     $stmt = $pdo->prepare(
         'SELECT id, first_name, middle_name, surname
          FROM persons
-         WHERE family_group_id = :gid AND claimed_by_user_id IS NOT NULL AND id <> :self
+         WHERE family_group_id = :gid AND died IS NULL AND id <> :self
          ORDER BY first_name, surname'
     );
     $stmt->execute(['gid' => $familyGroupId, 'self' => $excludePersonId]);

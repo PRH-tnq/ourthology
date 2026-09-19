@@ -6,7 +6,7 @@ require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/letters.php';
-require_once __DIR__ . '/includes/postcards.php'; // fetch_postcard_recipient_options() — the same "claimed people in my family group" list a letter may be addressed to
+require_once __DIR__ . '/includes/postcards.php'; // fetch_postcard_recipient_options() — the same "everyone living in my family group" list a letter may be addressed to
 require_once __DIR__ . '/includes/notifications.php';
 
 /**

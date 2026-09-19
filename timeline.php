@@ -9,6 +9,7 @@ require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/postcards.php';
 require_once __DIR__ . '/includes/letters.php';
+require_once __DIR__ . '/includes/cards.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -78,6 +79,14 @@ if (!empty($_SESSION['flash_letter_error'])) {
     $errors[] = (string) $_SESSION['flash_letter_error'];
 }
 unset($_SESSION['flash_letter_sent'], $_SESSION['flash_letter_error']);
+// Phase 67: card.php's own send flash -- same reused $notice/$errors slot.
+if (!empty($_SESSION['flash_card_sent'])) {
+    $notice = (string) $_SESSION['flash_card_sent'];
+}
+if (!empty($_SESSION['flash_card_error'])) {
+    $errors[] = (string) $_SESSION['flash_card_error'];
+}
+unset($_SESSION['flash_card_sent'], $_SESSION['flash_card_error']);
 // The compose pop-up's recipient checkboxes -- always resolved for the
 // ACTUAL logged-in user, regardless of whose timeline is currently
 // being viewed (sending is a personal action, not scoped to $target).
@@ -303,6 +312,12 @@ $targetName = person_display_name($target);
 // belongs to, per the access check above).
 $graph = fetch_family_graph($pdo, $myGroup);
 $upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
+// Phase 67: per-person rows for the banner's new "Send a card" buttons --
+// see ourthology_birthday_banner_rows()'s own doc comment in graph.php.
+// Sender's own first name feeds the card composer's default closing line
+// ("lots of love, Phil"), computed once here rather than per-row.
+$birthdayCardRows = ourthology_birthday_banner_rows($upcomingBirthdays);
+$myFirstName = (string) ($me['first_name'] ?? '');
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
 function ourthology_entry_date(array $entry): string
@@ -671,6 +686,115 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .letter-fly-stamp { position:absolute; top:10px; right:12px; width:52px; z-index:2; }
   .letter-fly-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
 
+  /* Phase 67: the greeting card pop-up, opened from a birthday banner's
+     "Send a card" button rather than a general compose button -- taller
+     than it is wide, like a real greeting card, with a front cover
+     (photo + editable overlay message + "Add your message" button) that
+     swings open on its left edge -- like turning a book cover, not a
+     symmetric flip -- to reveal an inside spread of editable fields
+     underneath. Its own class prefix (gcard-) throughout so nothing here
+     touches the postcard/letter styles above, even though the overlay
+     backdrop and box chrome are deliberately the same look. */
+  .gcard-overlay { position:fixed; inset:0; background:rgba(26,23,20,0.6); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; overflow:auto; }
+  .gcard-box { position:relative; width:min(92vw, 380px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 22px 26px; box-sizing:border-box; }
+  .gcard-close { position:absolute; top:10px; right:12px; z-index:6; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
+  .gcard-close:hover { background:var(--paper-2); }
+  .gcard-title { margin:0 0 12px; }
+
+  /* Taller than wide (5:7 is a standard greeting-card proportion) -- the
+     cover sits on top (z-index above the inside), hinged on its LEFT
+     edge (transform-origin) so opening it reads as a book/card cover
+     swinging open, not a postcard-style centre flip. */
+  .gcard-scene { position:relative; perspective:1800px; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
+  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
+  .gcard-cover.is-open { transform:rotateY(-150deg); pointer-events:none; }
+  .gcard-cover-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; overflow:hidden; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); }
+  .gcard-cover-front { background:#fff; }
+  .gcard-cover-back { transform:rotateY(180deg); background:#fdfaf6; }
+
+  .gcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; background:#fff; }
+  .gcard-drop-zone.is-dragover { background:var(--paper-2); }
+  .gcard-cover-front.has-image .gcard-drop-zone { display:none; }
+  .gcard-front-preview { position:absolute; inset:0; display:none; width:100%; height:100%; object-fit:cover; }
+  .gcard-cover-front.has-image .gcard-front-preview { display:block; }
+  .gcard-change-photo { display:none; position:absolute; bottom:8px; right:8px; z-index:2; font-size:11px; padding:5px 10px; border-radius:999px; background:rgba(26,23,20,0.65); color:#fff; border:none; cursor:pointer; }
+  .gcard-cover-front.has-image .gcard-change-photo { display:block; }
+
+  /* "Overlay a message ... make it so this is the first thing the
+     creator sees" -- a large editable line sat over the bottom of the
+     photo with a dark scrim behind it so it reads on any picture. */
+  .gcard-cover-message { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:34px 14px 16px; box-sizing:border-box; text-align:center; background:linear-gradient(to top, rgba(20,16,10,0.65), rgba(20,16,10,0) 90%); pointer-events:none; }
+  .gcard-cover-message-text { display:inline-block; min-width:50%; max-width:100%; outline:none; font-family:"Fraunces", Georgia, serif; font-size:24px; font-weight:700; line-height:1.2; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,0.55); pointer-events:auto; }
+  .gcard-cover-message-text:empty::before { content:attr(data-placeholder); color:rgba(255,255,255,0.8); }
+
+  .gcard-front-footer { display:flex; justify-content:center; margin:14px 0 4px; }
+  .gcard-open-btn { width:auto; margin:0; padding:10px 22px; }
+
+  /* The inside spread -- sits statically UNDER the cover the whole time
+     (z-index below it); opening the cover just reveals what was already
+     there, nothing about the inside itself animates in. */
+  .gcard-inside { position:absolute; inset:0; z-index:1; display:flex; flex-direction:column; border:2px solid var(--accent); border-radius:12px; background:#fdfaf6; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); padding:20px 18px 16px; box-sizing:border-box; overflow:auto; }
+  .gcard-field { margin:0 0 13px; }
+  .gcard-field-label { display:block; font-size:15px; font-family:'Caveat',cursive; color:var(--ink-faint); margin-bottom:2px; }
+  .gcard-field-input { display:block; width:100%; box-sizing:border-box; outline:none; border:none; border-bottom:1px dashed var(--line); padding-bottom:4px; font-family:'Caveat',cursive; font-size:19px; line-height:1.3; color:#2b2620; min-height:1.3em; }
+  .gcard-field-input:empty::before { content:attr(data-placeholder); color:var(--ink-faint); opacity:0.75; }
+  .gcard-field-message { flex:1 1 auto; display:flex; flex-direction:column; min-height:0; }
+  .gcard-message-input { flex:1 1 auto; border-bottom:none; background:repeating-linear-gradient(to bottom, transparent, transparent 29px, var(--line) 30px); font-size:18px; line-height:1.5; min-height:80px; overflow:auto; }
+  .gcard-closing-input { border-bottom:none; font-size:20px; text-align:right; }
+
+  .gcard-inside-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px; padding-top:10px; border-top:1px solid var(--line); }
+  .gcard-back-link { display:inline-block; background:none; border:none; padding:0; margin:0; font-size:12.5px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; font-family:inherit; }
+  .gcard-send-btn { width:auto; margin:0; padding:9px 20px; }
+
+  /* Phase 61's send-animation convention, reused for the card: lock the
+     overlay so × / click-outside / Escape can't tear it down mid-
+     animation, switch overflow to visible so the fly-off can cross the
+     box's own edge and the dimmed backdrop. */
+  .gcard-overlay.is-sending { overflow:visible; }
+  .gcard-box.is-sending { overflow:visible; pointer-events:none; }
+
+  /* "animate the close of the card with the card being added to an
+     envelope ... animate it going off to the recipient ... with more of
+     a flourish" -- three stages: the open cover swings back shut
+     (reusing .gcard-cover's own transition, just toggling .is-open off),
+     then the whole card scene pops into a little envelope, then that
+     envelope flies off with a bit more wobble/bounce than the plain
+     postcard/letter toss (ourthologyFlyOff above) gets -- a left-right
+     flourish before launch and a scale pulse on landing in the envelope. */
+  @keyframes gcardFold {
+    0%   { transform:scale(1) rotate(0deg); opacity:1; }
+    55%  { transform:scale(0.16) rotate(-3deg); opacity:1; }
+    100% { transform:scale(0.05) rotate(-3deg); opacity:0; }
+  }
+  .gcard-scene.is-folding { animation:gcardFold 0.45s cubic-bezier(.6,.04,.7,.46) forwards; }
+  @keyframes gcardPopIn {
+    0%   { transform:scale(0.5) rotate(-10deg); opacity:0; }
+    55%  { transform:scale(1.18) rotate(5deg); opacity:1; }
+    75%  { transform:scale(0.94) rotate(-3deg); opacity:1; }
+    100% { transform:scale(1) rotate(0deg); opacity:1; }
+  }
+  .gcard-envelope.is-popping { animation:gcardPopIn 0.32s cubic-bezier(.34,1.56,.64,1) forwards; }
+  @keyframes gcardFlyOff {
+    0%   { transform:translate(0,0) rotate(0deg) scale(1); opacity:1; }
+    12%  { transform:translate(-14px,-18px) rotate(-10deg) scale(1.06); opacity:1; }
+    26%  { transform:translate(12px,-34px) rotate(8deg) scale(1); opacity:1; }
+    40%  { transform:translate(-4px,-46px) rotate(-4deg) scale(1.02); opacity:1; }
+    100% { transform:translate(170vw,-70px) rotate(34deg) scale(0.85); opacity:0; }
+  }
+  .gcard-envelope.is-flying { animation:gcardFlyOff 0.85s cubic-bezier(.45,0,.55,1) forwards; }
+  @media (prefers-reduced-motion: reduce) {
+    .gcard-cover, .gcard-scene.is-folding, .gcard-envelope.is-popping, .gcard-envelope.is-flying { transition-duration:0.001s !important; animation-duration:0.001s !important; }
+  }
+  /* The envelope a card goes into -- "whiter than that used for a
+     letter": .letter-fly-envelope above is a warm cream/tan gradient
+     (#f3ead9 -> #e9dcc4); this is a crisp near-white instead, a
+     deliberately different, more formal envelope for a keepsake card. */
+  .gcard-envelope-wrap { position:absolute; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:5; }
+  .gcard-envelope { position:relative; width:200px; height:132px; border-radius:6px; background:linear-gradient(135deg,#ffffff,#f7f6f2); border:1px solid #e4e0d5; box-shadow:0 10px 24px -10px rgba(0,0,0,.4); overflow:hidden; opacity:0; }
+  .gcard-envelope-flap { position:absolute; top:0; left:0; width:100%; height:58%; background:linear-gradient(135deg,#ffffff,#f1f0ea); clip-path:polygon(0 0,100% 0,50% 100%); box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .gcard-envelope-stamp { position:absolute; top:10px; right:12px; width:52px; z-index:2; }
+  .gcard-envelope-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
+
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -711,6 +835,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      River/Rings/Spiral and zoom buttons. */
   .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; margin-left:auto; }
   .birthday-banner strong { color:#8A5A0A; font-weight:700; }
+  /* Phase 67: "add an option in that banner to 'send a card'" -- the
+     banner is now one pill per upcoming birthday (rather than one pill
+     with every name joined into a single string) so each can carry its
+     own button, wrapped in a group so several still sit together the way
+     the old single pill did. margin-left:auto moved from .birthday-banner
+     itself onto the group, since a bare single .birthday-banner no longer
+     needs to push itself right when it's not the group's first child. */
+  .birthday-banner-group { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; max-width:100%; }
+  .birthday-banner-group .birthday-banner { margin-left:0; }
+  .birthday-send-card-btn { flex:none; font-size:12px; font-weight:700; padding:5px 11px; margin-left:2px; border-radius:999px; border:1px solid #8A5A0A; color:#FBF8F1; background:#C2790F; cursor:pointer; font-family:inherit; white-space:nowrap; }
+  .birthday-send-card-btn:hover { background:#A9670C; }
 
   /* ---------- timeline canvas ---------- */
   .arc-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
@@ -988,9 +1123,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <span id="customZoomLabel"></span>
         <span class="zoom-pill-x">×</span>
       </button>
-      <?php if ($upcomingBirthdays): ?>
-        <div class="birthday-banner" role="status">
-          <span aria-hidden="true">&#127874;</span> <?= htmlspecialchars(ourthology_birthday_banner_text($upcomingBirthdays), ENT_QUOTES) ?>
+      <?php if ($birthdayCardRows): ?>
+        <div class="birthday-banner-group">
+          <?php foreach ($birthdayCardRows as $row): ?>
+            <div class="birthday-banner" role="status">
+              <span aria-hidden="true">&#127874;</span>
+              <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
+              <button
+                type="button"
+                class="birthday-send-card-btn"
+                data-person-id="<?= (int) $row['person_id'] ?>"
+                data-first-name="<?= htmlspecialchars($row['first_name'], ENT_QUOTES) ?>"
+                data-name="<?= htmlspecialchars($row['name'], ENT_QUOTES) ?>"
+                data-cover-default="<?= htmlspecialchars($row['cover_default'], ENT_QUOTES) ?>"
+                data-greeting-default="<?= htmlspecialchars($row['greeting_default'], ENT_QUOTES) ?>"
+              >&#127873; Send a card</button>
+            </div>
+          <?php endforeach; ?>
         </div>
       <?php endif; ?>
     </div>
@@ -1121,9 +1270,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // Phase 54: the little corner badge on a saved postcard's/letter's own
     // card (see .card-origin-badge) -- a postcard icon (a photo with a
     // torn corner) or an envelope icon, matched to entry.origin.
+    // Phase 67: a third icon (a folded greeting card) for entries saved
+    // from a greeting card -- origin='card'.
     var ORIGIN_BADGE_HTML = {
       postcard: '<span class="card-origin-badge" title="Saved from a postcard"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4.5" width="15" height="11" rx="1.2"/><path d="M2.5 7.5h15M6 4.5v3" stroke-linecap="round"/></svg></span>',
-      letter: '<span class="card-origin-badge" title="Saved from a letter"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.2" y="4.5" width="15.6" height="11.5" rx="1.2"/><path d="M2.6 5.3l7.4 6 7.4-6" stroke-linejoin="round"/></svg></span>'
+      letter: '<span class="card-origin-badge" title="Saved from a letter"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.2" y="4.5" width="15.6" height="11.5" rx="1.2"/><path d="M2.6 5.3l7.4 6 7.4-6" stroke-linejoin="round"/></svg></span>',
+      card: '<span class="card-origin-badge" title="Saved from a greeting card"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v14M3.5 5.5h13a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke-linejoin="round"/></svg></span>'
     };
     // Phase 33: shared by the memory-card rail and the viewer's detail
     // panel — previously each had its own copy of the public/private
@@ -2770,6 +2922,346 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         wireForm(overlay);
         wireLetterForm(overlay);
       });
+    })();
+  </script>
+
+  <template id="cardComposeTemplate">
+    <div class="gcard-overlay" id="gcardComposeOverlay">
+      <div class="gcard-box" id="gcardBox">
+        <button type="button" class="gcard-close" id="gcardComposeClose" aria-label="Close">×</button>
+        <h3 class="gcard-title" id="gcardTitle">Send a card</h3>
+        <form method="post" action="/card.php" enctype="multipart/form-data" id="gcardForm">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="send">
+          <input type="hidden" name="recipient_id" id="gcardRecipientId" value="">
+          <input type="hidden" name="occasion" value="Birthday">
+          <input type="hidden" name="cover_message" id="gcardCoverMessageField">
+          <input type="hidden" name="to_line" id="gcardToLineField">
+          <input type="hidden" name="greeting_line" id="gcardGreetingLineField">
+          <input type="hidden" name="message" id="gcardMessageField">
+          <input type="hidden" name="from_line" id="gcardFromLineField">
+
+          <div class="gcard-scene" id="gcardScene">
+            <div class="gcard-cover" id="gcardCover">
+              <div class="gcard-cover-face gcard-cover-front" id="gcardCoverFront">
+                <div class="gcard-drop-zone">
+                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span>Drop a photo here, paste one, or click to choose one</span>
+                </div>
+                <img class="gcard-front-preview" alt="">
+                <button type="button" class="gcard-change-photo">Change photo</button>
+                <input type="file" name="image" class="gcard-image-input" accept="image/*" hidden>
+                <div class="gcard-cover-message">
+                  <span class="gcard-cover-message-text" id="gcardCoverMessageText" contenteditable="true" data-placeholder="Happy Birthday!"></span>
+                </div>
+              </div>
+              <div class="gcard-cover-face gcard-cover-back" aria-hidden="true"></div>
+            </div>
+            <div class="gcard-inside">
+              <div class="gcard-field">
+                <span class="gcard-field-label">To.........</span>
+                <span class="gcard-field-input" id="gcardToLine" contenteditable="true" data-placeholder="name"></span>
+              </div>
+              <div class="gcard-field">
+                <span class="gcard-field-label">Greeting.......</span>
+                <span class="gcard-field-input" id="gcardGreetingLine" contenteditable="true" data-placeholder="Happy Birthday"></span>
+              </div>
+              <div class="gcard-field gcard-field-message">
+                <span class="gcard-field-label">Message.......</span>
+                <div class="gcard-field-input gcard-message-input" id="gcardMessage" contenteditable="true" data-placeholder="Write your personal message here…"></div>
+              </div>
+              <div class="gcard-field">
+                <span class="gcard-field-input gcard-closing-input" id="gcardClosing" contenteditable="true" data-placeholder="lots of love, …"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="gcard-front-footer" id="gcardFrontFooter">
+            <button type="button" class="btn-primary gcard-open-btn" id="gcardOpenBtn">Add your message</button>
+          </div>
+          <div class="gcard-inside-footer" id="gcardInsideFooter" style="display:none;">
+            <button type="button" class="gcard-back-link" id="gcardBackLink">← Back to the cover</button>
+            <button type="submit" class="btn-primary gcard-send-btn">Send</button>
+          </div>
+        </form>
+
+        <div class="gcard-envelope-wrap" id="gcardEnvelopeWrap" aria-hidden="true">
+          <div class="gcard-envelope" id="gcardEnvelope">
+            <span class="gcard-envelope-flap" aria-hidden="true"></span>
+            <span class="gcard-envelope-stamp" aria-hidden="true"><?= ourthology_postcard_stamp_svg($previewPostmarkAngle, date('d M Y')) ?></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+  <script>
+    // Phase 67: the greeting-card composer -- opened from one of the
+    // birthday banner's own "Send a card" buttons (each already carrying
+    // its recipient's id/name/defaults as data-* attributes -- see the
+    // PHP loop over $birthdayCardRows above), not from a single fixed
+    // trigger button the way the postcard/letter composer is. Cloned
+    // fresh from <template id="cardComposeTemplate"> on every open, same
+    // "nothing lingers between opens" convention as that composer.
+    (function () {
+      var tpl = document.getElementById("cardComposeTemplate");
+      if (!tpl) return;
+      var myFirstName = <?= json_encode($myFirstName, JSON_UNESCAPED_SLASHES) ?>;
+
+      function closeOverlay() {
+        var existing = document.getElementById("gcardComposeOverlay");
+        if (existing) existing.remove();
+        document.removeEventListener("keydown", onEscape);
+      }
+      function onEscape(evt) {
+        if (evt.key !== "Escape") return;
+        var existing = document.getElementById("gcardComposeOverlay");
+        if (existing && existing.dataset.locked === "1") return; // mid send-animation -- ignore
+        closeOverlay();
+      }
+      function lockOverlayForSend(root) {
+        root.dataset.locked = "1";
+        var box = root.querySelector(".gcard-box");
+        if (box) box.classList.add("is-sending");
+      }
+
+      // Every editable field pastes as plain text (never rich HTML/
+      // formatting off the clipboard); the four single-line ones
+      // (cover message, To, Greeting, closing) additionally swallow
+      // Enter so they can't grow a line break -- same treatment the
+      // postcard/letter composer's own To/From/salutation fields get
+      // above. The message field allows Enter (a real multi-line note).
+      function pasteAsPlainText(el) {
+        if (!el) return;
+        el.addEventListener("paste", function (evt) {
+          evt.preventDefault();
+          var text = (evt.clipboardData || window.clipboardData).getData("text/plain");
+          document.execCommand("insertText", false, text);
+        });
+      }
+      function preventEnter(el) {
+        if (!el) return;
+        el.addEventListener("keydown", function (evt) {
+          if (evt.key === "Enter") evt.preventDefault();
+        });
+      }
+
+      function wireImagePicker(root) {
+        var fileInput = root.querySelector(".gcard-image-input");
+        var frontFace = root.querySelector("#gcardCoverFront");
+        var previewImg = root.querySelector(".gcard-front-preview");
+        var dropZone = root.querySelector(".gcard-drop-zone");
+        var changeBtn = root.querySelector(".gcard-change-photo");
+        if (!fileInput || !frontFace || !previewImg || !dropZone) return;
+
+        function showPreview(files) {
+          if (!files || !files[0] || files[0].type.indexOf("image/") !== 0) return;
+          var reader = new FileReader();
+          reader.onload = function (e) {
+            previewImg.src = e.target.result;
+            frontFace.classList.add("has-image");
+          };
+          reader.readAsDataURL(files[0]);
+        }
+        function setFile(file) {
+          if (!file) return;
+          try {
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            fileInput.files = dt.files;
+          } catch (e) { /* older browser -- preview still shows, it just won't carry into the submit */ }
+          showPreview([file]);
+        }
+
+        dropZone.addEventListener("click", function () { fileInput.click(); });
+        if (changeBtn) changeBtn.addEventListener("click", function (evt) { evt.stopPropagation(); fileInput.click(); });
+        fileInput.addEventListener("change", function () { showPreview(fileInput.files); });
+        ["dragover", "dragenter"].forEach(function (evtName) {
+          frontFace.addEventListener(evtName, function (evt) { evt.preventDefault(); dropZone.classList.add("is-dragover"); });
+        });
+        ["dragleave", "dragend"].forEach(function (evtName) {
+          frontFace.addEventListener(evtName, function () { dropZone.classList.remove("is-dragover"); });
+        });
+        frontFace.addEventListener("drop", function (evt) {
+          evt.preventDefault();
+          dropZone.classList.remove("is-dragover");
+          var files = evt.dataTransfer ? evt.dataTransfer.files : null;
+          if (files && files[0]) setFile(files[0]);
+        });
+
+        // "the user should be able to drag, paste or select, just like
+        // when they create a postcard" -- a clipboard image paste
+        // anywhere in the pop-up drops straight onto the front photo.
+        // Bubbles up from whichever field (if any) currently has focus,
+        // so this only ever fires once per paste regardless of where the
+        // cursor is.
+        root.addEventListener("paste", function (evt) {
+          var items = (evt.clipboardData || window.clipboardData || {}).items;
+          if (!items) return;
+          for (var i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.indexOf("image/") === 0) {
+              var file = items[i].getAsFile();
+              if (file) {
+                evt.preventDefault();
+                setFile(file);
+              }
+              break;
+            }
+          }
+        });
+      }
+
+      // "Make it so this is the first thing the creator sees and add a
+      // button that says 'Add your message'. When they click that
+      // button, animate the opening of the card" -- the cover is hinged
+      // on its left edge (see the CSS) so opening it reads as a book/
+      // card cover swinging open rather than a symmetric flip, revealing
+      // the inside spread that was sitting there underneath the whole
+      // time.
+      function wireOpening(root) {
+        var cover = root.querySelector("#gcardCover");
+        var openBtn = root.querySelector("#gcardOpenBtn");
+        var backLink = root.querySelector("#gcardBackLink");
+        var frontFooter = root.querySelector("#gcardFrontFooter");
+        var insideFooter = root.querySelector("#gcardInsideFooter");
+        var toLine = root.querySelector("#gcardToLine");
+
+        function openCard() {
+          if (!cover) return;
+          cover.classList.add("is-open");
+          if (frontFooter) frontFooter.style.display = "none";
+          if (insideFooter) insideFooter.style.display = "flex";
+          window.setTimeout(function () { if (toLine) toLine.focus(); }, 520);
+        }
+        function closeCard() {
+          if (!cover) return;
+          cover.classList.remove("is-open");
+          if (insideFooter) insideFooter.style.display = "none";
+          if (frontFooter) frontFooter.style.display = "flex";
+        }
+        if (openBtn) openBtn.addEventListener("click", openCard);
+        if (backLink) backLink.addEventListener("click", closeCard);
+      }
+
+      // "allow the user to send it and animate the close of the card
+      // with the card being added to an envelope ... animate it going
+      // off to the recipient ... with more of a flourish." Four stages,
+      // each timed to the CSS animation/transition it kicks off: swing
+      // the cover shut (reusing its own open/close transition, 0.5s),
+      // fold the whole scene down flat (0.45s), pop it into the
+      // envelope (0.32s), then toss the envelope off screen with extra
+      // wobble (0.85s) -- before the real, unmodified card.php submit
+      // finally happens. See the postcard/letter handlers' own comments
+      // for why evt.preventDefault() + the later form.submit() (the
+      // plain DOM method) is safe from re-triggering this listener.
+      function wireSend(root) {
+        var form = root.querySelector("#gcardForm");
+        if (!form) return;
+        var coverText = root.querySelector("#gcardCoverMessageText");
+        var toLine = root.querySelector("#gcardToLine");
+        var greetingLine = root.querySelector("#gcardGreetingLine");
+        var message = root.querySelector("#gcardMessage");
+        var closing = root.querySelector("#gcardClosing");
+
+        form.addEventListener("submit", function (evt) {
+          var coverField = root.querySelector("#gcardCoverMessageField");
+          var toField = root.querySelector("#gcardToLineField");
+          var greetField = root.querySelector("#gcardGreetingLineField");
+          var msgField = root.querySelector("#gcardMessageField");
+          var fromField = root.querySelector("#gcardFromLineField");
+          if (coverField) coverField.value = (coverText ? coverText.textContent : "").trim();
+          if (toField) toField.value = (toLine ? toLine.textContent : "").trim();
+          if (greetField) greetField.value = (greetingLine ? greetingLine.textContent : "").trim();
+          if (msgField) msgField.value = message ? (message.innerText || message.textContent || "").trim() : "";
+          if (fromField) fromField.value = (closing ? closing.textContent : "").trim();
+
+          evt.preventDefault();
+          lockOverlayForSend(root);
+          var sendBtn = form.querySelector(".gcard-send-btn");
+          if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
+
+          var cover = root.querySelector("#gcardCover");
+          var scene = root.querySelector("#gcardScene");
+          if (cover) cover.classList.remove("is-open");
+          window.setTimeout(function () {
+            if (scene) scene.classList.add("is-folding");
+            window.setTimeout(function () {
+              if (scene) scene.style.display = "none";
+              root.querySelectorAll("#gcardFrontFooter, #gcardInsideFooter").forEach(function (f) { f.style.display = "none"; });
+              var wrap = root.querySelector("#gcardEnvelopeWrap");
+              var env = root.querySelector("#gcardEnvelope");
+              if (wrap) wrap.style.display = "flex";
+              if (env) env.classList.add("is-popping");
+              window.setTimeout(function () {
+                if (env) env.classList.add("is-flying");
+                window.setTimeout(function () { form.submit(); }, 850);
+              }, 320);
+            }, 450);
+          }, 520);
+        });
+      }
+
+      window.ourthologyOpenCardComposer = function (data) {
+        closeOverlay();
+        document.body.appendChild(tpl.content.cloneNode(true));
+        var overlay = document.getElementById("gcardComposeOverlay");
+        if (!overlay) return;
+        overlay.addEventListener("click", function (evt) {
+          if (overlay.dataset.locked === "1") return;
+          if (evt.target === overlay) closeOverlay();
+        });
+        document.getElementById("gcardComposeClose").addEventListener("click", function () {
+          if (overlay.dataset.locked === "1") return;
+          closeOverlay();
+        });
+        document.addEventListener("keydown", onEscape);
+
+        var recipientField = document.getElementById("gcardRecipientId");
+        if (recipientField) recipientField.value = data.personId || "";
+        var title = document.getElementById("gcardTitle");
+        if (title && data.name) title.textContent = "Send " + data.name + " a card";
+
+        var coverText = document.getElementById("gcardCoverMessageText");
+        if (coverText) coverText.textContent = data.coverDefault || "Happy Birthday!";
+        var toLine = document.getElementById("gcardToLine");
+        if (toLine) toLine.textContent = data.firstName || "";
+        var greetingLine = document.getElementById("gcardGreetingLine");
+        if (greetingLine) greetingLine.textContent = data.greetingDefault || "Happy Birthday";
+        var message = document.getElementById("gcardMessage");
+        var closing = document.getElementById("gcardClosing");
+        if (closing) closing.textContent = myFirstName ? ("lots of love, " + myFirstName) : "";
+
+        [coverText, toLine, greetingLine, closing].forEach(preventEnter);
+        [coverText, toLine, greetingLine, message, closing].forEach(pasteAsPlainText);
+
+        wireImagePicker(overlay);
+        wireOpening(overlay);
+        wireSend(overlay);
+      };
+
+      document.querySelectorAll(".birthday-send-card-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          window.ourthologyOpenCardComposer({
+            personId: btn.getAttribute("data-person-id"),
+            firstName: btn.getAttribute("data-first-name"),
+            name: btn.getAttribute("data-name"),
+            coverDefault: btn.getAttribute("data-cover-default"),
+            greetingDefault: btn.getAttribute("data-greeting-default")
+          });
+        });
+      });
+
+      // tree.php's own per-birthday "Send a card" link can't host this
+      // whole composer itself -- it just navigates here with
+      // ?send_card_to=<id>, and this reopens the same composer for that
+      // same person by reusing whichever banner button already carries
+      // their data, rather than re-fetching anything.
+      var params = new URLSearchParams(window.location.search);
+      var wantId = params.get("send_card_to");
+      if (wantId) {
+        var selector = '.birthday-send-card-btn[data-person-id="' + (window.CSS && CSS.escape ? CSS.escape(wantId) : wantId) + '"]';
+        var matchBtn = document.querySelector(selector);
+        if (matchBtn) matchBtn.click();
+      }
     })();
   </script>
 

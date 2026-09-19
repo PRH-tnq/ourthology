@@ -234,7 +234,7 @@ function ourthology_notify_postcard_received(PDO $pdo, int $recipientPersonId, s
         $stmt->execute(['id' => $recipientPersonId]);
         $recipientUserId = $stmt->fetchColumn();
         if (!$recipientUserId) {
-            return; // shouldn't happen -- only claimed persons can be addressed -- but never assume
+            return; // unclaimed recipient (Phase 66: postcards/letters can now be addressed to anyone living, claimed or not) -- no account, so nowhere to email
         }
         $recipientUserId = (int) $recipientUserId;
 
@@ -362,7 +362,7 @@ function ourthology_notify_letter_received(PDO $pdo, int $recipientPersonId, str
         $stmt->execute(['id' => $recipientPersonId]);
         $recipientUserId = $stmt->fetchColumn();
         if (!$recipientUserId) {
-            return; // shouldn't happen -- only claimed persons can be addressed -- but never assume
+            return; // unclaimed recipient (Phase 66: postcards/letters can now be addressed to anyone living, claimed or not) -- no account, so nowhere to email
         }
         $recipientUserId = (int) $recipientUserId;
 
