@@ -211,7 +211,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-month h3 { font-family:"Fraunces",Georgia,serif; font-size:15px; margin:0 0 8px; display:flex; align-items:center; justify-content:space-between; }
   .cal-month h3 .cal-today-chip { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent); background:var(--error-bg); border-radius:999px; padding:2px 8px; }
   .cal-month-empty { color:var(--ink-faint); font-size:12.5px; margin:0; }
-  .cal-entry { display:flex; align-items:baseline; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .cal-entry { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
   .cal-entry:last-child { border-bottom:none; }
   .cal-entry.is-today { background:var(--error-bg); margin:0 -8px; padding:6px 8px; border-radius:8px; border-bottom-color:transparent; }
   .cal-entry-day { flex:0 0 auto; font-weight:700; color:var(--ink-soft); min-width:22px; text-align:right; }
