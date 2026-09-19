@@ -468,3 +468,88 @@ CREATE TABLE calendar_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_calendar_event_group ON calendar_events(family_group_id);
+
+-- ---------------------------------------------------------------------
+-- Phase 58: peripheral trees + dual identity. Someone connected to a
+-- family ONLY by marriage/partnership (an in-law, at any depth -- see
+-- includes/peripheral.php) can't add their OWN antecedents onto that
+-- master tree, since that would start mixing two separate bloodlines
+-- onto one tree. Instead they're given a brand-new, completely separate
+-- family tree of their own -- a fresh family_group_id, classed exactly
+-- like any other master tree -- and, when the same account can claim
+-- both sides, can switch between the two.
+--
+-- 1) Relax the 1-account : 1-person constraint that used to be enforced
+-- here. persons.claimed_by_user_id was UNIQUE (one account could only
+-- ever claim one person row anywhere in the whole graph); Phase 58 lets
+-- one account claim a SECOND, separate person row -- their own "YOU"
+-- node on a peripheral tree -- while users.person_id (that account's
+-- original/"home" identity) stays UNIQUE and unchanged. A plain,
+-- non-unique index replaces it so the existing FK (fk_persons_claimed_by)
+-- still has the index InnoDB requires on a foreign key column.
+-- ---------------------------------------------------------------------
+ALTER TABLE persons
+  ADD INDEX idx_persons_claimed_by (claimed_by_user_id),
+  DROP INDEX uniq_claimed_user;
+
+-- ---------------------------------------------------------------------
+-- peripheral_tree_links: connects an in-law's node on a master tree to
+-- their own "YOU" node on the peripheral tree created for them. One row
+-- per peripheral tree. master_person_id is the in-law as they still
+-- appear on the ORIGINAL tree (untouched by any of this -- still their
+-- node there even after a peripheral tree exists for them);
+-- peripheral_person_id is the new "YOU" node on the new tree, claimed by
+-- the same user once they've claimed the master side (and left unclaimed,
+-- like any other invited person, until then -- see
+-- ourthology_create_peripheral_tree() in includes/peripheral.php).
+--
+-- UNIQUE on both sides: exactly one peripheral tree per in-law, and a
+-- peripheral tree's "YOU" node belongs to exactly one master link. Access
+-- to the "switch to your other family" icon (tree.php) is decided purely
+-- from persons.claimed_by_user_id on whichever side is being viewed --
+-- this table has no separate creator/owner flag of its own, since the
+-- creator IS whoever ends up claiming master_person_id, whether or not
+-- they're literally who clicked through peripheral_tree.php
+-- (created_by_user_id below is an audit trail only, not an access check).
+-- ---------------------------------------------------------------------
+CREATE TABLE peripheral_tree_links (
+  id                          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  master_family_group_id     INT UNSIGNED NOT NULL,
+  master_person_id           INT UNSIGNED NOT NULL,
+  peripheral_family_group_id INT UNSIGNED NOT NULL,
+  peripheral_person_id       INT UNSIGNED NOT NULL,
+  created_by_user_id         INT UNSIGNED NOT NULL,
+  created_at                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_ptl_master_person (master_person_id),
+  UNIQUE KEY uniq_ptl_peripheral_person (peripheral_person_id),
+  CONSTRAINT fk_ptl_master_person FOREIGN KEY (master_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_ptl_peripheral_person FOREIGN KEY (peripheral_person_id) REFERENCES persons(id),
+  CONSTRAINT fk_ptl_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_ptl_master_group ON peripheral_tree_links(master_family_group_id);
+CREATE INDEX idx_ptl_peripheral_group ON peripheral_tree_links(peripheral_family_group_id);
+
+-- ---------------------------------------------------------------------
+-- timeline_entries.copied_from_entry_id: the on-demand copy facility
+-- offered on tree.php right after a switch ("optionally...make copies of
+-- timeline entries and postcards to the other account"). A saved
+-- postcard/letter already becomes an ordinary timeline_entries row
+-- (origin='postcard'/'letter', Phase 54), so copying timeline_entries
+-- covers both without a separate postcards/letters copy path.
+--
+-- Self-referential and nullable: NULL for every ordinary entry, set only
+-- on a row created BY the copy facility, pointing at the entry it was
+-- copied from -- lets ourthology_copy_facility_state()/
+-- ourthology_copy_pending_entries() (includes/peripheral.php) work out
+-- what's already been copied (in either direction) so the banner only
+-- offers what's still pending, and clicking it twice never duplicates.
+-- Deliberately one-time and text-only (title/body/date/visibility/
+-- origin) -- never re-copies a copy (only entries with this column NULL
+-- are eligible to be copied at all), and never touches photos/videos.
+-- ---------------------------------------------------------------------
+ALTER TABLE timeline_entries
+  ADD COLUMN copied_from_entry_id INT UNSIGNED NULL AFTER origin,
+  ADD CONSTRAINT fk_entry_copied_from FOREIGN KEY (copied_from_entry_id) REFERENCES timeline_entries(id);
+
+CREATE INDEX idx_entries_copied_from ON timeline_entries(copied_from_entry_id);

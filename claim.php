@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/peripheral.php';
 
 ourthology_start_session();
 $pdo = ourthology_pdo();
@@ -93,6 +94,28 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->prepare('UPDATE persons SET claimed_by_user_id = :uid WHERE id = :pid')
                 ->execute(['uid' => $newUserId, 'pid' => $claim['person_id']]);
+
+            // Phase 58: this person might be one half of a peripheral-tree
+            // pair (includes/peripheral.php) -- if so, claiming this side
+            // claims the OTHER side too, in the same transaction, so a
+            // single invite link (always for the in-law's original/master
+            // node -- see peripheral_tree.php) gives access to both
+            // without a second claim step. A no-op for the overwhelming
+            // majority of claims, which have no peripheral_tree_links row
+            // at all.
+            $linkStmt = $pdo->prepare(
+                'SELECT master_person_id, peripheral_person_id FROM peripheral_tree_links
+                 WHERE master_person_id = :pid1 OR peripheral_person_id = :pid2'
+            );
+            $linkStmt->execute(['pid1' => $claim['person_id'], 'pid2' => $claim['person_id']]);
+            $link = $linkStmt->fetch();
+            if ($link) {
+                $counterpartId = (int) $link['master_person_id'] === (int) $claim['person_id']
+                    ? (int) $link['peripheral_person_id']
+                    : (int) $link['master_person_id'];
+                $pdo->prepare('UPDATE persons SET claimed_by_user_id = :uid WHERE id = :pid AND claimed_by_user_id IS NULL')
+                    ->execute(['uid' => $newUserId, 'pid' => $counterpartId]);
+            }
 
             $pdo->prepare('UPDATE claim_tokens SET used_at = NOW() WHERE token = :token')
                 ->execute(['token' => $token]);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -121,6 +122,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $plan = resolve_relationship($relationship, (int) $anchorIdInt, $viaIdInt, $relationKind, $maps, $personsById, $VIA_NEEDED, $secondParentIdInt, $secondParentKind);
         if (!$plan['ok']) {
             $errors[] = $plan['error'];
+        }
+    }
+
+    // Phase 58: does this plan add a brand-new ancestor to someone who's
+    // only in this family tree by partnership (an in-law, at any depth —
+    // see includes/peripheral.php)? That's not allowed on the master
+    // tree — it would start mixing two separate families onto one tree —
+    // so reroute to peripheral_tree.php instead of falling through to the
+    // ordinary insert below. "Attach an existing person" mode is
+    // deliberately excluded from this reroute: attaching an already-
+    // existing person could move a whole subtree of their relatives
+    // across at once, a much bigger and riskier operation than this
+    // feature is meant to cover, so it's declined outright instead.
+    if (!$errors && $plan !== null && $plan['ok']) {
+        $antecedentTarget = ourthology_antecedent_target($plan);
+        if ($antecedentTarget !== null && ourthology_is_in_law_only($pdo, $antecedentTarget)) {
+            if ($existingPersonId !== null) {
+                $errors[] = "That would connect two separate parts of the family together, which this page can't do for an existing person — add the relationship the other way around instead.";
+            } else {
+                $edgeKind = 'genetic';
+                foreach ($plan['edges'] as $e) {
+                    if ($e['parent'] === 'NEW' && (int) $e['child'] === $antecedentTarget) {
+                        $edgeKind = $e['kind'];
+                        break;
+                    }
+                }
+                $_SESSION['pending_peripheral'] = [
+                    'in_law_person_id' => $antecedentTarget,
+                    'new_first'         => $first,
+                    'new_middle'        => $middle,
+                    'new_surname'       => $surname,
+                    'edge_kind'         => $edgeKind,
+                    'created_at'        => time(),
+                ];
+                header('Location: /peripheral_tree.php');
+                exit;
+            }
         }
     }
 

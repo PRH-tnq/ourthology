@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/tree_layout.php';
+require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -46,6 +47,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_l
 $flashLink = $_SESSION['flash_claim_link'] ?? null;
 $flashFor  = $_SESSION['flash_claim_for'] ?? null;
 unset($_SESSION['flash_claim_link'], $_SESSION['flash_claim_for']);
+
+$flashPeripheral = $_SESSION['flash_peripheral_message'] ?? null;
+unset($_SESSION['flash_peripheral_message']);
+
+// Phase 58: peripheral-tree switch icons. $switchIconFor maps a person on
+// THIS tree to the peripheral person id switching to them lands on ("switch
+// to your other family", shown beside an in-law who's had a peripheral
+// tree created for them); $returnToMasterPersonId, when set, means THIS
+// tree IS a peripheral one and names the master person id "return to the
+// original tree" switches back to (shown beside this tree's own "You"
+// node). Visible to every viewer either way (Phase 58 Q3) -- only usable
+// by whoever actually owns that identity, decided per-node below from
+// claimed_by_user_id, exactly like edit_person.php's own $isEditable.
+$switchIconFor = [];
+$returnToMasterPersonId = null;
+$peripheralLinksStmt = $pdo->prepare(
+    'SELECT master_person_id, peripheral_person_id, master_family_group_id, peripheral_family_group_id
+     FROM peripheral_tree_links
+     WHERE master_family_group_id = :gid1 OR peripheral_family_group_id = :gid2'
+);
+$peripheralLinksStmt->execute(['gid1' => $myGroup, 'gid2' => $myGroup]);
+foreach ($peripheralLinksStmt->fetchAll() as $link) {
+    if ((int) $link['master_family_group_id'] === $myGroup) {
+        $switchIconFor[(int) $link['master_person_id']] = (int) $link['peripheral_person_id'];
+    }
+    if ((int) $link['peripheral_family_group_id'] === $myGroup) {
+        $returnToMasterPersonId = (int) $link['master_person_id'];
+    }
+}
+
+// Phase 58: "optionally...make copies of timeline entries and postcards
+// to the other account" -- a non-naggy banner, only shown when this
+// identity is actually one half of a peripheral-tree pair AND there's
+// really something pending in at least one direction (see
+// ourthology_copy_facility_state() in includes/peripheral.php).
+$copyState = ourthology_copy_facility_state($pdo, $myPersonId);
+if ($copyState !== null && $copyState['pending_to_other'] === 0 && $copyState['pending_from_other'] === 0) {
+    $copyState = null;
+}
 
 $pendingCounts = fetch_pending_for_user($pdo, (int) $me['user_id']);
 $pendingCount = count($pendingCounts['relationships']) + count($pendingCounts['partnerships']);
@@ -246,6 +286,18 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   .tn-edit-bg { fill:var(--card, #fff); stroke:var(--accent); stroke-width:1.5; }
   .tn-edit-icon { fill:none; stroke:var(--accent); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
 
+  /* Phase 58: peripheral-tree switch icons -- always visible to every
+     viewer (so it's clear a family member has another tree), but only
+     clickable (cursor + hover glow + JS handler below) for whoever
+     actually owns that identity; everyone else sees the same icon as a
+     plain, inert badge. */
+  .tn-switch-affordance[data-switch-target] { cursor:pointer; }
+  .tn-switch-bg { fill:var(--card, #fff); stroke:var(--unclaimed); stroke-width:1.5; }
+  .tn-switch-icon { fill:none; stroke:var(--unclaimed); stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+  .tn-switch-affordance[data-switch-target] .tn-switch-bg { stroke:var(--accent); }
+  .tn-switch-affordance[data-switch-target] .tn-switch-icon { stroke:var(--accent); }
+  .tn-switch-affordance[data-switch-target]:hover .tn-switch-bg { fill:var(--paper-2); }
+
   .tree-legend { margin-top:10px; }
   .tree-key { font-family:"Newsreader",Georgia,serif; font-size:12.5px; color:var(--ink-soft); margin:0; }
   .tree-key strong { color:var(--ink); }
@@ -338,6 +390,41 @@ $hasAnyStepTag = !empty($stepTagsByChild);
         <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
       </div>
     </div>
+
+    <?php if ($flashPeripheral): ?>
+      <div class="flash" style="background:var(--paper-2);"><?= htmlspecialchars($flashPeripheral, ENT_QUOTES) ?></div>
+    <?php endif; ?>
+
+    <?php if ($returnToMasterPersonId !== null): ?>
+      <p style="margin:0 0 4px;font-size:13px;color:var(--ink-faint);">
+        You're viewing a peripheral family tree.
+        <form method="post" action="/switch_person.php" style="display:inline;">
+          <?= csrf_field() ?>
+          <input type="hidden" name="target_person_id" value="<?= $returnToMasterPersonId ?>">
+          <button type="submit" class="linklet">Return to the original tree</button>
+        </form>
+      </p>
+    <?php endif; ?>
+
+    <?php if ($copyState !== null): ?>
+      <div class="flash" style="background:var(--paper-2);display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;">
+        <span>Want copies of your memories shared with <strong><?= htmlspecialchars($copyState['counterpart_name'], ENT_QUOTES) ?></strong>'s tree?</span>
+        <?php if ($copyState['pending_to_other'] > 0): ?>
+          <form method="post" action="/peripheral_copy.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="direction" value="to_other">
+            <button type="submit" class="linklet">Copy <?= (int) $copyState['pending_to_other'] ?> of yours to their tree</button>
+          </form>
+        <?php endif; ?>
+        <?php if ($copyState['pending_from_other'] > 0): ?>
+          <form method="post" action="/peripheral_copy.php" style="display:inline;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="direction" value="from_other">
+            <button type="submit" class="linklet">Copy <?= (int) $copyState['pending_from_other'] ?> of theirs to here</button>
+          </form>
+        <?php endif; ?>
+      </div>
+    <?php endif; ?>
 
     <?php if ($flashLink): ?>
       <?php
@@ -601,6 +688,25 @@ $hasAnyStepTag = !empty($stepTagsByChild);
                     <path class="tn-edit-icon" d="M-3.4,3.4 L-1,4 L-0.4,1.6 L3.2,-2 L1.4,-3.8 L-2.2,-0.2 Z M2,-4.6 L4.6,-2"></path>
                   </g>
                 <?php endif; ?>
+                <?php if (isset($switchIconFor[$pid])): ?>
+                  <?php
+                    // Phase 58: "switch to your other family" -- shown
+                    // beside anyone on this tree who's had a peripheral
+                    // tree created for them, visible to every viewer but
+                    // only clickable (data-switch-target present) for
+                    // whoever actually owns that identity -- see the JS
+                    // handler below and switch_person.php itself, which
+                    // re-checks this exact ownership independently anyway.
+                    $switchCx = -$hitW / 2 + 11;
+                    $switchCy = -$hitH / 2 + 11;
+                    $canSwitch = !empty($person['claimed_by_user_id']) && (int) $person['claimed_by_user_id'] === (int) $me['user_id'];
+                  ?>
+                  <g class="tn-switch-affordance" <?= $canSwitch ? 'data-switch-target="' . (int) $switchIconFor[$pid] . '"' : '' ?> transform="translate(<?= $switchCx ?>, <?= $switchCy ?>)" aria-label="Switch to their other family tree">
+                    <title><?= $canSwitch ? 'Switch to your other family tree' : htmlspecialchars(person_display_name($person), ENT_QUOTES) . ' has another family tree' ?></title>
+                    <circle class="tn-switch-bg" r="10"></circle>
+                    <path class="tn-switch-icon" d="M-4,-1.5 H3 M0.5,-4 L3,-1.5 L0.5,1 M4,1.5 H-3 M-0.5,4 L-3,1.5 L-0.5,-1"></path>
+                  </g>
+                <?php endif; ?>
               </g>
             </a>
           <?php endforeach; ?>
@@ -613,6 +719,9 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           &nbsp;·&nbsp; <span class="tree-swatch tree-swatch-unclaimed"></span>Not yet claimed
           <?php if ($hasAnyStepTag): ?>
             &nbsp;·&nbsp; <strong>S-</strong> + initials = a step relationship, tagged with that step-parent's own initials
+          <?php endif; ?>
+          <?php if ($switchIconFor): ?>
+            &nbsp;·&nbsp; <span class="tree-swatch" style="border-radius:50%;border:1.5px solid var(--accent);background:#fff;width:13px;height:13px;"></span>has another family tree of their own
           <?php endif; ?>
           <br>Scroll or drag if the tree is wider than the screen.
         </p>
@@ -651,6 +760,16 @@ $hasAnyStepTag = !empty($stepTagsByChild);
       </div>
     <?php endif; ?>
   </div>
+
+  <!-- Phase 58: shared hidden form the switch-icon click handler below
+       submits to -- one form reused for every node's icon, rather than
+       one per node, mirroring how the edit pop-up is one shared overlay
+       rather than one per node. -->
+  <form method="post" action="/switch_person.php" id="switchPersonForm" style="display:none;">
+    <?= csrf_field() ?>
+    <input type="hidden" name="target_person_id" id="switchPersonTarget" value="">
+  </form>
+
   <script>
     // Click-and-drag (and touch-drag) panning on empty tree-diagram space.
     // Pointer Events cover mouse and touch in one set of handlers. A drag
@@ -789,6 +908,19 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           evt.preventDefault();
           evt.stopPropagation();
           openEditPopup(icon.dataset.personId);
+        });
+      });
+
+      // Phase 58: the "switch to your other family" icon -- only the
+      // ones the server actually gave a data-switch-target (i.e. this
+      // viewer owns that identity) do anything; the plain badge shown to
+      // everyone else has no target attribute and so gets no handler.
+      document.querySelectorAll('.tn-switch-affordance[data-switch-target]').forEach(function (icon) {
+        icon.addEventListener('click', function (evt) {
+          evt.preventDefault();
+          evt.stopPropagation();
+          document.getElementById('switchPersonTarget').value = icon.dataset.switchTarget;
+          document.getElementById('switchPersonForm').submit();
         });
       });
 
