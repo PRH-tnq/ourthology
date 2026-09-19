@@ -148,6 +148,37 @@ $outgoingLetters = fetch_outgoing_letters_for_person($pdo, $myPersonId);
 $incomingCount = count($pending['relationships']) + count($pending['partnerships']) + count($pendingTags) + count($pendingPostcards) + count($pendingLetters);
 $outgoingCount = count($outgoing['relationships']) + count($outgoing['partnerships']) + count($outgoingTags) + count($outgoingPostcards) + count($outgoingLetters);
 
+// Phase 65: "record a list of postcards and letters a user has sent,
+// recording when and to who" -- a permanent, chronological history, newest
+// first, regardless of whether the recipient has acted on it yet (unlike
+// $outgoingPostcards/$outgoingLetters above, which only cover the still-
+// unresolved ones under "waiting on them"). Shown in this page's new
+// right-hand column. Each of the two fetches is already capped and sorted
+// on its own; merging two already-sorted lists here rather than one SQL
+// UNION keeps fetch_sent_postcards_for_person()/fetch_sent_letters_for_
+// person() simple and independently reusable, and 120 rows tops is not
+// worth a fancier merge than usort().
+$sentPostcards = fetch_sent_postcards_for_person($pdo, $myPersonId);
+$sentLetters = fetch_sent_letters_for_person($pdo, $myPersonId);
+$sentHistory = [];
+foreach ($sentPostcards as $pc) {
+    $sentHistory[] = [
+        'type'      => 'postcard',
+        'sent_at'   => $pc['sent_at'],
+        'recipient' => person_display_name(['first_name' => $pc['recipient_first'], 'surname' => $pc['recipient_surname']]),
+    ];
+}
+foreach ($sentLetters as $lt) {
+    $sentHistory[] = [
+        'type'      => 'letter',
+        'sent_at'   => $lt['sent_at'],
+        'recipient' => person_display_name(['first_name' => $lt['recipient_first'], 'surname' => $lt['recipient_surname']]),
+    ];
+}
+usort($sentHistory, fn(array $a, array $b): int => strcmp($b['sent_at'], $a['sent_at']));
+$sentHistoryTotal = count_sent_postcards_for_person($pdo, $myPersonId) + count_sent_letters_for_person($pdo, $myPersonId);
+$sentHistoryShown = array_slice($sentHistory, 0, 40);
+
 $openPostcard = $openPostcardRowId !== null
     ? fetch_postcard_recipient_row($pdo, (int) $openPostcardRowId, $myPersonId)
     : null;
@@ -246,6 +277,38 @@ function ourthology_pending_memory_preview_html(array $row): string
   .btn-small.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); margin:0; }
   h3.section-title { margin:24px 0 4px; font-size:15px; }
   h3.section-title:first-of-type { margin-top:16px; }
+
+  /* ---------- Phase 65: the pending card, widened into two columns ----------
+     .pending-card replaces the inline max-width:480px this page (and every
+     other page built on the shared .card) used to hardcode -- it needs its
+     own, wider max-width now that there's a second column, plus a
+     responsive fallback below for anything too narrow to hold both side by
+     side. .pending-col-left keeps every existing section (Waiting on you /
+     Sent by you, waiting on them) exactly as it laid out before; only the
+     new .pending-col-right is new markup. */
+  .pending-card { max-width:920px; }
+  .pending-layout { display:flex; align-items:flex-start; gap:28px; margin-top:4px; }
+  .pending-col-left { flex:1 1 480px; min-width:0; }
+  .pending-col-right { flex:1 1 320px; min-width:0; max-width:340px; border-left:1px solid var(--line); padding-left:28px; }
+  @media (max-width: 820px) {
+    .pending-card { max-width:480px; }
+    .pending-layout { flex-direction:column; gap:0; }
+    .pending-col-right { max-width:none; border-left:none; padding-left:0; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
+  }
+
+  /* The sent-history list itself: compact rows rather than full .req-card
+     boxes (there can be dozens of these, and each one is just a date, a
+     type, and a name -- a full bordered card per row would be a lot of
+     visual weight for that little information). Scrolls internally past a
+     tall-ish cap instead of pushing the whole page taller for a prolific
+     sender. */
+  .sent-history-list { list-style:none; margin:10px 0 0; padding:0; max-height:640px; overflow-y:auto; }
+  .sent-history-row { padding:8px 2px; border-bottom:1px solid var(--line); font-size:13.5px; }
+  .sent-history-row:last-child { border-bottom:none; }
+  .sent-history-what { color:var(--ink); }
+  .sent-history-date { display:block; font-size:11.5px; color:var(--ink-faint); margin-top:1px; }
+  .sent-history-empty { color:var(--ink-faint); font-size:14px; margin:4px 0 0; }
+  .sent-history-more { color:var(--ink-faint); font-size:12px; margin:10px 0 0; }
 
   /* Phase 48: same postcard flip-card, byte-for-byte, as timeline.php's
      compose pop-up -- this page only ever shows it read-only (the
@@ -367,7 +430,7 @@ function ourthology_pending_memory_preview_html(array $row): string
 </style>
 </head>
 <body>
-  <div class="card" style="max-width:480px;">
+  <div class="card pending-card">
     <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
       <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
         <circle cx="16" cy="16" r="15" fill="#9A2A2A"/>
@@ -389,6 +452,8 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="error"><?php foreach ($errors as $e): ?><div><?= htmlspecialchars($e, ENT_QUOTES) ?></div><?php endforeach; ?></div>
     <?php endif; ?>
 
+    <div class="pending-layout">
+    <div class="pending-col-left">
     <h3 class="section-title" id="waiting-on-you">Waiting on you (<?= $incomingCount ?>)</h3>
     <?php if (!$incomingCount): ?>
       <p style="color:var(--ink-faint);font-size:14px;margin:4px 0 0;">Nothing needs your approval right now.</p>
@@ -573,6 +638,27 @@ function ourthology_pending_memory_preview_html(array $row): string
         </p>
       </div>
     <?php endforeach; ?>
+    </div>
+
+    <div class="pending-col-right">
+      <h3 class="section-title" style="margin-top:0;">Postcards &amp; letters you've sent (<?= $sentHistoryTotal ?>)</h3>
+      <?php if (!$sentHistoryShown): ?>
+        <p class="sent-history-empty">Nothing sent yet — postcards and letters you send will show up here, with when and who to.</p>
+      <?php else: ?>
+        <ul class="sent-history-list">
+          <?php foreach ($sentHistoryShown as $h): ?>
+            <li class="sent-history-row">
+              <span class="sent-history-what"><?= $h['type'] === 'postcard' ? 'Postcard' : 'Letter' ?> to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
+              <span class="sent-history-date"><?= htmlspecialchars(date('d M Y', strtotime($h['sent_at'])), ENT_QUOTES) ?></span>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+        <?php if ($sentHistoryTotal > count($sentHistoryShown)): ?>
+          <p class="sent-history-more">and <?= $sentHistoryTotal - count($sentHistoryShown) ?> earlier one<?= ($sentHistoryTotal - count($sentHistoryShown)) === 1 ? '' : 's' ?>.</p>
+        <?php endif; ?>
+      <?php endif; ?>
+    </div>
+    </div>
 
     <p class="foot-link"><a href="/tree.php">Back to my tree</a></p>
   </div>

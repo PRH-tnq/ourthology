@@ -331,6 +331,37 @@ function fetch_outgoing_letters_for_person(PDO $pdo, int $senderPersonId): array
     return $stmt->fetchAll();
 }
 
+/**
+ * Phase 65: the permanent sent history counterpart to
+ * fetch_sent_postcards_for_person() in includes/postcards.php -- every
+ * letter $senderPersonId has ever sent, regardless of status, newest
+ * first, capped at $limit. See that function's own doc comment for why.
+ */
+function fetch_sent_letters_for_person(PDO $pdo, int $senderPersonId, int $limit = 60): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT l.id AS letter_id, l.status, l.created_at AS sent_at,
+                rp.first_name AS recipient_first, rp.surname AS recipient_surname
+         FROM letters l
+         JOIN persons rp ON rp.id = l.recipient_person_id
+         WHERE l.sender_person_id = :pid
+         ORDER BY l.created_at DESC
+         LIMIT :lim"
+    );
+    $stmt->bindValue('pid', $senderPersonId, PDO::PARAM_INT);
+    $stmt->bindValue('lim', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+/** The true count behind fetch_sent_letters_for_person() above, unaffected by its $limit -- so a capped list can still say "and N more". */
+function count_sent_letters_for_person(PDO $pdo, int $senderPersonId): int
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM letters WHERE sender_person_id = :pid');
+    $stmt->execute(['pid' => $senderPersonId]);
+    return (int) $stmt->fetchColumn();
+}
+
 /** One letter, but ONLY if it's addressed to $recipientPersonId -- the ownership check IS the query, same defensive pattern fetch_postcard_recipient_row() uses. Null if it doesn't exist or isn't theirs. */
 function fetch_letter_for_recipient(PDO $pdo, int $letterId, int $recipientPersonId): ?array
 {

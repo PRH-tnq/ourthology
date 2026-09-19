@@ -221,6 +221,45 @@ function fetch_outgoing_postcards_for_person(PDO $pdo, int $senderPersonId): arr
     return $stmt->fetchAll();
 }
 
+/**
+ * Phase 65: "record a list of postcards and letters a user has sent" --
+ * unlike fetch_outgoing_postcards_for_person() above (which only shows
+ * still-pending ones, for "waiting on them"), this is the permanent sent
+ * history: every postcard $senderPersonId has ever sent, one row per
+ * recipient regardless of status, newest first. Capped at $limit so
+ * pending.php's new "Sent" column can't grow without bound for a prolific
+ * sender -- see count_sent_postcards_for_person() below for the true total
+ * to show alongside a capped list.
+ */
+function fetch_sent_postcards_for_person(PDO $pdo, int $senderPersonId, int $limit = 60): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT pr.id AS recipient_row_id, pr.status, pr.created_at AS sent_at,
+                pc.id AS postcard_id,
+                rp.first_name AS recipient_first, rp.surname AS recipient_surname
+         FROM postcard_recipients pr
+         JOIN postcards pc ON pc.id = pr.postcard_id
+         JOIN persons rp ON rp.id = pr.recipient_person_id
+         WHERE pc.sender_person_id = :pid
+         ORDER BY pr.created_at DESC
+         LIMIT :lim"
+    );
+    $stmt->bindValue('pid', $senderPersonId, PDO::PARAM_INT);
+    $stmt->bindValue('lim', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+/** The true count behind fetch_sent_postcards_for_person() above, unaffected by its $limit -- so a capped list can still say "and N more". */
+function count_sent_postcards_for_person(PDO $pdo, int $senderPersonId): int
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM postcard_recipients pr JOIN postcards pc ON pc.id = pr.postcard_id WHERE pc.sender_person_id = :pid'
+    );
+    $stmt->execute(['pid' => $senderPersonId]);
+    return (int) $stmt->fetchColumn();
+}
+
 /** Marks a still-pending postcard 'read' (no-op if it's already past that). */
 function mark_postcard_read(PDO $pdo, int $recipientRowId): void
 {

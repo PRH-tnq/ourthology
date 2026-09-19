@@ -287,9 +287,9 @@ function ourthology_tour_steps(): array
             'page' => 'tree',
             'target' => '#unclaimedSection',
             'title' => 'Inviting them properly',
-            'body' => "Every person you add gets their own profile. Look for them in this list for an \"Invite this person\" button to send them, so they can claim it themselves. Until then you can keep editing it and adding memories — a lovely way to build up a departed relative's timeline as you find old photos.",
+            'body' => "Every person you add gets their own profile. This list is still part of your tree page — just scroll down past the tree diagram and its legend, and you'll find it underneath. Look for an \"Invite this person\" button next to their name to send them a link, so they can claim it themselves. Until then you can keep editing it and adding memories — a lovely way to build up a departed relative's timeline as you find old photos.",
             'arrows' => [
-                ['type' => 'point', 'text' => 'new people show up here', 'ax' => 0.5, 'ay' => 0, 'ldx' => 0, 'ldy' => -40],
+                ['type' => 'point', 'text' => 'same page, just below your tree', 'ax' => 0.5, 'ay' => 0, 'ldx' => 0, 'ldy' => -40],
             ],
         ],
         [
@@ -340,9 +340,9 @@ function ourthology_tour_steps(): array
         // ---------------------------------------------------------------- tree
         [
             'page' => 'tree',
-            'target' => null,
+            'target' => '#tourEditMe',
             'title' => 'One last thing — your profile',
-            'body' => "Every profile — yours included — has its own settings for editing details, adding a photo, and how memories reach you. Let's take a quick look at yours.",
+            'body' => "Every profile — yours included — has its own settings for editing details, adding a photo, and how memories reach you. This \"Edit me\" button always jumps straight to yours, without hunting for yourself in the tree first. Let's take a quick look.",
         ],
 
         // ------------------------------------------------------- edit_person
