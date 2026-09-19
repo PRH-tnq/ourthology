@@ -291,9 +291,17 @@ function discard_postcard(PDO $pdo, int $recipientRowId): void
  * real received_at once it's actually been sent) since date formatting
  * isn't this function's job.
  *
- * The white perforated border is a <mask> with a static ring of holes
- * punched around the stamp's fixed-size rect -- there's nothing
- * per-postcard about the perforation itself, only the postmark rotates.
+ * Phase 59: redesigned to lean into the UK theme -- a full Union Jack
+ * fills the stamp body (clipped to its rect), the wordmark and "UNITED
+ * KINGDOM" sit on solid crimson bands top and bottom, and the quill logo
+ * is centred in a plain crimson medallion in the middle. The stamp's
+ * outer edge is a pinked/zigzag border (a single hand-drawn <path>, white
+ * fill with a thin black outline) replacing the old round-hole
+ * perforation mask -- there's nothing per-postcard about the border
+ * itself, only the postmark rotates. The postmark now carries two arced
+ * texts around its rim, "OURTHOLOGY P.O." over the top and "YOU'RE
+ * WELCOME" under the bottom, each on its own semicircular <path> so they
+ * both read right-side up.
  */
 function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
 {
@@ -302,72 +310,26 @@ function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
     return <<<SVG
         <svg viewBox="-2 -6 118 84" aria-hidden="true">
           <defs>
-            <path id="pmArc" d="M 53 36 A 25 25 0 0 1 103 36"/>
-            <mask id="stampPerf" maskUnits="userSpaceOnUse" x="0" y="0" width="60" height="72">
-              <rect x="0" y="0" width="60" height="72" fill="white"/>
-              <circle cx="2.00" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="7.40" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="12.80" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="18.20" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="23.60" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="29.00" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="34.40" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="39.80" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="45.20" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="50.60" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="7.40" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="12.80" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="18.20" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="23.60" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="29.00" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="34.40" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="39.80" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="45.20" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="50.60" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="8.33" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="13.67" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="19.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="24.33" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="29.67" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="35.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="40.33" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="45.67" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="51.00" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="56.33" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="61.67" r="2.1" fill="black"/>
-              <circle cx="2.00" cy="67.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="3.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="8.33" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="13.67" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="19.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="24.33" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="29.67" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="35.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="40.33" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="45.67" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="51.00" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="56.33" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="61.67" r="2.1" fill="black"/>
-              <circle cx="56.00" cy="67.00" r="2.1" fill="black"/>
-            </mask>
-            <radialGradient id="stampGlow" cx="50%" cy="42%" r="55%">
-              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.32"/>
-              <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-            </radialGradient>
-            <clipPath id="ukFlagClip"><rect x="0" y="0" width="60" height="36"/></clipPath>
+            <path id="pmArcTop" d="M 53 36 A 25 25 0 0 1 103 36"/>
+            <path id="pmArcBottom" d="M 53 36 A 25 25 0 0 0 103 36"/>
+            <clipPath id="stampBody"><rect x="6.5" y="7.5" width="45" height="55"/></clipPath>
           </defs>
 
-          <rect x="2" y="3" width="54" height="64" rx="1" fill="#FBF8F1" mask="url(#stampPerf)"/>
-          <rect x="6.5" y="7.5" width="45" height="55" fill="#9A2A2A"/>
-          <circle cx="29" cy="33" r="18" fill="url(#stampGlow)"/>
+          <path d="M 2.0,3.0 L 5.86,4.6 L 9.71,3.0 L 13.57,4.6 L 17.43,3.0 L 21.29,4.6 L 25.14,3.0 L 29.0,4.6 L 32.86,3.0 L 36.71,4.6 L 40.57,3.0 L 44.43,4.6 L 48.29,3.0 L 52.14,4.6 L 56.0,3.0 L 54.4,7.0 L 56.0,11.0 L 54.4,15.0 L 56.0,19.0 L 54.4,23.0 L 56.0,27.0 L 54.4,31.0 L 56.0,35.0 L 54.4,39.0 L 56.0,43.0 L 54.4,47.0 L 56.0,51.0 L 54.4,55.0 L 56.0,59.0 L 54.4,63.0 L 56.0,67.0 L 52.14,65.4 L 48.29,67.0 L 44.43,65.4 L 40.57,67.0 L 36.71,65.4 L 32.86,67.0 L 29.0,65.4 L 25.14,67.0 L 21.29,65.4 L 17.43,67.0 L 13.57,65.4 L 9.71,67.0 L 5.86,65.4 L 2.0,67.0 L 3.6,63.0 L 2.0,59.0 L 3.6,55.0 L 2.0,51.0 L 3.6,47.0 L 2.0,43.0 L 3.6,39.0 L 2.0,35.0 L 3.6,31.0 L 2.0,27.0 L 3.6,23.0 L 2.0,19.0 L 3.6,15.0 L 2.0,11.0 L 3.6,7.0 Z" fill="#FBF8F1" stroke="#1a1a1a" stroke-width="0.35" stroke-linejoin="round"/>
 
-          <text x="29" y="14" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="4.2" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
+          <g clip-path="url(#stampBody)">
+            <rect x="6.5" y="7.5" width="45" height="55" fill="#00247d"/>
+            <path d="M6.5,7.5 L51.5,62.5 M51.5,7.5 L6.5,62.5" stroke="#fff" stroke-width="8"/>
+            <path d="M6.5,7.5 L51.5,62.5 M51.5,7.5 L6.5,62.5" stroke="#cf142b" stroke-width="3.6"/>
+            <path d="M29,7.5 V62.5 M6.5,35 H51.5" stroke="#fff" stroke-width="13"/>
+            <path d="M29,7.5 V62.5 M6.5,35 H51.5" stroke="#cf142b" stroke-width="7.4"/>
+          </g>
 
-          <g transform="translate(9.5,14) scale(1.22)">
+          <rect x="9" y="9.5" width="39" height="8.5" rx="1" fill="#9A2A2A" opacity="0.92"/>
+          <text x="29" y="15.3" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="4" fill="#FBF8F1" letter-spacing="0.3">OURTHOLOGY</text>
+
+          <circle cx="29" cy="36" r="11.5" fill="#9A2A2A" stroke="#FBF8F1" stroke-width="1"/>
+          <g transform="translate(13.8,20) scale(0.95)">
             <path d="M16 7 C10 8 6.3 12.6 7.4 17.2 C11.2 16.5 14.7 12.6 16 7 Z" fill="#FBF8F1"/>
             <path d="M16 7 C22 8 25.7 12.6 24.6 17.2 C20.8 16.5 17.3 12.6 16 7 Z" fill="#FBF8F1"/>
             <line x1="16" y1="7.2" x2="16" y2="17" stroke="#9A2A2A" stroke-width="1.1" stroke-linecap="round"/>
@@ -376,24 +338,17 @@ function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
             <line x1="16" y1="23.2" x2="19.4" y2="26.6" stroke="#FBF8F1" stroke-width="1.8" stroke-linecap="round"/>
           </g>
 
-          <text x="29" y="59.5" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="3.6" fill="#FBF8F1" letter-spacing="0.15">UNITED KINGDOM</text>
-
-          <g transform="translate(9,46.5)">
-            <g clip-path="url(#ukFlagClip)" transform="scale(0.25)">
-              <rect width="60" height="36" fill="#00247d"/>
-              <path d="M0,0 L60,36 M60,0 L0,36" stroke="#fff" stroke-width="9"/>
-              <path d="M0,0 L60,36 M60,0 L0,36" stroke="#cf142b" stroke-width="4"/>
-              <path d="M30,0 V36 M0,18 H60" stroke="#fff" stroke-width="14"/>
-              <path d="M30,0 V36 M0,18 H60" stroke="#cf142b" stroke-width="8"/>
-            </g>
-            <rect x="0.3" y="0.3" width="14.4" height="8.4" fill="none" stroke="#FBF8F1" stroke-width="0.5"/>
-          </g>
+          <rect x="7.5" y="54.5" width="43" height="7.5" rx="1" fill="#9A2A2A" opacity="0.92"/>
+          <text x="29" y="59.7" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="3.6" fill="#FBF8F1" letter-spacing="0.15">UNITED KINGDOM</text>
 
           <g opacity="0.78" transform="rotate({$angle} 78 36)">
             <circle cx="78" cy="36" r="25" fill="none" stroke="#29456e" stroke-width="1.6"/>
             <circle cx="78" cy="36" r="19" fill="none" stroke="#29456e" stroke-width="1"/>
             <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
-              <textPath href="#pmArc" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
+              <textPath href="#pmArcTop" startOffset="50%" text-anchor="middle">OURTHOLOGY P.O.</textPath>
+            </text>
+            <text font-family="Georgia, 'Times New Roman', serif" font-size="5.2" fill="#29456e" letter-spacing="0.3">
+              <textPath href="#pmArcBottom" startOffset="50%" text-anchor="middle">YOU'RE WELCOME</textPath>
             </text>
             <text x="78" y="39" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="6.2" fill="#29456e" letter-spacing="0.4">{$date}</text>
             <line x1="78" y1="7" x2="78" y2="1" stroke="#29456e" stroke-width="1.2" stroke-linecap="round"/>
@@ -402,4 +357,17 @@ function ourthology_postcard_stamp_svg(int $angleDeg, string $dateLabel): string
           </g>
         </svg>
         SVG;
+}
+
+/**
+ * Phase 59: letters have no stored postmark_angle column the way
+ * postcards do (see postcards.php's INSERT above) -- there's no per-
+ * letter row to persist a cosmetic tilt into, so this derives a small,
+ * stable one from the letter's own id instead. Deterministic (the same
+ * letter always tilts the same way, on every page load, in every place
+ * its envelope is shown) and needs no migration.
+ */
+function ourthology_letter_postmark_angle(int $letterId): int
+{
+    return ($letterId * 47) % 33 - 16;
 }

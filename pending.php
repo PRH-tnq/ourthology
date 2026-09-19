@@ -336,7 +336,13 @@ function ourthology_pending_memory_preview_html(array $row): string
   .envelope-row-flap { position:absolute; top:0; left:0; width:100%; height:58%; background:linear-gradient(135deg,#ede1c9,#ddcba3); clip-path:polygon(0 0,100% 0,50% 100%); box-shadow:0 1px 3px rgba(0,0,0,.15); }
   .envelope-row-return { position:absolute; top:9px; left:11px; font-family:'Caveat',cursive; font-size:13.5px; color:#6b5a3a; line-height:1.15; max-width:52%; z-index:2; }
   .envelope-row-return b { display:block; font-size:9px; text-transform:uppercase; letter-spacing:.04em; font-family:Georgia,serif; color:#8a7750; font-weight:600; }
-  .envelope-row-stamp { position:absolute; top:8px; right:10px; width:26px; height:20px; background:#fff; border:1px solid #c9b998; border-radius:2px; z-index:2; }
+  /* Phase 59: the real UK stamp + postmark graphic (see
+     ourthology_postcard_stamp_svg() in includes/postcards.php), scaled
+     down to fit this corner -- was a plain placeholder rectangle.
+     Phase 61: doubled from 32px to 64px per Phil's ask -- legible now
+     rather than just a colour blob in the corner. */
+  .envelope-row-stamp { position:absolute; top:8px; right:10px; width:64px; z-index:2; }
+  .envelope-row-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
   .envelope-row-addressee { position:absolute; left:0; right:0; bottom:22px; text-align:center; font-family:'Caveat',cursive; font-size:24px; color:#3a3226; z-index:2; }
   .envelope-row-sub { position:absolute; left:0; right:0; bottom:8px; text-align:center; font-size:10px; color:#8a7750; letter-spacing:.02em; z-index:2; }
 
@@ -476,7 +482,7 @@ function ourthology_pending_memory_preview_html(array $row): string
           <button type="submit" class="envelope-row" aria-label="Open letter from <?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?>">
             <span class="envelope-row-flap" aria-hidden="true"></span>
             <span class="envelope-row-return" aria-hidden="true"><b>From</b><?= htmlspecialchars(person_display_name(['first_name' => $lt['sender_first'], 'surname' => $lt['sender_surname']]), ENT_QUOTES) ?></span>
-            <span class="envelope-row-stamp" aria-hidden="true"></span>
+            <span class="envelope-row-stamp" aria-hidden="true"><?= ourthology_postcard_stamp_svg(ourthology_letter_postmark_angle((int) $lt['letter_id']), date('d M Y', strtotime($lt['received_at']))) ?></span>
             <span class="envelope-row-addressee"><?= htmlspecialchars((string) $me['first_name'], ENT_QUOTES) ?></span>
             <span class="envelope-row-sub"><?= $lt['status'] === 'read' ? 'Already opened — tap to reopen' : 'A letter for you — tap to open' ?></span>
           </button>

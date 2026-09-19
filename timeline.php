@@ -627,6 +627,50 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .letter-footer label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-soft); }
   .letter-send-btn { width:auto; margin:0; padding:9px 20px; }
 
+  /* Phase 61: "when a user hits the send letter button, do an animation
+     that folds the page up and puts it into the envelope, and then
+     flies it off the screen to the right hand side, and then returns
+     the user to the timeline page. Do the same 'fly off the screen'
+     animation ... for postcards." Purely a client-side delay in front
+     of the existing real form submit -- postcard.php/letter.php's own
+     send logic and redirect-to-timeline.php-with-a-flash-message flow
+     are completely unchanged, JS just holds the POST back for as long
+     as the animation runs. Both overlay and box need overflow switched
+     to visible for the fly-off, or the box's own overflow:auto would
+     just clip it at its own edge instead of letting it cross the
+     dimmed backdrop and leave the viewport. */
+  .postcard-overlay.is-sending { overflow:visible; }
+  .postcard-box.is-sending { overflow:visible; pointer-events:none; }
+  @keyframes ourthologyFold {
+    0%   { transform:scaleY(1); opacity:1; }
+    55%  { transform:scaleY(0.08); opacity:1; }
+    100% { transform:scaleY(0.04); opacity:0; }
+  }
+  .is-folding { animation:ourthologyFold 0.4s cubic-bezier(.6,.04,.7,.46) forwards; }
+  @keyframes ourthologyPopIn {
+    0%   { transform:scale(0.6); opacity:0; }
+    70%  { transform:scale(1.08); opacity:1; }
+    100% { transform:scale(1); opacity:1; }
+  }
+  .is-popping { animation:ourthologyPopIn 0.18s ease-out forwards; }
+  @keyframes ourthologyFlyOff {
+    0%   { transform:translate(0,0) rotate(0deg); opacity:1; }
+    18%  { transform:translate(-8px,-12px) rotate(-5deg); opacity:1; }
+    100% { transform:translate(160vw,-30px) rotate(24deg); opacity:0; }
+  }
+  .is-flying { animation:ourthologyFlyOff 0.62s cubic-bezier(.45,0,.6,1) forwards; }
+  @media (prefers-reduced-motion: reduce) {
+    .is-folding, .is-popping, .is-flying { animation-duration:0.001s !important; }
+  }
+  /* The little envelope the letter "goes into" once it's folded flat --
+     same flap/gradient look as pending.php's .envelope-row, just sized
+     for this pop-up, with its own small stamp for continuity. */
+  .letter-fly-wrap { position:absolute; inset:0; display:none; align-items:center; justify-content:center; pointer-events:none; z-index:5; }
+  .letter-fly-envelope { position:relative; width:200px; height:128px; border-radius:6px; background:linear-gradient(135deg,#f3ead9,#e9dcc4); border:1px solid #c9b998; box-shadow:0 10px 22px -10px rgba(0,0,0,.4); overflow:hidden; opacity:0; }
+  .letter-fly-flap { position:absolute; top:0; left:0; width:100%; height:58%; background:linear-gradient(135deg,#ede1c9,#ddcba3); clip-path:polygon(0 0,100% 0,50% 100%); box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  .letter-fly-stamp { position:absolute; top:10px; right:12px; width:52px; z-index:2; }
+  .letter-fly-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
+
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
@@ -2386,6 +2430,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               </div>
             </div>
           </form>
+          <div class="letter-fly-wrap" id="letterFlyWrap" aria-hidden="true">
+            <div class="letter-fly-envelope" id="letterFlyEnvelope">
+              <span class="letter-fly-flap" aria-hidden="true"></span>
+              <span class="letter-fly-stamp" aria-hidden="true"><?= ourthology_postcard_stamp_svg($previewPostmarkAngle, date('d M Y')) ?></span>
+            </div>
+          </div>
         </div>
         <?php endif; ?>
       </div>
@@ -2409,7 +2459,22 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         document.removeEventListener("keydown", onEscape);
       }
       function onEscape(evt) {
-        if (evt.key === "Escape") closeOverlay();
+        if (evt.key !== "Escape") return;
+        var existing = document.getElementById("postcardComposeOverlay");
+        if (existing && existing.dataset.locked === "1") return; // mid send-animation -- ignore
+        closeOverlay();
+      }
+
+      // Phase 61: called the instant either form's real submit is
+      // intercepted -- stops the × / overlay-click / Escape handlers
+      // from tearing the overlay down out from under the animation
+      // (closeOverlay() removes it from the DOM, which would kill the
+      // in-flight timers below), and blocks any further clicks inside
+      // the box while it's mid-toss.
+      function lockOverlayForSend(root) {
+        root.dataset.locked = "1";
+        var box = root.querySelector(".postcard-box");
+        if (box) box.classList.add("is-sending");
       }
 
       function wireForm(root) {
@@ -2493,9 +2558,24 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           });
         });
         if (postcardForm) {
-          postcardForm.addEventListener("submit", function () {
+          // Phase 61: "fly off the screen" then land back on timeline.php
+          // -- postcards have no envelope to fold into, so this skips
+          // straight to the toss. evt.preventDefault() here is safe to
+          // call unconditionally: the later postcardForm.submit() call
+          // is the plain DOM method, which (unlike requestSubmit()) never
+          // re-fires this "submit" listener, so there's no risk of this
+          // handler looping back on itself.
+          postcardForm.addEventListener("submit", function (evt) {
             if (toLineField) toLineField.value = (toLineEditable ? toLineEditable.textContent : "").trim();
             if (fromLineField) fromLineField.value = (fromLineEditable ? fromLineEditable.textContent : "").trim();
+
+            evt.preventDefault();
+            lockOverlayForSend(root);
+            var sendBtn = postcardForm.querySelector(".postcard-send-btn");
+            if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
+            var flyTarget = root.querySelector(".postcard-flip-scene") || postcardForm;
+            flyTarget.classList.add("is-flying");
+            window.setTimeout(function () { postcardForm.submit(); }, 620);
           });
         }
 
@@ -2640,10 +2720,37 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           });
         }
 
-        form.addEventListener("submit", function () {
+        form.addEventListener("submit", function (evt) {
           if (hiddenBody) hiddenBody.value = editor.innerHTML;
           if (toLineField) toLineField.value = (salutationName ? salutationName.textContent : "").trim();
           if (fromLineField) fromLineField.value = (closingName ? closingName.textContent : "").trim();
+
+          // Phase 61: "folds the page up and puts it into the envelope,
+          // and then flies it off the screen ... and then returns the
+          // user to the timeline page." Three stages, each timed to the
+          // CSS animation it kicks off: fold the letter sheet flat
+          // (0.4s), pop it into the little envelope (0.18s), then toss
+          // the envelope off screen (0.62s) -- ~1.2s all told, before
+          // the real, unmodified letter.php submit finally happens (see
+          // the postcard handler's comment on why form.submit() here is
+          // safe from re-triggering this same listener).
+          evt.preventDefault();
+          lockOverlayForSend(root);
+          var sendBtn = form.querySelector(".letter-send-btn");
+          if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
+
+          form.classList.add("is-folding");
+          window.setTimeout(function () {
+            form.style.display = "none";
+            var wrap = root.querySelector("#letterFlyWrap");
+            var env = root.querySelector("#letterFlyEnvelope");
+            if (wrap) wrap.style.display = "flex";
+            if (env) env.classList.add("is-popping");
+            window.setTimeout(function () {
+              if (env) env.classList.add("is-flying");
+              window.setTimeout(function () { form.submit(); }, 620);
+            }, 180);
+          }, 400);
         });
       }
 
@@ -2652,9 +2759,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         document.body.appendChild(tpl.content.cloneNode(true));
         var overlay = document.getElementById("postcardComposeOverlay");
         overlay.addEventListener("click", function (evt) {
+          if (overlay.dataset.locked === "1") return;
           if (evt.target === overlay) closeOverlay();
         });
-        document.getElementById("postcardComposeClose").addEventListener("click", closeOverlay);
+        document.getElementById("postcardComposeClose").addEventListener("click", function () {
+          if (overlay.dataset.locked === "1") return;
+          closeOverlay();
+        });
         document.addEventListener("keydown", onEscape);
         wireForm(overlay);
         wireLetterForm(overlay);
