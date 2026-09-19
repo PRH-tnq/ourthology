@@ -95,7 +95,7 @@ if ($action === 'send') {
     $bornStr = substr((string) $recipient['born'], 0, 10);
     $born = DateTimeImmutable::createFromFormat('!Y-m-d', $bornStr);
     $deliverOn = $born !== false
-        ? ourthology_next_annual_occurrence((int) $born->format('m'), (int) $born->format('d'))->modify('-1 day')
+        ? ourthology_graph_next_annual_occurrence((int) $born->format('m'), (int) $born->format('d'))->modify('-1 day')
         : new DateTimeImmutable('today');
 
     $cardId = create_greeting_card(

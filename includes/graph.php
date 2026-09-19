@@ -266,8 +266,18 @@ function graph_people_within_generations(array $graph, int $anchorId, int $minTi
  * birthday) server-side, rather than trusting a date posted by the
  * client. Guards a Feb 29 birthday on a non-leap year by falling back to
  * Feb 28 rather than letting DateTime silently roll it over into March.
+ *
+ * NOT named ourthology_next_annual_occurrence() -- includes/calendar.php
+ * (Phase 56) already declares its own function with that exact name (a
+ * deliberate, documented duplicate of this same date math, kept separate
+ * "so this new page can't regress the already-deployed tree.php reminder
+ * banner" -- see that file's own comment). Both files are require_once'd
+ * together by calendar.php, so a same-named function here would be a
+ * fatal "Cannot redeclare" -- this graph_-prefixed name keeps this
+ * function's own return type (a plain DateTimeImmutable) distinct from
+ * that one's (an array) too, since the two aren't interchangeable.
  */
-function ourthology_next_annual_occurrence(int $month, int $day, ?DateTimeImmutable $today = null): DateTimeImmutable
+function ourthology_graph_next_annual_occurrence(int $month, int $day, ?DateTimeImmutable $today = null): DateTimeImmutable
 {
     $today ??= new DateTimeImmutable('today');
     $occurrence = static function (int $year) use ($month, $day): DateTimeImmutable {
@@ -300,7 +310,7 @@ function graph_upcoming_birthdays(array $persons, int $withinDays = 7): array
         $month = (int) $born->format('m');
         $day = (int) $born->format('d');
 
-        $next = ourthology_next_annual_occurrence($month, $day, $today);
+        $next = ourthology_graph_next_annual_occurrence($month, $day, $today);
 
         $daysAway = (int) $today->diff($next)->format('%r%a');
         if ($daysAway < 0 || $daysAway > $withinDays) {
