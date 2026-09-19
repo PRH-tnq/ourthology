@@ -243,6 +243,11 @@ $hasAnyStepTag = !empty($stepTagsByChild);
   ul.plain { list-style:none; padding:0; margin:8px 0; }
   ul.plain li { padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
   .linklet { font-size:12px; background:transparent; border:none; color:var(--accent); cursor:pointer; padding:0; text-decoration:underline; }
+  /* Same pill-button look as .nav .linklet-btn (Print tree), just not
+     scoped to .nav -- reused by the "Return to the original tree" button
+     below, which sits outside the nav bar. */
+  .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
+  .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
   .flash { word-break:break-all; font-size:13px; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0 16px; }
 
   /* Phase 35: birthday reminder banner, top-right of the "Your tree"
@@ -396,14 +401,11 @@ $hasAnyStepTag = !empty($stepTagsByChild);
     <?php endif; ?>
 
     <?php if ($returnToMasterPersonId !== null): ?>
-      <p style="margin:0 0 4px;font-size:13px;color:var(--ink-faint);">
-        You're viewing a peripheral family tree.
-        <form method="post" action="/switch_person.php" style="display:inline;">
-          <?= csrf_field() ?>
-          <input type="hidden" name="target_person_id" value="<?= $returnToMasterPersonId ?>">
-          <button type="submit" class="linklet">Return to the original tree</button>
-        </form>
-      </p>
+      <form method="post" action="/switch_person.php" style="margin:0 0 12px;">
+        <?= csrf_field() ?>
+        <input type="hidden" name="target_person_id" value="<?= $returnToMasterPersonId ?>">
+        <button type="submit" class="linklet-btn">Return to the original tree</button>
+      </form>
     <?php endif; ?>
 
     <?php if ($copyState !== null): ?>

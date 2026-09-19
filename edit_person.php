@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/custom_audience.php';
 require_once __DIR__ . '/includes/storage.php';
@@ -21,6 +22,13 @@ $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
 $myUserId = (int) $me['user_id'];
 $myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
+
+// Phase 58, post-launch: no inviting a new partner while working on a
+// peripheral tree (see includes/peripheral.php's own comment on
+// ourthology_is_peripheral_group()). Computed once up front since it
+// gates both the "Add a partner" form's own POST handler below and
+// whether that form is even shown further down the page.
+$onPeripheralTree = ourthology_is_peripheral_group($pdo, $myGroup);
 
 ourthology_start_session();
 
@@ -202,6 +210,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($otherId === false || (int) $otherId === $personId || !person_in_group($pdo, (int) $otherId, $myGroup)) {
             $errors[] = 'Choose someone else in your family tree to record as their partner.';
+        } elseif ($onPeripheralTree) {
+            // Phase 58, post-launch (per Phil): no inviting a new partner
+            // while working on a peripheral tree -- this is the third of
+            // three places a new partnership can be created (see
+            // add_relative.php's own comment on
+            // ourthology_is_peripheral_group() for why).
+            $errors[] = "You can't add a partner on a peripheral family tree — keep it to your own descendants here so it doesn't get complicated.";
         } else {
             try {
                 create_confirmed_partnership($pdo, $personId, (int) $otherId, $kind, $myUserId);
@@ -233,6 +248,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Choose someone else in your family tree to connect them to.';
         } elseif (!in_array($direction, ['parent', 'child'], true)) {
             $errors[] = 'Choose whether they are a parent or a child.';
+        } elseif (ourthology_is_in_law_only($pdo, $direction === 'parent' ? $personId : (int) $otherId)) {
+            // Phase 58: whichever of the two ends up on the CHILD side of
+            // this edge would be gaining a brand-new blood ancestor -- if
+            // that's someone only connected to this family by partnership
+            // (an in-law, includes/peripheral.php), this quick-connect
+            // shortcut would mix two separate families onto one tree the
+            // same way add_relative.php's own "add a parent" reroute
+            // exists to prevent, just reached a different way (both
+            // people already in this same tree, rather than adding a
+            // brand-new one). Declined outright rather than rerouted --
+            // this action can also reattach someone with their own
+            // existing subtree of relatives, the same reason
+            // add_relative.php's "attach an existing person" case is
+            // declined rather than auto-merged onto a peripheral tree.
+            $errors[] = "That would connect two separate parts of the family together, which this quick-connect can't do — use \"Add a relative\" from the tree page instead, and we'll set them up with a family tree of their own for it.";
         } else {
             $parentId = $direction === 'parent' ? (int) $otherId : $personId;
             $childId  = $direction === 'parent' ? $personId : (int) $otherId;
@@ -962,7 +992,7 @@ if ($postedProfile) {
       <?php endforeach; ?>
       </div>
 
-      <?php if ($canEdit && $partnerCandidates): ?>
+      <?php if ($canEdit && $partnerCandidates && !$onPeripheralTree): ?>
       <div class="edit-block">
         <form method="post" class="add-partner-row">
           <?= csrf_field() ?>

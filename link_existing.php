@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/peripheral.php';
 
 require_login();
 $me = current_user_with_person();
@@ -34,6 +35,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!in_array($relationKind, ['genetic', 'step', 'adoptive'], true)) {
         $relationKind = 'genetic';
+    }
+
+    // Phase 58: this page is a second way to create the exact edge
+    // add_relative.php's own "add a parent/parent-in-law" reroute exists
+    // to catch — except here the other side is an already-existing,
+    // possibly fully-populated SEPARATE family tree, not a brand-new
+    // person. If $myPersonId is only connected to this family by
+    // partnership (an in-law, includes/peripheral.php), linking them a
+    // blood parent or child here would merge that whole other tree onto
+    // this one through them. Declined outright, same as add_relative.php's
+    // own "attach an existing person" case and for the same reason:
+    // merging a whole already-populated tree onto a freshly-created
+    // peripheral one is a materially bigger operation than this feature
+    // covers. A partner link is untouched -- that's exactly how someone
+    // becomes an in-law in the first place, and is never the problem.
+    if (!$errors && in_array($direction, ['parent', 'child'], true) && ourthology_is_in_law_only($pdo, $myPersonId)) {
+        $errors[] = "You're only connected to this family by marriage or partnership, so you can't link an existing person as your own parent or child here — that would merge two separate families together. Add a new relative from your tree page instead, and we'll set you up with a family tree of your own for it.";
+    }
+
+    // Phase 58, post-launch (per Phil): no inviting a new partner while
+    // working on a peripheral tree -- see add_relative.php's own comment
+    // on ourthology_is_peripheral_group() for why. This is the second of
+    // three places a new partnership can be created (add_relative.php's
+    // own "spouse" relationship option is the first); edit_person.php's
+    // "Add a partner" quick-connect is the third.
+    if (!$errors && $direction === 'partner' && ourthology_is_peripheral_group($pdo, $myGroup)) {
+        $errors[] = "You can't add a partner on a peripheral family tree — keep it to your own descendants here so it doesn't get complicated. Add a partner on your original tree instead.";
     }
 
     $target = null;

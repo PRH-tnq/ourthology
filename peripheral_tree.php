@@ -49,7 +49,7 @@ if ($pending === null) {
     unset($_SESSION['pending_peripheral']);
 }
 
-$household = $inLawPerson !== null ? ourthology_in_law_household($pdo, $inLawPersonId) : ['partners' => [], 'children' => []];
+$household = $inLawPerson !== null ? ourthology_in_law_household($pdo, $inLawPersonId) : ['partners' => [], 'descendants' => []];
 
 $errors = [];
 $successLink = null;
@@ -59,11 +59,14 @@ if ($expired === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
 
     // Never trust the submitted checkboxes directly — re-intersect with
-    // the household as it stands right now in the database.
-    $checkedPartnerIds = array_map('intval', $_POST['partner_ids'] ?? []);
-    $checkedChildIds   = array_map('intval', $_POST['child_ids'] ?? []);
-    $bringPartners = array_values(array_filter($household['partners'], fn($p) => in_array((int) $p['id'], $checkedPartnerIds, true)));
-    $bringChildren = array_values(array_filter($household['children'], fn($c) => in_array((int) $c['id'], $checkedChildIds, true)));
+    // the household as it stands right now in the database. Filtering
+    // $household['descendants'] (rather than building a new array from
+    // the checked ids) keeps it in the same parents-before-children order
+    // ourthology_create_peripheral_tree() relies on.
+    $checkedPartnerIds    = array_map('intval', $_POST['partner_ids'] ?? []);
+    $checkedDescendantIds = array_map('intval', $_POST['descendant_ids'] ?? []);
+    $bringPartners    = array_values(array_filter($household['partners'], fn($p) => in_array((int) $p['id'], $checkedPartnerIds, true)));
+    $bringDescendants = array_values(array_filter($household['descendants'], fn($d) => in_array((int) $d['id'], $checkedDescendantIds, true)));
 
     try {
         $pdo->beginTransaction();
@@ -74,7 +77,7 @@ if ($expired === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
             ['first' => $pending['new_first'], 'middle' => $pending['new_middle'], 'surname' => $pending['new_surname']],
             ['kind' => $pending['edge_kind']],
             $bringPartners,
-            $bringChildren
+            $bringDescendants
         );
 
         if ($result['claimed']) {
@@ -181,8 +184,8 @@ if ($expired === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
       <?php endif; ?>
 
-      <?php if ($household['partners'] || $household['children']): ?>
-        <form method="post">
+      <?php if ($household['partners'] || $household['descendants']): ?>
+        <form method="post" id="peripheralBringForm">
           <?= csrf_field() ?>
           <p style="margin:16px 0 0;font-weight:600;font-size:14px;">
             Also bring across (only what you tick here is copied — nothing else from the original tree comes with it):
@@ -191,13 +194,52 @@ if ($expired === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php foreach ($household['partners'] as $p): ?>
               <li><label><input type="checkbox" name="partner_ids[]" value="<?= (int) $p['id'] ?>"> <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?> (their partner)</label></li>
             <?php endforeach; ?>
-            <?php foreach ($household['children'] as $c): ?>
-              <li><label><input type="checkbox" name="child_ids[]" value="<?= (int) $c['id'] ?>"> <?= htmlspecialchars(person_display_name($c), ENT_QUOTES) ?> (their child)</label></li>
+            <?php foreach ($household['descendants'] as $d): ?>
+              <li style="padding-left:<?= 8 + 20 * ((int) $d['depth'] - 1) ?>px;">
+                <label>
+                  <input type="checkbox" name="descendant_ids[]" value="<?= (int) $d['id'] ?>"
+                         data-descendant-id="<?= (int) $d['id'] ?>" data-parent-master-id="<?= (int) $d['parent_master_id'] ?>">
+                  <?= htmlspecialchars(person_display_name($d), ENT_QUOTES) ?> (their <?= htmlspecialchars(ourthology_descendant_label((int) $d['depth']), ENT_QUOTES) ?>)
+                </label>
+              </li>
             <?php endforeach; ?>
           </ul>
+          <?php if (array_filter($household['descendants'], fn($d) => (int) $d['depth'] > 1)): ?>
+            <p class="hint" style="margin-top:6px;">A grandchild (or further down) can only come across together with their own parent — tick the parent first and their own box will unlock.</p>
+          <?php endif; ?>
           <p class="hint" style="margin-top:8px;">A copy is made as a starting point on the new tree — it won't stay linked to or update from the original.</p>
           <button type="submit" class="btn-primary" style="margin-top:16px;">Create their family tree</button>
         </form>
+        <script>
+          (function () {
+            var form = document.getElementById('peripheralBringForm');
+            if (!form) return;
+            var boxes = Array.prototype.slice.call(form.querySelectorAll('[data-descendant-id]'));
+            var byId = {};
+            boxes.forEach(function (b) { byId[b.getAttribute('data-descendant-id')] = b; });
+
+            function childBoxesOf(id) {
+              return boxes.filter(function (b) { return b.getAttribute('data-parent-master-id') === id; });
+            }
+
+            function sync(box) {
+              var parentBox = byId[box.getAttribute('data-parent-master-id')];
+              var enabled = !parentBox || parentBox.checked;
+              box.disabled = !enabled;
+              if (!enabled && box.checked) {
+                box.checked = false;
+              }
+              childBoxesOf(box.getAttribute('data-descendant-id')).forEach(sync);
+            }
+
+            boxes.forEach(function (b) {
+              b.addEventListener('change', function () {
+                childBoxesOf(b.getAttribute('data-descendant-id')).forEach(sync);
+              });
+            });
+            boxes.forEach(sync);
+          })();
+        </script>
       <?php else: ?>
         <form method="post">
           <?= csrf_field() ?>

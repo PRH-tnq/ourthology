@@ -142,14 +142,34 @@ function ourthology_antecedent_target(array $plan): ?int
 }
 
 /**
- * Everyone in $familyGroupId's graph reachable as $personId's own direct
- * partner(s) and children -- exactly the set peripheral_tree.php offers as
- * "bring across" checkboxes (never anyone further out, per Phil: "should
- * only include the children and partner of the creator... but not
- * extended family from the original master"). Each child entry also
- * carries the exact relation_kind recorded on the master tree, so a
- * brought-across mirror can be created with the same genetic/step/adoptive
- * tag rather than defaulting it.
+ * Everyone in the graph reachable as $personId's own direct partner(s), and
+ * their whole descendant line (children, grandchildren, and so on down) --
+ * exactly the set peripheral_tree.php offers as "bring across" checkboxes.
+ * Originally this stopped at direct children only; extended per Phil after
+ * launch ("not any of our children or their children... give me that
+ * option") to walk the full descendant line, since a family with
+ * grandchildren already on the master tree would otherwise have to leave
+ * them behind. Still deliberately excludes anyone connected only by
+ * partnership at any point in that line (a child's own partner, a
+ * grandchild's own partner, etc.) -- per Phil, in the same message: no
+ * partner ever gets brought across or invited on a peripheral tree, only
+ * this one blood line, to keep it from getting complicated (see
+ * ourthology_is_peripheral_group() below). A descendant's OTHER recorded
+ * parent, if they have one, is simply never brought across either way, so
+ * a mirrored descendant always ends up with exactly one mirrored parent --
+ * whichever ancestor in this same line it descends from.
+ *
+ * Each descendant carries 'parent_master_id' (the master-tree id of
+ * whichever ancestor in this same set is their direct parent -- $personId
+ * itself for a direct child) and 'depth' (1 for a direct child, 2 for a
+ * grandchild, and so on), and the list is built breadth-first so every
+ * entry's parent always appears earlier in the array -- ourthology_create_
+ * peripheral_tree() below relies on that order to mirror parents before
+ * their own children. Depth is capped at 8 generations as a sanity guard
+ * against a malformed/cyclic graph; no real family tree should ever get
+ * near it. Each entry also carries the exact relation_kind recorded on the
+ * master tree, so a brought-across mirror can be created with the same
+ * genetic/step/adoptive tag rather than defaulting it.
  */
 function ourthology_in_law_household(PDO $pdo, int $personId): array
 {
@@ -161,15 +181,82 @@ function ourthology_in_law_household(PDO $pdo, int $personId): array
     );
     $partners->execute(['pid' => $personId, 'pid2' => $personId, 'pid3' => $personId]);
 
-    $children = $pdo->prepare(
+    $childStmt = $pdo->prepare(
         "SELECT p.id, p.first_name, p.middle_name, p.surname, p.born, p.died, r.relation_kind
          FROM relationships r
          JOIN persons p ON p.id = r.child_id
          WHERE r.parent_id = :pid AND r.status = 'confirmed'"
     );
-    $children->execute(['pid' => $personId]);
 
-    return ['partners' => $partners->fetchAll(), 'children' => $children->fetchAll()];
+    $descendants = [];
+    $seen = [$personId => true];
+    $frontier = [$personId];
+    $depth = 0;
+    while ($frontier && $depth < 8) {
+        $depth++;
+        $nextFrontier = [];
+        foreach ($frontier as $parentMasterId) {
+            $childStmt->execute(['pid' => $parentMasterId]);
+            foreach ($childStmt->fetchAll() as $row) {
+                $childId = (int) $row['id'];
+                if (isset($seen[$childId])) {
+                    continue; // guards against a malformed/cyclic graph looping forever
+                }
+                $seen[$childId] = true;
+                $descendants[] = [
+                    'id'               => $childId,
+                    'first_name'       => $row['first_name'],
+                    'middle_name'      => $row['middle_name'],
+                    'surname'          => $row['surname'],
+                    'born'             => $row['born'],
+                    'died'             => $row['died'],
+                    'relation_kind'    => $row['relation_kind'],
+                    'parent_master_id' => $parentMasterId,
+                    'depth'            => $depth,
+                ];
+                $nextFrontier[] = $childId;
+            }
+        }
+        $frontier = $nextFrontier;
+    }
+
+    return ['partners' => $partners->fetchAll(), 'descendants' => $descendants];
+}
+
+/**
+ * A short, human word for how many generations down $depth is (1 = child,
+ * 2 = grandchild, ...) -- purely a display label for peripheral_tree.php's
+ * bring-across checklist.
+ */
+function ourthology_descendant_label(int $depth): string
+{
+    if ($depth <= 1) {
+        return 'child';
+    }
+    if ($depth === 2) {
+        return 'grandchild';
+    }
+    return str_repeat('great-', $depth - 2) . 'grandchild';
+}
+
+/**
+ * True iff $groupId is itself a peripheral tree (the "child" side of a
+ * peripheral_tree_links pair), as opposed to a master tree or an ordinary
+ * tree that's never been part of one. Used to switch off anything that
+ * would let a peripheral tree grow a partner of its own -- per Phil,
+ * post-launch: "on the peripheral tree do not give the option for a
+ * partner to be invited... that will get too complicated" (a partner
+ * added there could, in turn, want their OWN peripheral tree off of this
+ * one, nested arbitrarily deep, which this app doesn't attempt to
+ * support). See add_relative.php, link_existing.php and edit_person.php
+ * for where this gates the three ways a new partnership can otherwise be
+ * created.
+ */
+function ourthology_is_peripheral_group(PDO $pdo, int $groupId): bool
+{
+    $stmt = $pdo->prepare('SELECT 1 FROM peripheral_tree_links WHERE peripheral_family_group_id = :gid LIMIT 1');
+    $stmt->execute(['gid' => $groupId]);
+    return (bool) $stmt->fetchColumn();
 }
 
 /**
@@ -203,14 +290,17 @@ function ourthology_mirror_person(PDO $pdo, array $source, int $groupId, int $cr
 /**
  * Does the actual creation, inside a transaction the caller (peripheral_
  * tree.php) begins and commits/rolls back. $inLawPersonId is the in-law's
- * EXISTING node on the master tree (left untouched); $bringPartnerIds/
- * $bringChildIds are subsets of ourthology_in_law_household()'s own
+ * EXISTING node on the master tree (left untouched); $bringPartners/
+ * $bringDescendants are subsets of ourthology_in_law_household()'s own
  * results, already re-validated by the caller against current DB state
  * (never trust the submitted checkboxes directly -- same discipline as
- * add_relative.php's own via_id/second_parent_id checks). $antecedentEdge
- * is the single edge from the ORIGINAL resolve_relationship() plan that
- * triggered this (parent='NEW', child=$inLawPersonId, kind=<whatever was
- * chosen>) -- reapplied here against the new peripheral "YOU" node instead.
+ * add_relative.php's own via_id/second_parent_id checks). $bringDescendants
+ * must keep ourthology_in_law_household()'s own order (parents before their
+ * own children) -- see step 4 below, which relies on that order to mirror
+ * each one's parent before it's needed. $antecedentEdge is the single edge
+ * from the ORIGINAL resolve_relationship() plan that triggered this
+ * (parent='NEW', child=$inLawPersonId, kind=<whatever was chosen>) --
+ * reapplied here against the new peripheral "YOU" node instead.
  *
  * Returns ['peripheral_person_id' => int, 'peripheral_group_id' => int,
  * 'claimed' => bool] -- 'claimed' tells the caller whether the new "YOU"
@@ -227,7 +317,7 @@ function ourthology_create_peripheral_tree(
     array $newAntecedentName,
     array $antecedentEdge,
     array $bringPartners,
-    array $bringChildren
+    array $bringDescendants
 ): array {
     $inLawPersonId = (int) $inLawPerson['id'];
 
@@ -272,20 +362,36 @@ function ourthology_create_peripheral_tree(
         'uid'  => $actingUserId,
     ]);
 
-    // 4) Bring across whichever partner(s)/children were agreed to.
+    // 4) Bring across whichever partner(s)/descendants were agreed to.
     foreach ($bringPartners as $partner) {
         $mirrorId = ourthology_mirror_person($pdo, $partner, $peripheralGroupId, $actingUserId);
         create_confirmed_partnership($pdo, $peripheralPersonId, $mirrorId, 'married', $actingUserId);
     }
-    foreach ($bringChildren as $child) {
-        $mirrorId = ourthology_mirror_person($pdo, $child, $peripheralGroupId, $actingUserId);
+    // $bringDescendants can span several generations (children,
+    // grandchildren, ...) -- $idMap tracks master-tree id -> new mirror id
+    // as each one is created, seeded with the in-law's own master id
+    // pointing at the peripheral "YOU" node, so a grandchild's edge can be
+    // attached to its already-mirrored parent rather than straight to
+    // "YOU". Relies on $bringDescendants being in ourthology_in_law_
+    // household()'s own breadth-first order (parents before their own
+    // children); anything whose parent isn't in $idMap -- its parent
+    // wasn't brought across too -- is skipped rather than orphaned onto
+    // the wrong node.
+    $idMap = [$inLawPersonId => $peripheralPersonId];
+    foreach ($bringDescendants as $descendant) {
+        $parentMirrorId = $idMap[(int) $descendant['parent_master_id']] ?? null;
+        if ($parentMirrorId === null) {
+            continue;
+        }
+        $mirrorId = ourthology_mirror_person($pdo, $descendant, $peripheralGroupId, $actingUserId);
+        $idMap[(int) $descendant['id']] = $mirrorId;
         $pdo->prepare(
             "INSERT INTO relationships (parent_id, child_id, relation_kind, status, created_by_user_id)
              VALUES (:p, :c, :kind, 'confirmed', :uid)"
         )->execute([
-            'p'    => $peripheralPersonId,
+            'p'    => $parentMirrorId,
             'c'    => $mirrorId,
-            'kind' => $child['relation_kind'] ?? 'genetic',
+            'kind' => $descendant['relation_kind'] ?? 'genetic',
             'uid'  => $actingUserId,
         ]);
     }
