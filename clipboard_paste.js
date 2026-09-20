@@ -24,7 +24,9 @@
   // e.clipboardData.items would for a keyboard Ctrl-V. Rejects when the
   // browser has no Async Clipboard read support at all (Firefox desktop,
   // very old browsers, or a non-HTTPS context) so callers can show a
-  // useful message instead of a silent no-op.
+  // useful message instead of a silent no-op. The resolved array also
+  // carries a `hadFileReference` flag (see below) for callers that want
+  // a more specific empty-result message than "no image found".
   function readImages() {
     if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.read) {
       return Promise.reject(new Error("clipboard-read-unsupported"));
@@ -32,15 +34,31 @@
     return navigator.clipboard.read().then(function (items) {
       var files = [];
       var work = [];
+      var hadFileReference = false;
       items.forEach(function (item) {
         var imgType = item.types.filter(function (t) { return t.indexOf("image/") === 0; })[0];
-        if (!imgType) return;
-        work.push(item.getType(imgType).then(function (blob) {
-          var ext = (imgType.split("/")[1] || "png").split("+")[0];
-          files.push(new File([blob], "pasted-image." + ext, { type: imgType }));
-        }));
+        if (imgType) {
+          work.push(item.getType(imgType).then(function (blob) {
+            var ext = (imgType.split("/")[1] || "png").split("+")[0];
+            files.push(new File([blob], "pasted-image." + ext, { type: imgType }));
+          }));
+          return;
+        }
+        // Copying a file straight from Windows File Explorer (Ctrl+C on
+        // the file itself, not "Copy image" from inside a site or app)
+        // puts a file REFERENCE on the OS clipboard, not image bytes --
+        // Chromium-based browsers surface that to the page as
+        // text/uri-list, which has no pixel data behind it for this API
+        // to read. There's no way to pull the bytes from here; only the
+        // older paste *event* can (it materializes the referenced file
+        // directly, which is why Ctrl-V still works for this case even
+        // though the button can't) -- flag it so wire() can say so.
+        if (item.types.indexOf("text/uri-list") !== -1) hadFileReference = true;
       });
-      return Promise.all(work).then(function () { return files; });
+      return Promise.all(work).then(function () {
+        files.hadFileReference = hadFileReference;
+        return files;
+      });
     });
   }
 
@@ -59,7 +77,9 @@
       evt.stopPropagation();
       readImages().then(function (files) {
         if (!files.length) {
-          onMessage("No image found on your clipboard — copy one, then tap Paste again.");
+          onMessage(files.hadFileReference
+            ? "A file copied from File Explorer can’t be pasted this way — press Ctrl+V instead, or use Attach."
+            : "No image found on your clipboard — copy one, then tap Paste again, or try Ctrl+V.");
           return;
         }
         onMessage(null);

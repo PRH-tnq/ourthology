@@ -402,22 +402,18 @@ if (isset($_GET['send_card_to'])) {
             ];
         }
     }
-} elseif (isset($_GET['send_card_anytime'])) {
-    // Phase 72: calendar.php's standalone "Send a card" button -- no
-    // birthday, no key date, nothing to look up server-side at all.
-    // card.php's send action delivers this kind the moment it's sent
-    // (deliver_on = today) instead of computing one from either of the
-    // other two flows.
-    $directOpenCardRow = [
-        'kind'            => 'anytime',
-        'personId'        => null,
-        'eventId'         => null,
-        'name'            => '',
-        'firstName'       => '',
-        'coverDefault'    => '',
-        'greetingDefault' => '',
-    ];
 }
+
+// Phase 75: calendar.php's "Send a message" button (was "Send a card",
+// Phase 72's ?send_card_anytime= -- superseded by this) -- no birthday,
+// no key date, and now no single card type either: it opens the same
+// unified postcard/letter/greetings-card pop-up the timeline's own
+// "Send a message" button does (window.ourthologyOpenMessageComposer()
+// on load), defaulting to the postcard view. The greetings-card panel
+// inside that pop-up still uses the "anytime" delivery kind card.php
+// already handles (deliver_on = today, no birthday/event to compute one
+// from) when reached via its own Greetings card tab.
+$autoOpenSendMessage = isset($_GET['send_message']);
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
 function ourthology_entry_date(array $entry): string
@@ -708,6 +704,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .card-paste-status { position:absolute; left:8px; right:8px; bottom:6px; z-index:1; font-size:11px; color:var(--accent); text-align:center; }
   .card-paste-status[hidden] { display:none; }
   .postcard-face-front.has-image .postcard-drop-zone { display:none; }
+  /* Phase 75: a plain, blank-card "sample stamp" -- rotated, low-opacity,
+     ignores clicks (pointer-events:none) so it never gets in the way of
+     "click to choose a photo" underneath, and shares the has-image gate
+     below with everything else that's only relevant before a real photo
+     is attached. */
+  .postcard-watermark { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; font-family:"Fraunces", Georgia, serif; font-weight:800; font-size:30px; letter-spacing:5px; text-transform:uppercase; color:var(--accent); opacity:.14; transform:rotate(-16deg); user-select:none; }
+  .postcard-face-front.has-image .postcard-watermark { display:none; }
   .postcard-front-preview { position:absolute; inset:0; display:none; width:100%; height:100%; object-fit:cover; }
   .postcard-face-front.has-image .postcard-front-preview { display:block; }
   .postcard-change-photo { display:none; position:absolute; bottom:8px; right:8px; z-index:1; font-size:11.5px; padding:5px 10px; border-radius:999px; background:rgba(26,23,20,0.65); color:#fff; border:none; cursor:pointer; }
@@ -768,13 +771,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      letter), a recipient picker that fills in "Dear X,", a large
      handwriting-font body that can carry inline photos, and an
      auto-generated "Best regards" close. */
-  /* Phase 54: split into plain lead-in text plus a real button for just
-     the "Send a letter instead" part -- it used to be one giant button
-     with the whole sentence as its label. */
-  .letter-switch-text { margin:0 0 14px; font-size:13px; color:var(--ink-soft); }
-  .letter-switch-btn { display:inline; background:none; border:none; padding:0; margin:0; font-size:13px; font-weight:700; color:var(--accent); text-decoration:underline; cursor:pointer; font-family:inherit; }
+  /* Phase 75: the old text-link "Send a letter instead" / "← Back to
+     postcard" pair (Phase 54) is gone, replaced by #messageModeToggle's
+     3-way segmented control above -- .letter-mode-panel's default-hidden
+     state is all that's left to do here now. */
   .letter-mode-panel { display:none; }
-  .letter-back-link { display:inline-block; background:none; border:none; padding:0; margin:0 0 12px; font-size:12.5px; color:var(--ink-soft); text-decoration:underline; cursor:pointer; font-family:inherit; }
   .letterhead { display:flex; align-items:center; gap:12px; padding:14px 18px; border:1px solid var(--line); border-radius:12px 12px 0 0; background:linear-gradient(135deg, #9A2A2A, #7a2020); color:#FBF8F1; }
   .letterhead .letter-brand-mark { flex:none; }
   .letterhead-text { flex:1 1 auto; min-width:0; }
@@ -1005,11 +1006,30 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .segmented button { border:none; background:transparent; color:var(--ink-soft); font-weight:700; font-size:13px; padding:7px 13px; border-radius:999px; cursor:pointer; transition:background .15s ease,color .15s ease,transform .1s ease; white-space:nowrap; }
   .segmented button:hover { color:var(--ink); }
   .segmented button.active { background:var(--accent); color:var(--on-accent); transform:scale(1.04); }
+  /* Phase 75: the postcard/letter/greetings-card switcher sits inside the
+     narrow gcard-box (380px) as well as the wider postcard-box, and both
+     boxes' own "x" close buttons are absolutely positioned in that same
+     top-right corner -- the extra top margin clears them, and wrapping
+     keeps "Greetings card" from ever clipping on a narrow phone. */
+  .message-mode-toggle { margin:20px 0 14px; flex-wrap:wrap; row-gap:4px; }
+  /* .segmented's own display:inline-flex (an author rule) otherwise beats
+     the [hidden] attribute's UA-stylesheet display:none, the same reason
+     #customZoomPill needs its own .zoom-pill[hidden] override above. */
+  .message-mode-toggle[hidden] { display:none; }
   .zoom-pill { display:inline-flex; align-items:center; gap:6px; background:var(--accent-bg); color:var(--accent); border:none; border-radius:999px; padding:7px 12px 7px 13px; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; }
   .zoom-pill[hidden] { display:none; }
   .zoom-pill:hover { filter:brightness(0.97); }
   .zoom-pill svg { width:14px; height:14px; flex:0 0 auto; }
   .zoom-pill .zoom-pill-x { font-size:16px; line-height:1; opacity:.75; margin-left:2px; }
+  /* Phase 74: sits directly on the river canvas now, in the blank band
+     the X-axis labels leave below them (see the markup comment above
+     #customZoomPill). That band is empty SVG space, not an HTML gap
+     between elements -- the actual space between the SVG's own box and
+     the scrollbar below it is a bare 10px, nowhere near enough -- so
+     `top` is computed and set in px by positionZoomPill() (below)
+     rather than fixed here; the 85% is just a harmless fallback for the
+     brief instant before that first runs. */
+  .zoom-pill-oncanvas { position:absolute; left:50%; top:85%; transform:translateX(-50%); z-index:2; box-shadow:var(--shadow); }
 
   /* Phase 39: birthday reminder banner, shared with tree.php's Phase 35
      original -- sits as the right-pushed last item in .controls, i.e.
@@ -1054,11 +1074,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   /* ---------- timeline canvas ---------- */
   .arc-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
-  .arc-wrap svg { display:block; cursor:crosshair; user-select:none; -webkit-user-select:none; touch-action:none; }
+  /* Phase 74: these three were plain "svg inside .arc-wrap" descendant
+     selectors, which was fine while #arcSvg (the chart itself) was the
+     only svg in here -- but #customZoomPill's small icon svg now lives
+     in here too (see the pill's own markup comment), and a bare "svg"
+     selector doesn't care how deep it's nested. Scoped to #arcSvg by id
+     so only the actual chart is affected, whatever else shares this box. */
+  .arc-wrap #arcSvg { display:block; cursor:crosshair; user-select:none; -webkit-user-select:none; touch-action:none; }
   .selection-rect { fill:var(--accent-glow); fill-opacity:.16; stroke:var(--accent); stroke-width:1.5; stroke-dasharray:4 3; pointer-events:none; display:none; }
   .selection-rect.active { display:block; }
-  .arc-wrap.layout-river svg { width:100%; height:auto; }
-  .arc-wrap.layout-rings svg, .arc-wrap.layout-spiral svg { width:100%; max-width:560px; height:auto; margin:0 auto; }
+  .arc-wrap.layout-river #arcSvg { width:100%; height:auto; }
+  .arc-wrap.layout-rings #arcSvg, .arc-wrap.layout-spiral #arcSvg { width:100%; max-width:560px; height:auto; margin:0 auto; }
 
   .river-scrollbar { position:relative; height:10px; margin:10px 6px 4px; background:var(--line); border-radius:999px; cursor:pointer; display:none; }
   .arc-wrap.layout-river .river-scrollbar { display:block; }
@@ -1322,7 +1348,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <a href="/tree.php" id="tourMyTree">My tree</a>
           <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
           <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn" class="linklet-btn">Memory planner</button><?php endif; ?>
-          <button type="button" id="sendPostcardBtn" class="linklet-btn">Send a postcard</button>
+          <button type="button" id="sendMessageBtn" class="linklet-btn">Send a message</button>
           <span class="whoami">
             Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
             <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>
@@ -1396,11 +1422,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <button data-zoom="decade">Decade</button>
         <button data-zoom="year">This year</button>
       </div>
-      <button class="zoom-pill" id="customZoomPill" type="button" hidden>
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M16 16l-3.8-3.8" stroke-linecap="round"/></svg>
-        <span id="customZoomLabel"></span>
-        <span class="zoom-pill-x">×</span>
-      </button>
       <div class="controls-right">
         <?php // Phase 71: "Take the tour" / "What's new", moved here from
               // the nav row above -- same River/Rings/Spiral row, right
@@ -1450,6 +1471,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <g id="nodes"></g>
         <rect id="selectionRect" class="selection-rect" x="0" y="-24" width="0" height="424"></rect>
       </svg>
+      <!-- Phase 74: moved down from the controls row above the timeline
+           to sit right on it instead, in the SVG's own blank space below
+           the X-axis labels (drawn inside the SVG, never lower than
+           y="326" in its 400-tall viewBox -- see the tick-label code
+           below -- leaving y="326"-"400" empty) and just above the
+           scrollbar underneath. positionZoomPill() (in the script below)
+           sets its `top` in real px off the SVG's own rendered height
+           each time it's shown, so it lands in that blank band and
+           tracks the chart's responsive scaling on any screen width --
+           overlapping the SVG's own bounding box is expected here, since
+           that whole band is empty by design; nothing to actually cover.
+           Either way .arc-wrap itself never grows to fit it. -->
+      <button class="zoom-pill zoom-pill-oncanvas" id="customZoomPill" type="button" hidden>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M16 16l-3.8-3.8" stroke-linecap="round"/></svg>
+        <span id="customZoomLabel"></span>
+        <span class="zoom-pill-x">×</span>
+      </button>
       <div class="river-scrollbar" id="riverScrollbar">
         <div class="river-scrollbar-thumb" id="riverScrollThumb"></div>
       </div>
@@ -2019,7 +2057,41 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var nodeTooltip = document.getElementById("nodeTooltip");
     var nodeTooltipDate = document.getElementById("nodeTooltipDate");
     var nodeTooltipTitle = document.getElementById("nodeTooltipTitle");
+    var zoomPill = document.getElementById("customZoomPill");
     var hoverTimer = null;
+
+    // Phase 74: the pill now sits on the chart itself, in the empty
+    // band below the X-axis labels -- tick text (drawn above) never
+    // goes past viewBox y=336 out of the river's 0-400 height, so
+    // everything from there to y=400 is blank by design. Converts that
+    // viewBox band to real on-screen pixels off the SVG's OWN rendered
+    // height (not .arc-wrap's, which has extra fixed-px chrome below
+    // the svg -- scrollbar, margins, padding -- that isn't part of this
+    // proportion), so the pill tracks the chart's responsive scaling
+    // exactly instead of drifting off narrower/wider screens. On a
+    // short/narrow chart (a phone) that blank band can end up shorter
+    // than the pill itself -- when it does, the hard floor is staying
+    // clear of the scrollbar (still draggable right underneath it),
+    // even if that means the pill overlaps the tick labels a little;
+    // that's a much smaller cost than blocking the scrollbar outright.
+    function positionZoomPill() {
+      if (state.layout !== "river" || zoomPill.hidden) return;
+      var svgRect = svg.getBoundingClientRect();
+      var wrapRect = arcWrap.getBoundingClientRect();
+      var scrollbarRect = riverScrollbar.getBoundingClientRect();
+      if (!svgRect.height || !wrapRect.height) return;
+      var svgTopWithinWrap = svgRect.top - wrapRect.top;
+      var blankTopPx = svgTopWithinWrap + (336 / 400) * svgRect.height;
+      var svgBottomPx = svgTopWithinWrap + svgRect.height;
+      var scrollbarTopWithinWrap = scrollbarRect.top - wrapRect.top;
+      var pillHeight = zoomPill.offsetHeight || 30;
+      var gap = 6;
+      var top = (blankTopPx + svgBottomPx) / 2 - pillHeight / 2;
+      top = Math.min(top, scrollbarTopWithinWrap - gap - pillHeight);
+      top = Math.max(top, 4);
+      zoomPill.style.top = top.toFixed(1) + "px";
+    }
+    window.addEventListener("resize", positionZoomPill);
 
     function hideNodeTooltip() {
       if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
@@ -2254,10 +2326,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       }
 
-      var zoomPill = document.getElementById("customZoomPill");
       if (state.customRange) {
         zoomPill.hidden = false;
         document.getElementById("customZoomLabel").textContent = fmtRangeLabel(range);
+        positionZoomPill();
       } else {
         zoomPill.hidden = true;
       }
@@ -3307,12 +3379,27 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <div class="postcard-overlay" id="postcardComposeOverlay">
       <div class="postcard-box">
         <button type="button" class="postcard-close" id="postcardComposeClose" aria-label="Close">×</button>
+        <?php if ($postcardRecipientOptions): ?>
+        <!-- Phase 75: "send a message" -- one pop-up, three interchangeable
+             message types, navigable back and forth at any time, same
+             River/Rings/Spiral segmented-control pattern/CSS as the
+             timeline's own layout switcher above. Postcard and Letter
+             are panels within THIS template (wireMessageModeSwitch()
+             below just toggles which one shows); Greetings card is a
+             separate template/overlay (cardComposeTemplate) reused as-is
+             -- clicking it hands off to window.ourthologyOpenCardComposer()
+             instead of showing a panel here. -->
+        <div class="segmented message-mode-toggle" id="messageModeToggle" role="group" aria-label="Message type">
+          <button type="button" data-mode="postcard" class="active">Postcard</button>
+          <button type="button" data-mode="letter">Letter</button>
+          <button type="button" data-mode="gcard">Greetings card</button>
+        </div>
+        <?php endif; ?>
         <div class="postcard-mode-panel" id="postcardModePanel">
         <h3 style="margin:0 0 14px;">Send a postcard</h3>
         <?php if (!$postcardRecipientOptions): ?>
           <p class="notice">Nobody else in your family has claimed a profile yet — a postcard needs someone actually signed up to receive it.</p>
         <?php else: ?>
-          <p class="letter-switch-text">Need a longer form of message? <button type="button" class="letter-switch-btn" id="switchToLetterBtn">Send a letter instead</button></p>
           <form method="post" action="/postcard.php" enctype="multipart/form-data">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="send">
@@ -3331,6 +3418,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               <div class="postcard-flip-inner">
                 <div class="postcard-face postcard-face-front">
                   <div class="postcard-photo-mat">
+                    <!-- Phase 75: "watermark it as POSTCARD ... when an
+                         image is uploaded, remove the watermark" -- sits
+                         behind the drop-zone's own prompt (DOM order,
+                         plus pointer-events:none so it never steals the
+                         "click to choose a photo" click), and the same
+                         .has-image class that already swaps the drop-
+                         zone for the real preview (see the CSS) hides
+                         this too, so it needs no wiring of its own. -->
+                    <div class="postcard-watermark" aria-hidden="true">Postcard</div>
                     <div class="postcard-drop-zone">
                       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       <span>Drop a photo here, paste one, or click to choose one</span>
@@ -3380,7 +3476,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
         <?php if ($postcardRecipientOptions): ?>
         <div class="letter-mode-panel" id="letterModePanel">
-          <button type="button" class="letter-back-link" id="switchToPostcardBtn">← Back to postcard</button>
           <h3 style="margin:0 0 12px;">Send a letter</h3>
           <form method="post" action="/letter.php" id="letterForm">
             <?= csrf_field() ?>
@@ -3452,7 +3547,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // Escape all close it, appended fresh each open so state never lingers
     // between opens.
     (function () {
-      var openBtn = document.getElementById("sendPostcardBtn");
+      var openBtn = document.getElementById("sendMessageBtn");
       var tpl = document.getElementById("postcardComposeTemplate");
       if (!openBtn || !tpl) return;
 
@@ -3615,27 +3710,48 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           });
         }
 
-        // Phase 53: "need a longer form of message? send a letter
-        // instead" -- swaps which panel is visible inside the SAME
-        // pop-up rather than opening a second one, so the × / overlay-
-        // click / Escape close handling already wired up above just
-        // keeps working unchanged.
+      }
+
+      // Phase 75: "send a message" -- one pop-up, three message types,
+      // navigable back and forth at any time. Postcard/Letter are just
+      // panels within THIS overlay (same show/hide trick Phase 53's old
+      // two-way "send a letter instead" link used, generalized to a
+      // third option); Greetings card lives in its own template
+      // (cardComposeTemplate/#gcardComposeOverlay) so clicking it closes
+      // this overlay and opens that one instead, via the global open
+      // function each composer exposes for exactly this handoff -- see
+      // #gcardModeToggle's matching wiring in ourthologyOpenCardComposer.
+      function wireMessageModeSwitch(root, initialMode) {
+        var toggle = root.querySelector("#messageModeToggle");
+        if (!toggle) return;
         var postcardPanel = root.querySelector("#postcardModePanel");
         var letterPanel = root.querySelector("#letterModePanel");
-        var toLetterBtn = root.querySelector("#switchToLetterBtn");
-        var toPostcardBtn = root.querySelector("#switchToPostcardBtn");
-        if (toLetterBtn && letterPanel && postcardPanel) {
-          toLetterBtn.addEventListener("click", function () {
-            postcardPanel.style.display = "none";
-            letterPanel.style.display = "block";
+        var buttons = toggle.querySelectorAll("button");
+        function setMode(mode) {
+          buttons.forEach(function (b) {
+            b.classList.toggle("active", b.getAttribute("data-mode") === mode);
           });
+          if (mode === "letter") {
+            if (postcardPanel) postcardPanel.style.display = "none";
+            if (letterPanel) letterPanel.style.display = "block";
+          } else {
+            if (letterPanel) letterPanel.style.display = "none";
+            if (postcardPanel) postcardPanel.style.display = "";
+          }
         }
-        if (toPostcardBtn && letterPanel && postcardPanel) {
-          toPostcardBtn.addEventListener("click", function () {
-            letterPanel.style.display = "none";
-            postcardPanel.style.display = "";
+        buttons.forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            if (root.dataset.locked === "1") return;
+            var mode = btn.getAttribute("data-mode");
+            if (mode === "gcard") {
+              closeOverlay();
+              window.ourthologyOpenCardComposer({ kind: "anytime", personId: null, eventId: null, name: "", firstName: "", coverDefault: "", greetingDefault: "" });
+              return;
+            }
+            setMode(mode);
           });
-        }
+        });
+        setMode(initialMode || "postcard");
       }
 
       // Phase 53: the letter composer -- a recipient <select> that fills
@@ -3795,7 +3911,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       }
 
-      openBtn.addEventListener("click", function () {
+      // Phase 75: exposed globally so the "Send a message" trigger (this
+      // button), calendar.php's auto-open param, AND the greetings-card
+      // popup's own mode switcher (see cardComposeTemplate below) can all
+      // open this same postcard/letter overlay and land on whichever of
+      // the two panels the user asked for -- that's what makes "navigable
+      // back and forth between postcard, letter or greetings card at any
+      // time" possible without duplicating any of this wiring.
+      window.ourthologyOpenMessageComposer = function (mode) {
         closeOverlay();
         document.body.appendChild(tpl.content.cloneNode(true));
         var overlay = document.getElementById("postcardComposeOverlay");
@@ -3810,6 +3933,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         document.addEventListener("keydown", onEscape);
         wireForm(overlay);
         wireLetterForm(overlay);
+        wireMessageModeSwitch(overlay, mode);
+      };
+
+      openBtn.addEventListener("click", function () {
+        window.ourthologyOpenMessageComposer("postcard");
       });
     })();
   </script>
@@ -3818,6 +3946,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <div class="gcard-overlay" id="gcardComposeOverlay">
       <div class="gcard-box" id="gcardBox">
         <button type="button" class="gcard-close" id="gcardComposeClose" aria-label="Close">×</button>
+        <!-- Phase 75: lets the "Send a message" flow (postcard/letter/
+             greetings card, opened via the anytime picker) hop over to
+             this greetings-card composer and back again. Hidden whenever
+             this popup was opened for a birthday/key-date card instead
+             (see ourthologyOpenCardComposer below) so that flow -- the
+             "coming up" banner's own "Send a card" buttons -- stays
+             exactly as it was. -->
+        <div class="segmented message-mode-toggle" id="gcardModeToggle" role="group" aria-label="Message type" hidden>
+          <button type="button" data-mode="postcard">Postcard</button>
+          <button type="button" data-mode="letter">Letter</button>
+          <button type="button" data-mode="gcard" class="active">Greetings card</button>
+        </div>
         <h3 class="gcard-title" id="gcardTitle">Send a card</h3>
         <form method="post" action="/card.php" enctype="multipart/form-data" id="gcardForm">
           <?= csrf_field() ?>
@@ -4259,6 +4399,27 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           title.textContent = isAnytime ? "Send a card" : (data.name ? (isKeyDate ? ("Send a card for " + data.name) : ("Send " + data.name + " a card")) : "Send a card");
         }
 
+        // Phase 75: the postcard/letter/greetings-card switcher only makes
+        // sense for the "anytime" flow (opened via the timeline/calendar
+        // "Send a message" button) -- a birthday or key-date card stays
+        // exactly as it was, per "keep the Banner... functionally
+        // untouched", so the toggle is hidden and left unwired for those.
+        var modeToggle = document.getElementById("gcardModeToggle");
+        if (modeToggle) {
+          modeToggle.hidden = !isAnytime;
+          if (isAnytime) {
+            modeToggle.querySelectorAll("button").forEach(function (btn) {
+              btn.addEventListener("click", function () {
+                if (overlay.dataset.locked === "1") return;
+                var mode = btn.getAttribute("data-mode");
+                if (mode === "gcard") return;
+                closeOverlay();
+                window.ourthologyOpenMessageComposer(mode);
+              });
+            });
+          }
+        }
+
         // Nothing here is "about" any one person yet for a key date or an
         // anytime card, so nothing's picked yet either -- the picker shows
         // and "Add your message" starts disabled; wireRecipientPicker()
@@ -4315,6 +4476,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       // everything needed to reopen the same composer for that same
       // birthday or key date, even one further out than this page's own
       // 7-day banner would otherwise show.
+      // Phase 75: calendar.php's "Send a message" button (?send_message=1)
+      // lands here the same way -- opening the unified postcard/letter/
+      // greetings-card pop-up on load, defaulting to the postcard panel.
+      <?php if ($autoOpenSendMessage): ?>
+      window.ourthologyOpenMessageComposer("postcard");
+      <?php endif; ?>
+
       var directOpenRow = <?= $directOpenCardRow !== null ? json_encode($directOpenCardRow) : 'null' ?>;
       if (directOpenRow) {
         window.ourthologyOpenCardComposer(directOpenRow);

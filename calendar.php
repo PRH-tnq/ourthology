@@ -292,7 +292,10 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
         <a href="/timeline.php">My timeline</a>
         <a href="/tree.php">My tree</a>
         <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
-        <a href="/timeline.php?send_card_anytime=1" class="linklet-btn" style="text-decoration:none;">Send a card</a>
+        <!-- Phase 75: was ?send_card_anytime=1 / "Send a card" -- now opens
+             the unified postcard/letter/greetings-card pop-up on timeline.php
+             instead of jumping straight to a greetings card. -->
+        <a href="/timeline.php?send_message=1" class="linklet-btn" style="text-decoration:none;">Send a message</a>
         <button type="button" id="printCalendarBtn" class="linklet-btn" onclick="window.print()">Print calendar</button>
       </div>
       <div class="whoami">
