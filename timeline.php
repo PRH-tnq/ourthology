@@ -1191,6 +1191,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      instead of every tile being stretched edge-to-edge. */
   .viewer-media-grid { width:100%; max-height:100%; display:grid; grid-template-columns:repeat(var(--cols, 2), 1fr); gap:10px; padding:14px; overflow-y:auto; align-content:center; justify-content:center; }
   .viewer-media-grid-tile { position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; background:var(--paper); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; transition:border-color .15s ease; }
+  /* Phase 81: image/video tiles render as <button> (opens #memLightbox)
+     while document tiles stay <a target="_blank">; this resets the
+     button's own user-agent chrome so it renders identically to the <a>
+     tiles beside it. */
+  button.viewer-media-grid-tile { margin:0; padding:0; font:inherit; cursor:pointer; }
   .viewer-media-grid-tile:hover { border-color:var(--accent); }
   .viewer-media-grid-tile img { width:100%; height:100%; object-fit:cover; }
   .viewer-media .media-tile { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--ink-faint); }
@@ -1307,6 +1312,37 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .trip-lightbox img { max-width:100%; max-height:100%; border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
   .trip-lightbox-close { position:absolute; top:18px; right:24px; border:none; background:rgba(255,255,255,.12); color:#fff; font-size:26px; width:40px; height:40px; border-radius:999px; cursor:pointer; line-height:1; }
   .trip-lightbox-close:hover { background:rgba(255,255,255,.22); }
+
+  /* Phase 81: a SEPARATE lightbox from .trip-lightbox above, opened from a
+     memory's own multi-photo grid (viewer-media-grid) rather than the
+     trip planner. .trip-lightbox only ever shows one zoomed photo with no
+     "next/previous" concept; this one tracks an index into the current
+     memory's media list and adds prev/next arrows + a counter, so it's
+     built fresh rather than bolted onto that one. Same visual language
+     (dark backdrop, fixed/centered, opacity+pointer-events open toggle)
+     and the same z-index tier so either can sit on top of ordinary page
+     content -- they're never open at the same time so no stacking clash
+     between the two. */
+  .mem-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.86); z-index:1600; display:flex; align-items:center; justify-content:center; padding:30px; opacity:0; pointer-events:none; transition:opacity .12s ease; }
+  .mem-lightbox.open { opacity:1; pointer-events:auto; }
+  .mem-lightbox-stage { max-width:100%; max-height:100%; display:flex; align-items:center; justify-content:center; }
+  .mem-lightbox-stage img, .mem-lightbox-stage video { max-width:100%; max-height:100%; border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  .mem-lightbox-stage .mem-lightbox-file { background:#fff; border-radius:10px; padding:34px 40px; text-align:center; color:var(--ink); box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  .mem-lightbox-stage .mem-lightbox-file a { display:inline-block; margin-top:10px; }
+  .mem-lightbox-close { position:absolute; top:18px; right:24px; border:none; background:rgba(255,255,255,.12); color:#fff; font-size:26px; width:40px; height:40px; border-radius:999px; cursor:pointer; line-height:1; }
+  .mem-lightbox-close:hover { background:rgba(255,255,255,.22); }
+  .mem-lightbox-nav { position:absolute; top:50%; transform:translateY(-50%); border:none; background:rgba(255,255,255,.12); color:#fff; font-size:34px; width:52px; height:52px; border-radius:999px; cursor:pointer; line-height:1; display:flex; align-items:center; justify-content:center; }
+  .mem-lightbox-nav:hover { background:rgba(255,255,255,.22); }
+  .mem-lightbox-nav:disabled { opacity:0; pointer-events:none; }
+  .mem-lightbox-prev { left:18px; }
+  .mem-lightbox-next { right:18px; }
+  .mem-lightbox-counter { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); color:#fff; font-size:13px; background:rgba(255,255,255,.12); border-radius:999px; padding:5px 14px; }
+  @media (max-width:640px) {
+    .mem-lightbox-nav { width:42px; height:42px; font-size:28px; }
+    .mem-lightbox-prev { left:6px; }
+    .mem-lightbox-next { right:6px; }
+    .mem-lightbox { padding:12px; }
+  }
 </style>
 </head>
 <body>
@@ -1668,6 +1704,22 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   <div class="trip-lightbox" id="tripLightbox">
     <button type="button" class="trip-lightbox-close" id="tripLightboxClose" aria-label="Close">×</button>
     <img id="tripLightboxImg" src="" alt="">
+  </div>
+
+  <!-- Phase 81: opened from a memory's own multi-photo grid (see
+       wireViewerMediaGridClicks() / openMemLightbox() below) -- a
+       dedicated lightbox rather than reusing #tripLightbox above, since
+       that one only ever shows a single zoomed photo with no concept of
+       "next/previous within a list"; this one tracks an index into the
+       CURRENT memory's own media array and adds the left/right arrows
+       (and matching ArrowLeft/ArrowRight keys) to step through it,
+       without touching the trip planner's existing zoom feature at all. -->
+  <div class="mem-lightbox" id="memLightbox">
+    <button type="button" class="mem-lightbox-close" id="memLightboxClose" aria-label="Close">×</button>
+    <button type="button" class="mem-lightbox-nav mem-lightbox-prev" id="memLightboxPrev" aria-label="Previous photo">‹</button>
+    <div class="mem-lightbox-stage" id="memLightboxStage"></div>
+    <button type="button" class="mem-lightbox-nav mem-lightbox-next" id="memLightboxNext" aria-label="Next photo">›</button>
+    <div class="mem-lightbox-counter" id="memLightboxCounter"></div>
   </div>
 
   <script id="entriesData" type="application/json"><?= $entriesJsonSafe ?></script>
@@ -2647,6 +2699,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerAddMediaForm = document.getElementById("viewerAddMediaForm");
     var viewerAddMediaEntryId = document.getElementById("viewerAddMediaEntryId");
 
+    // Phase 81: multi-photo in-page lightbox, opened from a memory's own
+    // media grid (see viewerMediaViewHtml/wireViewerMediaGridClicks below).
+    var memLightbox = document.getElementById("memLightbox");
+    var memLightboxStage = document.getElementById("memLightboxStage");
+    var memLightboxClose = document.getElementById("memLightboxClose");
+    var memLightboxPrev = document.getElementById("memLightboxPrev");
+    var memLightboxNext = document.getElementById("memLightboxNext");
+    var memLightboxCounter = document.getElementById("memLightboxCounter");
+    var memLightboxList = [];
+    var memLightboxIndex = 0;
+
     // Phase 43: a richer, drag-and-drop-capable file picker for the "add
     // media to a memory I'm tagged on" form -- matching add_entry.php's own
     // #photoDrop pattern (same CSS, now shared via styles.css) but simpler,
@@ -2867,6 +2930,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           if (e) {
             e.media = (e.media || []).concat(data.media || []);
             viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
+            wireViewerMediaGridClicks(e.media);
             vamRemainingSlots = Math.max(0, 25 - e.media.length); // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
           }
           vamReset();
@@ -2893,15 +2957,89 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       // square for any other count in between (e.g. 5 or 7 lands as 3
       // columns too, just with a shorter last row).
       var cols = Math.max(2, Math.ceil(Math.sqrt(list.length)));
-      return '<div class="viewer-media-grid" style="--cols:' + cols + '">' + list.map(function (m) {
-        return '<a class="viewer-media-grid-tile" href="' + m.url + '" target="_blank" rel="noopener" title="Open full size">' + mediaTileHtml(m) + '</a>';
+      // Phase 81: image/video tiles become buttons that open the in-page
+      // lightbox (see wireViewerMediaGridClicks below), tracking their
+      // position in the list so the left/right arrows can step through the
+      // rest of the memory's media without leaving the page. Document
+      // tiles keep the old direct-new-tab <a> behavior on their own
+      // click -- there's nothing to preview inline -- but are still
+      // reachable by arrow-navigating to them from a neighboring
+      // photo/video, where the lightbox shows an "open file" prompt
+      // instead (see memLightboxRenderCurrent).
+      return '<div class="viewer-media-grid" style="--cols:' + cols + '">' + list.map(function (m, idx) {
+        if (m.kind === "image" || m.kind === "video") {
+          return '<button type="button" class="viewer-media-grid-tile" data-idx="' + idx + '" title="Open full size">' + mediaTileHtml(m) + '</button>';
+        }
+        return '<a class="viewer-media-grid-tile" href="' + m.url + '" target="_blank" rel="noopener" title="Open file">' + mediaTileHtml(m) + '</a>';
       }).join("") + '</div>';
     }
+
+    // Phase 81: attaches the click listeners that open #memLightbox to the
+    // grid's image/video <button> tiles just rendered by
+    // viewerMediaViewHtml() above. Has to be called fresh every time that
+    // HTML is (re)assigned into #viewerMedia -- once when a memory is
+    // first opened, and again after the "add media" form succeeds and
+    // reassigns it with the new, longer list -- since innerHTML wipes out
+    // any listeners attached to the previous markup.
+    function wireViewerMediaGridClicks(mediaList) {
+      var tiles = viewerMedia.querySelectorAll(".viewer-media-grid-tile[data-idx]");
+      for (var i = 0; i < tiles.length; i++) {
+        tiles[i].addEventListener("click", function (evt) {
+          var idx = parseInt(evt.currentTarget.getAttribute("data-idx"), 10);
+          openMemLightbox(mediaList, idx);
+        });
+      }
+    }
+
+    function memLightboxRenderCurrent() {
+      var m = memLightboxList[memLightboxIndex];
+      if (!m) return;
+      if (m.kind === "image") {
+        memLightboxStage.innerHTML = '<img src="' + m.url + '" alt="">';
+      } else if (m.kind === "video") {
+        memLightboxStage.innerHTML = '<video src="' + m.url + '" controls playsinline autoplay></video>';
+      } else {
+        // Reached by arrow-navigating from a neighboring photo/video --
+        // there's no inline preview for a document, so show an "open
+        // file" prompt in its place rather than silently doing nothing.
+        memLightboxStage.innerHTML = '<div class="mem-lightbox-file">' + DOC_ICON + '<div><a href="' + m.url + '" target="_blank" rel="noopener">Open file</a></div></div>';
+      }
+      var count = memLightboxList.length;
+      memLightboxPrev.disabled = memLightboxIndex <= 0;
+      memLightboxNext.disabled = memLightboxIndex >= count - 1;
+      var showChrome = count > 1;
+      memLightboxPrev.hidden = !showChrome;
+      memLightboxNext.hidden = !showChrome;
+      memLightboxCounter.hidden = !showChrome;
+      memLightboxCounter.textContent = (memLightboxIndex + 1) + " of " + count;
+    }
+    function memLightboxStep(delta) {
+      var next = memLightboxIndex + delta;
+      if (next < 0 || next >= memLightboxList.length) return;
+      memLightboxIndex = next;
+      memLightboxRenderCurrent();
+    }
+    function openMemLightbox(list, index) {
+      memLightboxList = list || [];
+      memLightboxIndex = index || 0;
+      memLightboxRenderCurrent();
+      memLightbox.classList.add("open");
+    }
+    function closeMemLightbox() {
+      memLightbox.classList.remove("open");
+      memLightboxStage.innerHTML = "";
+      memLightboxList = [];
+    }
+    memLightboxClose.addEventListener("click", closeMemLightbox);
+    memLightboxPrev.addEventListener("click", function () { memLightboxStep(-1); });
+    memLightboxNext.addEventListener("click", function () { memLightboxStep(1); });
+    memLightbox.addEventListener("click", function (e) { if (e.target === memLightbox) closeMemLightbox(); });
 
     function openViewer(id) {
       var e = findEntry(id);
       if (!e) return;
       viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
+      wireViewerMediaGridClicks(e.media);
       viewerTitleView.textContent = e.title;
       viewerDateView.textContent = fmtDate(new Date(e.date + "T00:00:00"));
       viewerHeaderTitle.textContent = e.type === "diary" ? "Diary entry" : "Memory";
@@ -2961,6 +3099,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     document.getElementById("viewerCloseBtn").addEventListener("click", closeViewer);
     viewerScrim.addEventListener("click", function (e) { if (e.target === viewerScrim) closeViewer(); });
     document.addEventListener("keydown", function (e) {
+      // Phase 81: #memLightbox sits on top of #viewerScrim, so its Escape
+      // is checked first and returns -- otherwise the same keypress would
+      // close the lightbox AND the memory viewer underneath it in one go.
+      if (memLightbox.classList.contains("open")) {
+        if (e.key === "Escape") { closeMemLightbox(); return; }
+        if (e.key === "ArrowLeft") { memLightboxStep(-1); return; }
+        if (e.key === "ArrowRight") { memLightboxStep(1); return; }
+        return;
+      }
       if (e.key === "Escape" && viewerScrim.classList.contains("open")) closeViewer();
     });
 
