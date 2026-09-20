@@ -3031,7 +3031,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 </div>
                 <img class="gcard-front-preview" alt="">
                 <button type="button" class="gcard-change-photo">Change photo</button>
-                <input type="file" name="image" class="gcard-image-input" accept="image/*" hidden>
+                <input type="file" name="image" class="gcard-image-input" accept="image/*,.heic,.heif" hidden>
                 <div class="gcard-cover-message">
                   <span class="gcard-cover-message-text" id="gcardCoverMessageText" contenteditable="true" data-placeholder="Happy Birthday!"></span>
                 </div>
@@ -3126,14 +3126,44 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       }
 
+      // A phone's own camera photo is very often HEIC (iPhone) -- a format
+      // no Chromium/Firefox <img> can actually decode. Server-side, that's
+      // already handled (store_postcard_image() in includes/media.php
+      // converts it on the way in), but the client-side preview here used
+      // to just hand a HEIC file straight to FileReader/<img>, which
+      // "succeeds" (has-image gets added, hiding the drop zone) while the
+      // <img> itself silently renders nothing -- exactly the "I drop or
+      // select a photo and it doesn't show up" report this fixes. Same
+      // heic2any-based conversion the "add a memory" uploader already uses
+      // (see vamHeicToJpegFile() above), duplicated locally rather than
+      // shared -- this composer is deliberately self-contained in its own
+      // IIFE, same as the postcard/letter composers.
+      var GCARD_HEIC_RE = /\.(heic|heif)$/i;
+      function gcardLooksLikeHeic(file) {
+        return GCARD_HEIC_RE.test(file.name || "") || file.type === "image/heic" || file.type === "image/heif";
+      }
+      function gcardHeicToJpegFile(file) {
+        if (typeof heic2any !== "function") return Promise.reject(new Error("heic2any not available"));
+        return heic2any({ blob: file, toType: "image/jpeg", quality: 0.88 }).then(function (result) {
+          var blob = Array.isArray(result) ? result[0] : result;
+          var newName = file.name.replace(GCARD_HEIC_RE, "") + ".jpg";
+          return new File([blob], newName, { type: "image/jpeg" });
+        });
+      }
+
       function wireImagePicker(root) {
         var fileInput = root.querySelector(".gcard-image-input");
         var frontFace = root.querySelector("#gcardCoverFront");
         var previewImg = root.querySelector(".gcard-front-preview");
         var dropZone = root.querySelector(".gcard-drop-zone");
+        var dropZoneLabel = dropZone ? dropZone.querySelector("span") : null;
+        var dropZoneLabelDefault = dropZoneLabel ? dropZoneLabel.textContent : "";
         var changeBtn = root.querySelector(".gcard-change-photo");
         if (!fileInput || !frontFace || !previewImg || !dropZone) return;
 
+        function setDropZoneLabel(text) {
+          if (dropZoneLabel) dropZoneLabel.textContent = text;
+        }
         function showPreview(files) {
           if (!files || !files[0] || files[0].type.indexOf("image/") !== 0) return;
           var reader = new FileReader();
@@ -3143,19 +3173,41 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           };
           reader.readAsDataURL(files[0]);
         }
-        function setFile(file) {
+        function setFile(file, skipPreview) {
           if (!file) return;
           try {
             var dt = new DataTransfer();
             dt.items.add(file);
             fileInput.files = dt.files;
           } catch (e) { /* older browser -- preview still shows, it just won't carry into the submit */ }
-          showPreview([file]);
+          if (!skipPreview) showPreview([file]);
+        }
+
+        function handleIncomingFile(file) {
+          if (!file) return;
+          if (!gcardLooksLikeHeic(file)) {
+            setDropZoneLabel(dropZoneLabelDefault);
+            setFile(file);
+            return;
+          }
+          setDropZoneLabel("Converting your photo…");
+          gcardHeicToJpegFile(file).then(function (jpegFile) {
+            setDropZoneLabel(dropZoneLabelDefault);
+            setFile(jpegFile);
+          }).catch(function () {
+            // Couldn't convert it here to preview it -- it still gets
+            // attached and will convert fine server-side when the card's
+            // actually sent (same store_postcard_image() path a postcard's
+            // photo goes through), there's just nothing to show for it
+            // in this pop-up in the meantime.
+            setFile(file, true);
+            setDropZoneLabel("Photo attached — this one can't preview here, but it'll look right once the card's sent.");
+          });
         }
 
         dropZone.addEventListener("click", function () { fileInput.click(); });
         if (changeBtn) changeBtn.addEventListener("click", function (evt) { evt.stopPropagation(); fileInput.click(); });
-        fileInput.addEventListener("change", function () { showPreview(fileInput.files); });
+        fileInput.addEventListener("change", function () { handleIncomingFile(fileInput.files && fileInput.files[0]); });
         ["dragover", "dragenter"].forEach(function (evtName) {
           frontFace.addEventListener(evtName, function (evt) { evt.preventDefault(); dropZone.classList.add("is-dragover"); });
         });
@@ -3166,7 +3218,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           evt.preventDefault();
           dropZone.classList.remove("is-dragover");
           var files = evt.dataTransfer ? evt.dataTransfer.files : null;
-          if (files && files[0]) setFile(files[0]);
+          if (files && files[0]) handleIncomingFile(files[0]);
         });
 
         // "the user should be able to drag, paste or select, just like
@@ -3183,7 +3235,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               var file = items[i].getAsFile();
               if (file) {
                 evt.preventDefault();
-                setFile(file);
+                handleIncomingFile(file);
               }
               break;
             }
