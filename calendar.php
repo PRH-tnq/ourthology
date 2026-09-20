@@ -130,6 +130,7 @@ $allEntries = array_merge($birthdays, $keyDates);
 $today = new DateTimeImmutable('today');
 $todayMonth = (int) $today->format('n');
 $todayDay = (int) $today->format('j');
+$todayYear = (int) $today->format('Y');
 
 // "Upcoming" -- within the next month, nearest first. Deliberately a
 // longer horizon than tree.php's 7-day birthday banner (that one's a
@@ -213,7 +214,21 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-year { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:16px; }
   .cal-month { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
   .cal-month.is-current { border-color:var(--accent); box-shadow:0 0 0 2px rgba(154,42,42,.12); }
+  /* Phase 71: "differentiate between this year and next" -- the grid
+     always shows all twelve months in calendar order (Jan first), so
+     without some marker it isn't obvious that, say, "March" here means
+     March next year rather than the one already gone by. A deeper paper
+     tone (var(--paper-2), the same tan used for input fields and other
+     "recessed" surfaces elsewhere) reads as literally further back/away
+     compared to the brighter var(--card) used for this year's months,
+     and the '27-style year label beside the name spells it out exactly.
+     .is-current keeps its accent border regardless -- "this month" is
+     never a next-year month anyway (see $isNextYear's own comment). */
+  .cal-month.is-next-year { background:var(--paper-2); }
   .cal-month h3 { font-family:"Fraunces",Georgia,serif; font-size:15px; margin:0 0 8px; display:flex; align-items:center; justify-content:space-between; }
+  .cal-month h3 .cal-month-label { display:flex; align-items:baseline; gap:5px; }
+  .cal-month h3 .cal-month-year { font-size:12px; font-weight:600; color:var(--ink-faint); }
+  .cal-month.is-next-year h3 .cal-month-year { color:var(--ink-soft); }
   .cal-month h3 .cal-today-chip { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent); background:var(--error-bg); border-radius:999px; padding:2px 8px; }
   .cal-month-empty { color:var(--ink-faint); font-size:12.5px; margin:0; }
   .cal-entry { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
@@ -358,9 +373,21 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 
     <div class="cal-year">
       <?php foreach ($monthNames as $num => $name): ?>
-        <?php $isCurrentMonth = $num === $todayMonth; ?>
-        <div class="cal-month<?= $isCurrentMonth ? ' is-current' : '' ?>">
-          <h3><?= htmlspecialchars($name, ENT_QUOTES) ?><?php if ($isCurrentMonth): ?><span class="cal-today-chip">This month</span><?php endif; ?></h3>
+        <?php
+          $isCurrentMonth = $num === $todayMonth;
+          // Phase 71: "differentiate between this year and next" -- the
+          // grid always runs January first regardless of what month it
+          // is now (see the comment above $byMonth), so a month that's
+          // already gone by this calendar year (anything before this
+          // month) means its NEXT occurrence is actually next year, not
+          // this one -- March shown in September is next March, 2027,
+          // not the one that already passed. This month itself counts as
+          // "this year" even though part of it is behind us too.
+          $monthYear = $num >= $todayMonth ? $todayYear : $todayYear + 1;
+          $isNextYear = $monthYear !== $todayYear;
+        ?>
+        <div class="cal-month<?= $isCurrentMonth ? ' is-current' : '' ?><?= $isNextYear ? ' is-next-year' : '' ?>">
+          <h3><span class="cal-month-label"><?= htmlspecialchars($name, ENT_QUOTES) ?> <span class="cal-month-year">'<?= substr((string) $monthYear, 2, 2) ?></span></span><?php if ($isCurrentMonth): ?><span class="cal-today-chip">This month</span><?php endif; ?></h3>
           <?php if (!$byMonth[$num]): ?>
             <p class="cal-month-empty">Nothing marked.</p>
           <?php else: ?>

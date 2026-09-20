@@ -982,6 +982,32 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 
         var iframe = document.createElement('iframe');
         iframe.src = '/edit_person.php?person_id=' + encodeURIComponent(personId) + '&popup=1';
+        // Phase 71: "when someone saves something ... automatically
+        // close that pop-up about a second after" -- edit_person.php
+        // redirects back to itself after any successful save (profile,
+        // a relationship, a photo, account settings, even a delete),
+        // still inside this same iframe, showing a ".notice" flash
+        // ("Profile updated.", etc) -- the outer popup box around it
+        // never knew to close itself for that. Same-origin iframe, so
+        // its document is readable directly, no postMessage needed. The
+        // first load is the popup just opening (nothing saved yet, no
+        // notice), so that one's skipped; every load after that gets
+        // checked, and finding a notice means a save just landed, worth
+        // a beat to read before the whole thing closes on its own. The
+        // "still this overlay" check guards against a stray timer from
+        // an earlier popup closing whichever one is open now, if the
+        // person reopened it (a different person's edit, say) before
+        // that timer fired.
+        var firstLoad = true;
+        iframe.addEventListener('load', function () {
+          if (firstLoad) { firstLoad = false; return; }
+          var doc = iframe.contentDocument;
+          if (doc && doc.querySelector('.notice')) {
+            window.setTimeout(function () {
+              if (document.getElementById('editPopupOverlay') === overlay) { closeEditPopup(); }
+            }, 1000);
+          }
+        });
 
         box.appendChild(closeBtn);
         box.appendChild(iframe);

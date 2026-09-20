@@ -560,28 +560,43 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .page-head::after { content:""; display:table; clear:both; }
   /* Phil asked for this bigger, then bigger again — now double the second
      size (156px desktop, up from an initial 78px). */
-  /* Phase 71: "Take the tour" / "What's new" moved out of .nav to sit
-     right under the profile photo instead — .header-avatar-col is the
-     float now (the photo itself no longer floats, it's just this
-     column's first child), so the two buttons stack directly beneath it
-     as one unit wherever the column ends up, desktop or the stacked
-     mobile layout below. */
-  .header-avatar-col { float:right; margin:0 0 12px 18px; display:flex; flex-direction:column; align-items:stretch; gap:8px; width:156px; }
-  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); float:none; margin:0; }
+  /* Phase 71 note: a first attempt at moving "Take the tour" / "What's
+     new" put them in their own column stacked under this photo -- that
+     made .page-head's floated block much taller than the nav row beside
+     it, leaving a large blank gap between "My timeline" and the
+     River/Rings/Spiral row below (Phil flagged it with a screenshot).
+     Reverted back to a plain floated photo, with the buttons living in
+     .controls instead, on the River/Rings/Spiral row -- see
+     .tour-controls-group below. */
+  /* Phase 71 (mobile): "beside the profile image... it will look much
+     neater" -- on the stacked mobile layout there's no River/Rings/Spiral
+     row directly under the header the way there is on desktop, so the
+     buttons on that row (.tour-controls-group) end up wrapping onto their
+     own row below it instead, further down the page than the header.
+     .header-avatar-row wraps the avatar so a second, mobile-only pair of
+     buttons (.header-avatar-actions-mobile -- same IDs' worth of function,
+     different elements, since these need to show only below 620px while
+     .tour-controls-group's originals keep showing above it) can sit next
+     to it, hidden entirely above 620px so desktop is untouched. */
+  .header-avatar-row { float:right; margin:0 0 12px 18px; }
+  .header-avatar-actions-mobile { display:none; }
+  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); }
   .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:62px; color:var(--ink-faint); }
-  .header-avatar-actions { display:flex; flex-direction:column; gap:6px; }
   @media (max-width: 620px) {
     /* At this size the photo no longer fits beside the wordmark on a real
        phone width (confirmed by measuring, not by eye — it ran off the
        card's right edge before this), so on a narrow phone the header
        goes back to a plain stacked column instead of wrapping text around
-       the float — "order" puts the avatar back between the brand and the
-       nav regardless of where it sits in the markup (it has to come first
-       in the markup for the desktop float-wrap above to work). */
+       the float — "order" puts the avatar row back between the brand and
+       the nav regardless of where it sits in the markup (it has to come
+       first in the markup for the desktop float-wrap above to work). */
     .page-head { display:flex; flex-direction:column; }
     .page-head .brand { order:1; }
-    .header-avatar-col { order:2; float:none; width:122px; margin:4px 0 10px auto; }
-    .header-avatar, .header-avatar-placeholder { width:122px; height:122px; font-size:49px; }
+    .header-avatar-row { order:2; float:none; width:100%; margin:4px 0 10px 0; display:flex; align-items:center; justify-content:flex-end; gap:10px; }
+    .header-avatar, .header-avatar-placeholder { width:122px; height:122px; font-size:49px; flex:none; }
+    .header-avatar-actions-mobile { display:flex; flex-direction:column; gap:6px; }
+    .header-avatar-actions-mobile .linklet-btn { font-size:12px; font-weight:600; padding:6px 11px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; white-space:nowrap; text-align:center; }
+    .header-avatar-actions-mobile .linklet-btn.ghost { background:transparent; color:var(--accent); }
     .page-head .nav { order:3; }
     .page-head .page-head-heading { order:4; }
     /* The vertical divider before "Signed in as" only makes sense when it
@@ -609,13 +624,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      option of the two rather than competing with "Take the tour". */
   .nav .linklet-btn.ghost { background:transparent; color:var(--accent); }
   .nav .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
-  /* Phase 71: same pill treatment as .nav .linklet-btn above, duplicated
-     here since these two buttons no longer live inside .nav -- they sit
-     in .header-avatar-actions, under the profile photo, instead. */
-  .header-avatar-actions .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; text-align:center; }
-  .header-avatar-actions .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
-  .header-avatar-actions .linklet-btn.ghost { background:transparent; color:var(--accent); }
-  .header-avatar-actions .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
 
   /* Phase 48: "Send a postcard" -- a compose pop-up styled like a
      physical postcard, front (photo) and back (handwritten note) as two
@@ -962,19 +970,42 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      original -- sits as the right-pushed last item in .controls, i.e.
      top-right of the page, just under the avatar, in line with the
      River/Rings/Spiral and zoom buttons. */
-  .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; margin-left:auto; }
+  .birthday-banner { display:flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid #C2790F; background:#F3DFB8; border-radius:999px; font-size:13px; color:#6B4A0A; max-width:100%; }
   .birthday-banner strong { color:#8A5A0A; font-weight:700; }
   /* Phase 67: "add an option in that banner to 'send a card'" -- the
      banner is now one pill per upcoming birthday (rather than one pill
      with every name joined into a single string) so each can carry its
      own button, wrapped in a group so several still sit together the way
-     the old single pill did. margin-left:auto moved from .birthday-banner
-     itself onto the group, since a bare single .birthday-banner no longer
-     needs to push itself right when it's not the group's first child. */
-  .birthday-banner-group { display:flex; flex-wrap:wrap; gap:8px; margin-left:auto; max-width:100%; }
+     the old single pill did. */
+  .birthday-banner-group { display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
   .birthday-banner-group .birthday-banner { margin-left:0; }
   .birthday-send-card-btn { flex:none; font-size:12px; font-weight:700; padding:5px 11px; margin-left:2px; border-radius:999px; border:1px solid #8A5A0A; color:#FBF8F1; background:#C2790F; cursor:pointer; font-family:inherit; white-space:nowrap; }
   .birthday-send-card-btn:hover { background:#A9670C; }
+
+  /* Phase 71: "Take the tour" / "What's new" moved out of the nav row
+     (and out of a too-tall column under the avatar -- see the note by
+     .header-avatar above) onto the River/Rings/Spiral row instead, right
+     next to each other. .controls-right is the single right-pushed group
+     now -- it holds this button pair and the birthday banner group
+     (whichever of the two are present), so however many of them render,
+     they sit adjacent to each other at the row's right edge with one
+     shared push, rather than each fighting for its own margin-left:auto
+     and leaving a gap between them. */
+  .controls-right { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-left:auto; max-width:100%; }
+  .tour-controls-group { display:flex; gap:8px; }
+  .tour-controls-group .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; white-space:nowrap; }
+  .tour-controls-group .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
+  .tour-controls-group .linklet-btn.ghost { background:transparent; color:var(--accent); }
+  .tour-controls-group .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
+  /* Phase 71 (mobile): this pair moves beside the profile photo instead
+     (.header-avatar-actions-mobile, up in .page-head) below 620px -- this
+     override has to come after the base .tour-controls-group rule above,
+     since a media-query rule earlier in the file loses a same-specificity
+     tie to a later unconditional one, regardless of which one currently
+     matches. */
+  @media (max-width: 620px) {
+    .tour-controls-group { display:none; }
+  }
 
   /* ---------- timeline canvas ---------- */
   .arc-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; padding:8px; }
@@ -1200,19 +1231,22 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               it renders top-right) because that's what lets it float and
               have .brand and .nav wrap up against it — see the .page-head
               comment in <style> above. */ ?>
-      <div class="header-avatar-col">
+      <?php // Phase 71 (mobile): .header-avatar-row is a plain no-op wrapper
+            // above 620px (just the float, unchanged from before); below
+            // 620px it becomes the flex row that puts these two buttons
+            // beside the photo instead of on the River/Rings/Spiral row,
+            // which .tour-controls-group's copies keep doing above 620px. ?>
+      <div class="header-avatar-row">
+        <?php if ($isOwner): ?>
+          <div class="header-avatar-actions-mobile">
+            <button type="button" id="tourReplayBtnMobile" class="linklet-btn tour-replay-btn">Take the tour</button>
+            <button type="button" id="tourWhatsNewBtnMobile" class="linklet-btn ghost tour-whatsnew-btn">What's new</button>
+          </div>
+        <?php endif; ?>
         <?php if (!empty($target['avatar_path'])): ?>
           <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
         <?php else: ?>
           <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
-        <?php endif; ?>
-        <?php // Phase 71: "Take the tour" / "What's new" moved here, under
-              // the profile photo, out of the nav row below. ?>
-        <?php if ($isOwner): ?>
-          <div class="header-avatar-actions">
-            <button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button>
-            <button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost">What's new</button>
-          </div>
         <?php endif; ?>
       </div>
 
@@ -1316,27 +1350,38 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <span id="customZoomLabel"></span>
         <span class="zoom-pill-x">×</span>
       </button>
-      <?php if ($reminderCardRows): ?>
-        <div class="birthday-banner-group">
-          <?php foreach ($reminderCardRows as $row): ?>
-            <div class="birthday-banner" role="status">
-              <span aria-hidden="true"><?= $row['kind'] === 'birthday' ? '&#127874;' : '&#128197;' ?></span>
-              <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
-              <button
-                type="button"
-                class="birthday-send-card-btn"
-                data-kind="<?= htmlspecialchars($row['kind'], ENT_QUOTES) ?>"
-                data-person-id="<?= $row['person_id'] !== null ? (int) $row['person_id'] : '' ?>"
-                data-event-id="<?= $row['event_id'] !== null ? (int) $row['event_id'] : '' ?>"
-                data-first-name="<?= htmlspecialchars($row['first_name'], ENT_QUOTES) ?>"
-                data-name="<?= htmlspecialchars($row['name'], ENT_QUOTES) ?>"
-                data-cover-default="<?= htmlspecialchars($row['cover_default'], ENT_QUOTES) ?>"
-                data-greeting-default="<?= htmlspecialchars($row['greeting_default'], ENT_QUOTES) ?>"
-              >&#127873; Send a card</button>
-            </div>
-          <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
+      <div class="controls-right">
+        <?php // Phase 71: "Take the tour" / "What's new", moved here from
+              // the nav row above -- same River/Rings/Spiral row, right
+              // next to each other. ?>
+        <?php if ($isOwner): ?>
+          <div class="tour-controls-group">
+            <button type="button" id="tourReplayBtn" class="linklet-btn tour-replay-btn">Take the tour</button>
+            <button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost tour-whatsnew-btn">What's new</button>
+          </div>
+        <?php endif; ?>
+        <?php if ($reminderCardRows): ?>
+          <div class="birthday-banner-group">
+            <?php foreach ($reminderCardRows as $row): ?>
+              <div class="birthday-banner" role="status">
+                <span aria-hidden="true"><?= $row['kind'] === 'birthday' ? '&#127874;' : '&#128197;' ?></span>
+                <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
+                <button
+                  type="button"
+                  class="birthday-send-card-btn"
+                  data-kind="<?= htmlspecialchars($row['kind'], ENT_QUOTES) ?>"
+                  data-person-id="<?= $row['person_id'] !== null ? (int) $row['person_id'] : '' ?>"
+                  data-event-id="<?= $row['event_id'] !== null ? (int) $row['event_id'] : '' ?>"
+                  data-first-name="<?= htmlspecialchars($row['first_name'], ENT_QUOTES) ?>"
+                  data-name="<?= htmlspecialchars($row['name'], ENT_QUOTES) ?>"
+                  data-cover-default="<?= htmlspecialchars($row['cover_default'], ENT_QUOTES) ?>"
+                  data-greeting-default="<?= htmlspecialchars($row['greeting_default'], ENT_QUOTES) ?>"
+                >&#127873; Send a card</button>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      </div>
     </div>
 
     <div class="arc-wrap layout-river" id="arcWrap">
@@ -4103,6 +4148,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     })();
   </script>
 
+  <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
 </body>
 </html>

@@ -1000,6 +1000,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     });
   })();
   </script>
+  <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('add_entry', $myPersonId); ?>
 </body>
 </html>

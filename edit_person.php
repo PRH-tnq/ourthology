@@ -1232,6 +1232,7 @@ if ($postedProfile) {
     });
   })();
   </script>
+  <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('edit_person', $myPersonId); ?>
 </body>
 </html>

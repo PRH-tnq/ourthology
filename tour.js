@@ -92,8 +92,13 @@
   var nextBtn = document.getElementById("tourNextBtn");
   var prevBtn = document.getElementById("tourPrevBtn");
   var skipBtn = document.getElementById("tourSkipBtn");
-  var replayBtn = document.getElementById("tourReplayBtn"); // only present on timeline.php
-  var whatsNewBtn = document.getElementById("tourWhatsNewBtn"); // only present on timeline.php
+  // Phase 71: timeline.php now renders two copies of each button -- one
+  // for the River/Rings/Spiral row (>620px) and one beside the profile
+  // photo (<=620px, CSS shows/hides whichever applies) -- so these are
+  // NodeLists, not single elements, and every "only present on
+  // timeline.php" case below just iterates an empty list harmlessly.
+  var replayBtns = document.querySelectorAll(".tour-replay-btn");
+  var whatsNewBtns = document.querySelectorAll(".tour-whatsnew-btn");
   var annoLayer = document.getElementById("tourAnnoLayer");
   // Phase 44: the post-tour "get started" nudge and its dismiss button --
   // like replayBtn above, these only exist on timeline.php's own markup,
@@ -624,12 +629,12 @@
   }
   skipBtn.addEventListener("click", finishTour);
   window.addEventListener("resize", function () { if (step >= 0) place(); });
-  if (replayBtn) {
-    replayBtn.addEventListener("click", function () { startTour("full"); });
-  }
-  if (whatsNewBtn) {
-    whatsNewBtn.addEventListener("click", function () { startTour("recent"); });
-  }
+  replayBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () { startTour("full"); });
+  });
+  whatsNewBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () { startTour("recent"); });
+  });
 
   var resumeActive = false;
   try { resumeActive = sessionStorage.getItem("ourthologyTourActive") === "1"; } catch (e) {}
