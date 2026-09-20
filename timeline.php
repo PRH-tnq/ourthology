@@ -1287,6 +1287,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      the taller (wrapped) state on both sides keeps the two columns level
      regardless of which side's copy text is longer. */
   .trip-picker .media-picker-empty { min-height:85px; }
+  /* Phase 82: the media-only "Add photos" upload button + its inline
+     status line, shown instead of the (hidden, for these viewers) big
+     Save button -- sits between the picker and its notes textarea, same
+     spot .trip-kept-inputs (invisible) already occupies. */
+  .trip-picker-add-media-btn { margin-top:10px; width:100%; }
+  .trip-picker-add-status { margin:6px 0 0; font-size:12.5px; }
+  .trip-picker-add-status--ok { color:var(--ink-faint); }
+  .trip-picker-add-status--error { color:var(--accent); }
   @media (max-width: 760px) {
     .trip-top-fields { grid-template-columns:1fr 1fr; }
     .trip-event-columns { display:block; }
@@ -1629,6 +1637,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       <div class="trip-modal-body">
         <p class="trip-error" id="tripError" hidden></p>
         <p class="trip-readonly-note" id="tripReadonlyNote" hidden>You're seeing this trip because you're tagged on it — only <span id="tripReadonlyOwnerName">its owner</span> can change the plan.</p>
+        <!-- Phase 82: shown instead of #tripReadonlyNote above when you're
+             tagged AND approved on this trip -- everything else about it
+             still belongs to its owner, but you can add photos to any of
+             its events below (see tripMediaOnlyMode in the script). -->
+        <p class="trip-readonly-note" id="tripMediaOnlyNote" hidden>You're tagged on this trip, so only <span id="tripMediaOnlyOwnerName">its owner</span> can change the plan details — but you can still add photos to any event below.</p>
         <form method="post" action="/trip_plan.php" enctype="multipart/form-data" id="tripForm">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="save">
@@ -3158,6 +3171,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var tripError = document.getElementById('tripError');
     var tripReadonlyNote = document.getElementById('tripReadonlyNote');
     var tripReadonlyOwnerName = document.getElementById('tripReadonlyOwnerName');
+    var tripMediaOnlyNote = document.getElementById('tripMediaOnlyNote');
+    var tripMediaOnlyOwnerName = document.getElementById('tripMediaOnlyOwnerName');
     var tripForm = document.getElementById('tripForm');
     var tripPlanIdField = document.getElementById('tripPlanIdField');
     var tripTargetPersonField = document.getElementById('tripTargetPersonField');
@@ -3182,6 +3197,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
     var tripEventCounter = 0;
     var readOnlyMode = false;
+    // Phase 82: true only for someone who is NOT the trip's owner but DOES
+    // have an approved tag on it -- readOnlyMode stays true for them too
+    // (title/dates/tags/notes/events all stay the owner's alone), but the
+    // plan/memory pickers themselves stay add-interactive, and each gets
+    // its own small "Add photos" upload button (see tripInitPicker below)
+    // instead of the big Save button, which stays hidden for them.
+    var tripMediaOnlyMode = false;
     var activeTripPicker = null; // last-focused picker's addFiles(), for document-level paste
 
     function renderTagPicker(people, checkedIds) {
@@ -3201,18 +3223,29 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // add_entry.php's #photoDrop and the memory viewer's vam-uploader
     // above each keep their own single copy of, since the planner can have
     // many of these live on the page (up to 10 events x 2 roles) at once.
-    function tripInitPicker(root, existingItems) {
+    function tripInitPicker(root, existingItems, eventId, role) {
       var empty = root.querySelector('.media-picker-empty');
       var grid = root.querySelector('.media-picker-grid');
       var input = root.querySelector('.trip-picker-input');
-      // .trip-kept-inputs is a SIBLING of this picker within their shared
-      // .trip-event-col (not a descendant of the picker itself), so it's
-      // found from the picker's parent, not from `root` directly.
+      // .trip-kept-inputs (and, as of Phase 82, the media-only "Add
+      // photos" button/status line beside it) are SIBLINGS of this picker
+      // within their shared .trip-event-col (not descendants of the
+      // picker itself), so they're found from the picker's parent, not
+      // from `root` directly.
       var keptContainer = root.parentElement.querySelector('.trip-kept-inputs');
       var keptFieldName = input.getAttribute('data-kept-name');
+      var uploadBtn = root.parentElement.querySelector('.trip-picker-add-media-btn');
+      var uploadStatus = root.parentElement.querySelector('.trip-picker-add-status');
 
       var kept = (existingItems || []).slice();
       var pending = [];
+      // Phase 82: true for a viewer with NO add rights at all on this
+      // picker (readOnlyMode with no approved tag) -- false for the
+      // owner (readOnlyMode is already false for them) AND for an
+      // approved-tagged non-owner in tripMediaOnlyMode, who can still
+      // stage/upload photos even though readOnlyMode stays true for
+      // everything else about the trip.
+      var pickerLocked = readOnlyMode && !tripMediaOnlyMode;
 
       function extLabel(name) { var m = /\.([a-z0-9]+)$/i.exec(name || ''); return m ? m[1].toUpperCase() : 'FILE'; }
       function kindOfFile(file) { return file.type.indexOf('image/') === 0 ? 'image' : (file.type.indexOf('video/') === 0 ? 'video' : 'document'); }
@@ -3254,10 +3287,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + pendingTileHtml(item) +
             '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">×</button></div>';
         }).join('');
-        if (!readOnlyMode && totalCount() < TRIP_MAX_FILES) {
+        if (!pickerLocked && totalCount() < TRIP_MAX_FILES) {
           tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + TRIP_ADD_ICON + '</div>';
         }
         grid.innerHTML = tiles;
+        if (tripMediaOnlyMode && uploadBtn) {
+          uploadBtn.hidden = pending.length === 0;
+          uploadBtn.textContent = 'Add ' + pending.length + (pending.length === 1 ? ' photo' : ' photos');
+        }
       }
       function heicToJpegFile(file) {
         if (typeof heic2any !== 'function') return Promise.reject(new Error('heic2any not available'));
@@ -3288,7 +3325,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       }
       function addFiles(fileList) {
-        if (readOnlyMode) return;
+        if (pickerLocked) return;
         var incoming = Array.prototype.slice.call(fileList || []);
         if (!incoming.length) return;
         for (var i = 0; i < incoming.length; i++) {
@@ -3317,13 +3354,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           render();
           return;
         }
-        if (readOnlyMode) return;
+        if (pickerLocked) return;
         if (e.target.closest('.pick-tile') && !e.target.closest('.pick-tile--add')) return;
         input.click();
       });
       root.addEventListener('focus', function () { activeTripPicker = addFiles; }, true);
       root.addEventListener('mouseenter', function () { activeTripPicker = addFiles; });
-      if (!readOnlyMode) {
+      if (!pickerLocked) {
         input.addEventListener('change', function () { addFiles(input.files); });
         ['dragenter', 'dragover'].forEach(function (n) { root.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); root.classList.add('dragover'); }); });
         ['dragleave', 'drop'].forEach(function (n) { root.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); if (n === 'dragleave' && e.target !== root) return; root.classList.remove('dragover'); }); });
@@ -3346,6 +3383,57 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           });
         }
       }
+      // Phase 82: media-only mode's own upload path -- unlike the owner's
+      // pending[] files above (which just ride along in the big form and
+      // are only ever actually stored when the whole trip is Saved), an
+      // approved-tagged non-owner has no Save button to submit through
+      // (see setReadOnly -- it stays hidden for them), so this button
+      // uploads THIS picker's staged files immediately, for THIS one
+      // event/role, over its own small fetch() -- mirroring the ordinary
+      // memory viewer's own tagged "Add media" form (Phase 41/43), just
+      // per-picker instead of one shared form for the whole memory.
+      if (tripMediaOnlyMode && uploadBtn && eventId) {
+        uploadBtn.addEventListener('click', function () {
+          if (!pending.length || uploadBtn.disabled) return;
+          var fd = new FormData();
+          fd.append('action', 'add_event_media');
+          fd.append('event_id', eventId);
+          fd.append('role', role);
+          var csrfInput = tripForm.querySelector('input[name="csrf_token"]');
+          fd.append('csrf_token', csrfInput ? csrfInput.value : '');
+          pending.forEach(function (item) { if (item.file) fd.append('media[]', item.file); });
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = 'Adding…';
+          uploadStatus.hidden = true;
+          fetch('/trip_plan.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              uploadBtn.disabled = false;
+              if (!data || !data.ok) {
+                uploadStatus.hidden = false;
+                uploadStatus.textContent = (data && data.error) || 'Something went wrong saving that. Please try again.';
+                uploadStatus.className = 'trip-picker-add-status trip-picker-add-status--error';
+                render();
+                return;
+              }
+              pending.forEach(function (item) { if (item.url) URL.revokeObjectURL(item.url); });
+              pending = [];
+              syncInput();
+              (data.media || []).forEach(function (m) { kept.push(m); });
+              uploadStatus.hidden = false;
+              uploadStatus.textContent = data.notice || 'Added.';
+              uploadStatus.className = 'trip-picker-add-status trip-picker-add-status--ok';
+              render();
+            })
+            .catch(function () {
+              uploadBtn.disabled = false;
+              uploadStatus.hidden = false;
+              uploadStatus.textContent = 'Something went wrong saving that. Please try again.';
+              uploadStatus.className = 'trip-picker-add-status trip-picker-add-status--error';
+              render();
+            });
+        });
+      }
       render();
     }
 
@@ -3356,6 +3444,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       var iso = ev.eventDate || null;
       var dparts = iso ? iso.split('-') : ['', '', ''];
       var dis = readOnlyMode ? ' disabled' : '';
+      // Same meaning as tripInitPicker's own pickerLocked -- title/dates/
+      // notes/event add-remove stay gated on plain readOnlyMode (owner-
+      // only, unchanged), but the picker's OWN paste button (the rest of
+      // its interactivity is wired up inside tripInitPicker, once this
+      // markup exists in the DOM) also needs to appear in media-only mode.
+      var pickerLocked = readOnlyMode && !tripMediaOnlyMode;
       return '' +
         '<div class="trip-event" data-event-index="' + index + '">' +
           '<div class="trip-event-head">' +
@@ -3372,21 +3466,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             '<div class="trip-event-col trip-event-plan">' +
               '<h4>Plans</h4>' +
               '<div class="photo-drop media-picker trip-picker" tabindex="0" role="button" aria-label="Attach booking receipts or tickets">' +
-                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop receipts/tickets here</div>' + (readOnlyMode ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
+                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop receipts/tickets here</div>' + (pickerLocked ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
                 '<div class="media-picker-grid" hidden></div>' +
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][plan_media][]" data-kept-name="events[' + index + '][existing_plan_media_ids][]" multiple hidden accept="image/*,.heic,.heif,application/pdf,.pdf">' +
               '</div>' +
               '<div class="trip-kept-inputs"></div>' +
+              (tripMediaOnlyMode ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
               '<textarea name="events[' + index + '][plan_notes]" placeholder="Scribble notes — confirmation numbers, addresses, times…" rows="4"' + dis + '>' + escapeHtml(ev.planNotes || '') + '</textarea>' +
             '</div>' +
             '<div class="trip-event-col trip-event-memory">' +
               '<h4>Memories</h4>' +
               '<div class="photo-drop media-picker trip-picker" tabindex="0" role="button" aria-label="Attach photos or videos">' +
-                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop photos/videos here</div>' + (readOnlyMode ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
+                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop photos/videos here</div>' + (pickerLocked ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
                 '<div class="media-picker-grid" hidden></div>' +
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][memory_media][]" data-kept-name="events[' + index + '][existing_memory_media_ids][]" multiple hidden accept="image/*,.heic,.heif,video/*">' +
               '</div>' +
               '<div class="trip-kept-inputs"></div>' +
+              (tripMediaOnlyMode ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
               '<textarea name="events[' + index + '][memory_notes]" placeholder="How did it go? Write about it as it happens…" rows="4"' + dis + '>' + escapeHtml(ev.memoryNotes || '') + '</textarea>' +
             '</div>' +
           '</div>' +
@@ -3398,8 +3494,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       tripEventsContainer.insertAdjacentHTML('beforeend', tripEventRowHtml(index, ev));
       var rowEl = tripEventsContainer.querySelector('[data-event-index="' + index + '"]');
       var pickers = rowEl.querySelectorAll('.trip-picker');
-      tripInitPicker(pickers[0], (ev && ev.planMedia) || []);
-      tripInitPicker(pickers[1], (ev && ev.memoryMedia) || []);
+      var eventId = ev && ev.id ? ev.id : null;
+      tripInitPicker(pickers[0], (ev && ev.planMedia) || [], eventId, 'plan');
+      tripInitPicker(pickers[1], (ev && ev.memoryMedia) || [], eventId, 'memory');
     }
 
     tripEventsContainer.addEventListener('click', function (e) {
@@ -3426,8 +3523,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       tripTagField.style.display = ro ? 'none' : '';
       tripAddEventBtn.style.display = ro ? 'none' : '';
       tripSaveBtn.style.display = ro ? 'none' : '';
-      tripReadonlyNote.hidden = !ro;
-      if (ro) tripReadonlyOwnerName.textContent = ownerName || 'its owner';
+      // Phase 82: two different notes for the two flavors of "locked" --
+      // tripMediaOnlyMode still shows one (so it's clear photos CAN still
+      // be added), just the other one of the pair.
+      tripReadonlyNote.hidden = !ro || tripMediaOnlyMode;
+      tripMediaOnlyNote.hidden = !ro || !tripMediaOnlyMode;
+      if (ro) {
+        tripReadonlyOwnerName.textContent = ownerName || 'its owner';
+        tripMediaOnlyOwnerName.textContent = ownerName || 'its owner';
+      }
     }
 
     function resetTripForm() {
@@ -3437,6 +3541,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       tripPlanIdField.value = '';
       tripDeleteForm.hidden = true;
       tripTitleInput.value = '';
+      tripMediaOnlyMode = false;
       setDateSlots(tripStartDay, tripStartMonth, tripStartYear, null);
       setDateSlots(tripFinishDay, tripFinishMonth, tripFinishYear, null);
       tripVisibilityBlock.querySelector('input[value="public"]').checked = true;
@@ -3467,6 +3572,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           setDateSlots(tripFinishDay, tripFinishMonth, tripFinishYear, data.finishDate);
           var visInput = tripVisibilityBlock.querySelector('input[value="' + data.visibility + '"]');
           if (visInput) visInput.checked = true;
+          // Phase 82: set BEFORE setReadOnly()/the events render below --
+          // both tripEventRowHtml() and tripInitPicker() read this global
+          // while building each event row, so it has to be current before
+          // that happens, not just before the note text is decided.
+          tripMediaOnlyMode = !data.canEdit && !!data.canAddMedia;
           setReadOnly(!data.canEdit, data.ownerName);
           if (data.canEdit) renderTagPicker(data.taggablePeople, data.taggedPersonIds);
           tripDeleteForm.hidden = !data.canEdit;
@@ -3495,7 +3605,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     tripLightbox.addEventListener('click', function (e) { if (e.target === tripLightbox) closeTripLightbox(); });
 
     document.addEventListener('paste', function (e) {
-      if (!tripScrim.classList.contains('open') || !activeTripPicker || readOnlyMode) return;
+      if (!tripScrim.classList.contains('open') || !activeTripPicker || (readOnlyMode && !tripMediaOnlyMode)) return;
       if (!e.clipboardData) return;
       var files = [];
       if (e.clipboardData.files && e.clipboardData.files.length) files = Array.prototype.slice.call(e.clipboardData.files);

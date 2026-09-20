@@ -144,3 +144,26 @@ function trip_flatten_event_files(array $eventsFiles, int $index, string $field)
         'size'     => $eventsFiles['size'][$index][$field] ?? [],
     ];
 }
+
+/**
+ * Phase 82: minimal ownership/context lookup for ONE trip event, keyed by
+ * its own id — used by trip_plan.php's add_event_media action, which
+ * (unlike detail/save, both keyed by trip_plan_id) is only ever reached
+ * with an event id, since that's all a single picker on an already-loaded
+ * trip knows about itself. Returns null if the event doesn't exist.
+ */
+function fetch_trip_event_context(PDO $pdo, int $eventId): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT ev.id, ev.trip_plan_id, tp.timeline_entry_id AS entry_id,
+                te.person_id AS owner_person_id, p.family_group_id AS owner_family_group_id,
+                p.claimed_by_user_id AS owner_claimed_by
+         FROM trip_events ev
+         JOIN trip_plans tp ON tp.id = ev.trip_plan_id
+         JOIN timeline_entries te ON te.id = tp.timeline_entry_id
+         JOIN persons p ON p.id = te.person_id
+         WHERE ev.id = :id'
+    );
+    $stmt->execute(['id' => $eventId]);
+    return $stmt->fetch() ?: null;
+}

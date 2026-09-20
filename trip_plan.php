@@ -71,6 +71,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string) ($_GET['action'] ?? '') ===
     $canEdit = (int) $trip['owner_family_group_id'] === $myGroup
         && person_is_editable_by(['claimed_by_user_id' => $trip['owner_claimed_by']], $myUserId);
 
+    // Phase 82: someone with an APPROVED tag on the trip's own companion
+    // memory -- "involved" in a SHARED trip, same meaning that phrase
+    // already carries everywhere else in this app -- may add (never
+    // remove or replace) plan/memory photos to its events, even though
+    // everything else about the trip stays the owner's alone to change.
+    // Same spirit as an ordinary memory's own add_tagged_media (Phase 41),
+    // just reached through this file's own action instead of timeline.php's.
+    $canAddMedia = $canEdit || person_has_approved_tag($pdo, (int) $trip['entry_id'], $myPersonId);
+
     $taggablePeople = [];
     if ($canEdit) {
         $familyGraph = fetch_family_graph($pdo, $myGroup);
@@ -109,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string) ($_GET['action'] ?? '') ===
         'finishDate'      => $trip['finish_date'],
         'visibility'      => $trip['visibility'],
         'canEdit'         => $canEdit,
+        'canAddMedia'     => $canAddMedia,
         'taggedPersonIds' => array_map(fn ($t) => (int) $t['person_id'], $trip['tags']),
         'taggablePeople'  => $taggablePeople,
         'events'          => $events,
@@ -135,6 +145,101 @@ if ($bodyTooLarge) {
 
 csrf_check();
 $action = (string) ($_POST['action'] ?? '');
+
+// Phase 82: a small, separate AJAX action -- one event, one role, add-only
+// -- reachable by the trip's owner OR anyone with an APPROVED tag on it,
+// unlike every other mutation below which stays owner-only. Handled up
+// here, before the owner-only gate just below, since it's the one
+// exception to it; mirrors timeline.php's own add_tagged_media (Phase 41)
+// for an ordinary memory.
+if ($action === 'add_event_media') {
+    header('Content-Type: application/json');
+
+    $eventId = filter_var($_POST['event_id'] ?? '', FILTER_VALIDATE_INT);
+    $role = (string) ($_POST['role'] ?? '');
+    if ($eventId === false || !in_array($role, ['plan', 'memory'], true)) {
+        echo json_encode(['ok' => false, 'error' => "That event couldn't be found."]);
+        exit;
+    }
+
+    $eventContext = fetch_trip_event_context($pdo, (int) $eventId);
+    if ($eventContext === null) {
+        echo json_encode(['ok' => false, 'error' => "That event doesn't exist."]);
+        exit;
+    }
+
+    $isOwner = (int) $eventContext['owner_family_group_id'] === $myGroup
+        && person_is_editable_by(['claimed_by_user_id' => $eventContext['owner_claimed_by']], $myUserId);
+    $hasApprovedTag = person_has_approved_tag($pdo, (int) $eventContext['entry_id'], $myPersonId);
+    if (!$isOwner && !$hasApprovedTag) {
+        echo json_encode(['ok' => false, 'error' => "You don't have permission to add photos to that event."]);
+        exit;
+    }
+
+    $incoming = normalize_multi_file_upload($_FILES['media'] ?? []);
+    if (count($incoming) === 0) {
+        echo json_encode(['ok' => false, 'error' => 'Choose at least one photo, video, or document to add.']);
+        exit;
+    }
+
+    $countStmt = $pdo->prepare('SELECT COUNT(*) FROM trip_event_media WHERE trip_event_id = :eid AND role = :role');
+    $countStmt->execute(['eid' => (int) $eventId, 'role' => $role]);
+    $existingCount = (int) $countStmt->fetchColumn();
+    if ($existingCount + count($incoming) > TRIP_MAX_MEDIA_PER_ROLE) {
+        echo json_encode(['ok' => false, 'error' => 'Attach at most ' . TRIP_MAX_MEDIA_PER_ROLE . ' ' . $role . ' photos to one event.']);
+        exit;
+    }
+
+    $sortStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) FROM trip_event_media WHERE trip_event_id = :eid AND role = :role');
+    $sortStmt->execute(['eid' => (int) $eventId, 'role' => $role]);
+    $nextSort = (int) $sortStmt->fetchColumn() + 1;
+
+    $stored = [];
+    $addedMedia = [];
+    try {
+        $pdo->beginTransaction();
+        $stored = store_uploaded_media_files($_FILES['media'] ?? [], (int) $eventContext['owner_person_id']);
+        $mediaInsert = $pdo->prepare(
+            'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
+             VALUES (:eid, :path, :mime, :size, :w, :h)'
+        );
+        $tripMediaInsert = $pdo->prepare(
+            'INSERT INTO trip_event_media (trip_event_id, media_id, role, sort_order) VALUES (:tev, :mid, :role, :sort)'
+        );
+        foreach ($stored as $file) {
+            $mediaInsert->execute([
+                'eid' => (int) $eventContext['entry_id'], 'path' => $file['file_path'], 'mime' => $file['mime_type'],
+                'size' => $file['byte_size'], 'w' => $file['width'], 'h' => $file['height'],
+            ]);
+            $mediaId = (int) $pdo->lastInsertId();
+            $tripMediaInsert->execute(['tev' => (int) $eventId, 'mid' => $mediaId, 'role' => $role, 'sort' => $nextSort++]);
+            $addedMedia[] = [
+                'id'   => $mediaId,
+                'kind' => str_starts_with($file['mime_type'], 'video/')
+                    ? 'video'
+                    : (str_starts_with($file['mime_type'], 'image/') ? 'image' : 'file'),
+                'url'  => '/media.php?id=' . $mediaId,
+            ];
+        }
+        $pdo->commit();
+        $notice = count($stored) === 1 ? 'Photo added.' : count($stored) . ' files added.';
+    } catch (RuntimeException $e) {
+        $pdo->rollBack();
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        exit;
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        foreach ($stored as $done) {
+            delete_media_file($done['file_path']);
+        }
+        error_log('ourthology trip_plan add_event_media error: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'error' => 'Something went wrong saving that. Please try again.']);
+        exit;
+    }
+
+    echo json_encode(['ok' => true, 'notice' => $notice, 'media' => $addedMedia]);
+    exit;
+}
 
 if ($action !== 'save') {
     header('Location: /timeline.php');
