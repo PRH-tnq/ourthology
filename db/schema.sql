@@ -656,3 +656,97 @@ ALTER TABLE users
 ALTER TABLE greeting_cards
   ADD COLUMN event_id INT UNSIGNED NULL AFTER recipient_person_id,
   ADD CONSTRAINT fk_card_event FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE SET NULL;
+
+-- ---------------------------------------------------------------------
+-- Phase 69: Memory Planner. Plans a multi-day trip/event up front (a
+-- title, a start/finish date, and any number of "events" within it, each
+-- with its own booking receipts/tickets and scribbled notes to plan with)
+-- and then records memories against those same events as the trip
+-- actually happens -- one pop-up, reopened later for the same trip, that
+-- gradually turns from a plan into a memory of it.
+--
+-- Reuses the ordinary timeline_entries/media/memory_tags machinery
+-- rather than inventing a parallel one: every trip gets exactly one
+-- companion timeline_entries row (origin='trip', entry_type='note',
+-- occurred_on = start_date), the same way a saved postcard/letter/card
+-- does (Phase 54/67) -- so it shows up in the rail, gets tagged and
+-- approved via the existing memory_tags flow ("tag-and-approve, like
+-- normal memories" per Phil), and is deleted by timeline.php's existing
+-- delete_entry action with no code changes there at all.
+--
+-- Every plan/memory image across every event in the trip is stored as an
+-- ORDINARY media row too, pointing at that one shared timeline_entry_id
+-- -- never a separate table of its own bytes/mime/size -- so media.php's
+-- existing access check (can_view_media()) and thumbnail cache
+-- (ensure_media_thumbnail()) already serve and gate every trip photo for
+-- free, and the planner's own image-zoom lightbox is just another
+-- consumer of the same /media.php?id= URLs the rest of the app already
+-- uses. trip_event_media below only records WHICH event and WHICH side
+-- (plan or memory) each of those media rows belongs to.
+-- ---------------------------------------------------------------------
+ALTER TABLE timeline_entries
+  MODIFY COLUMN origin ENUM('postcard','letter','card','trip') NULL DEFAULT NULL;
+
+CREATE TABLE trip_plans (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  person_id           INT UNSIGNED NOT NULL,
+  timeline_entry_id   INT UNSIGNED NOT NULL,
+  title               VARCHAR(255) NOT NULL,
+  start_date          DATE NOT NULL,
+  finish_date         DATE NOT NULL,
+  created_by_user_id  INT UNSIGNED NOT NULL,
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_tripplan_entry (timeline_entry_id),
+  CONSTRAINT fk_tripplan_person FOREIGN KEY (person_id) REFERENCES persons(id),
+  CONSTRAINT fk_tripplan_entry FOREIGN KEY (timeline_entry_id)
+    REFERENCES timeline_entries(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tripplan_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per event within a trip ("flight out", "the campsite", "the
+-- wedding itself", ...) -- Phil asked for "flexible space for at least
+-- 10 events but more if needed", so this is a plain child table rather
+-- than a fixed number of columns, with sort_order carrying the order
+-- they're arranged/reordered in on the pop-up. plan_notes is the
+-- left-hand "Plans" column's scribbled text for this event; memory_notes
+-- is the right-hand "Memories" column's — kept as two separate columns
+-- (rather than reusing timeline_entries.body, which this table doesn't
+-- have one of) since the two are independent and a trip has many events
+-- sharing the one timeline_entries row.
+CREATE TABLE trip_events (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  trip_plan_id        INT UNSIGNED NOT NULL,
+  sort_order          INT UNSIGNED NOT NULL DEFAULT 0,
+  title               VARCHAR(255) NOT NULL,
+  event_date          DATE NULL,
+  plan_notes          TEXT NULL,
+  memory_notes        TEXT NULL,
+  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_tripevent_plan FOREIGN KEY (trip_plan_id)
+    REFERENCES trip_plans(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Links an ordinary media row to the one trip_event/side (plan or
+-- memory) it was uploaded for. media_id is UNIQUE: each media row is
+-- either a plan attachment or a memory attachment of exactly one event,
+-- never shared between two slots. The 10-images-per-event-per-side cap
+-- (matching MEDIA_MAX_FILES_PER_ENTRY's existing per-entry convention)
+-- is enforced in trip_plan.php, not here.
+CREATE TABLE trip_event_media (
+  id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  trip_event_id       INT UNSIGNED NOT NULL,
+  media_id            INT UNSIGNED NOT NULL,
+  role                ENUM('plan','memory') NOT NULL,
+  sort_order          INT UNSIGNED NOT NULL DEFAULT 0,
+  CONSTRAINT fk_tripmedia_event FOREIGN KEY (trip_event_id)
+    REFERENCES trip_events(id) ON DELETE CASCADE,
+  CONSTRAINT fk_tripmedia_media FOREIGN KEY (media_id)
+    REFERENCES media(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_tripmedia_media (media_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_tripplan_person ON trip_plans(person_id);
+CREATE INDEX idx_tripevent_plan_sort ON trip_events(trip_plan_id, sort_order);
+CREATE INDEX idx_tripmedia_event_role ON trip_event_media(trip_event_id, role, sort_order);

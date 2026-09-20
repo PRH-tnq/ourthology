@@ -79,9 +79,27 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
 
     $tagsByEntry = fetch_approved_tags_for_entries($pdo, $ids);
 
+    // Phase 69: a trip (origin='trip') carries its own start/finish date
+    // span and event count alongside the ordinary entry fields above, for
+    // the rail card's "Jun 3 – Jun 10 · 4 events" label and for the click
+    // handler to know which trip_plans.id to open the planner pop-up on —
+    // looked up once here, the same way media/tags are, rather than a
+    // separate round trip per trip card.
+    $tripStmt = $pdo->prepare(
+        "SELECT tp.timeline_entry_id, tp.id AS trip_plan_id, tp.start_date, tp.finish_date,
+                (SELECT COUNT(*) FROM trip_events tev WHERE tev.trip_plan_id = tp.id) AS event_count
+         FROM trip_plans tp WHERE tp.timeline_entry_id IN ($placeholders)"
+    );
+    $tripStmt->execute($ids);
+    $tripByEntry = [];
+    foreach ($tripStmt->fetchAll() as $t) {
+        $tripByEntry[(int) $t['timeline_entry_id']] = $t;
+    }
+
     foreach ($entries as &$entry) {
         $entry['media'] = $mediaByEntry[(int) $entry['id']] ?? [];
         $entry['tags'] = $tagsByEntry[(int) $entry['id']] ?? [];
+        $entry['trip'] = $tripByEntry[(int) $entry['id']] ?? null;
     }
 
     return $entries;
