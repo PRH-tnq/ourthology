@@ -560,8 +560,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .page-head::after { content:""; display:table; clear:both; }
   /* Phil asked for this bigger, then bigger again — now double the second
      size (156px desktop, up from an initial 78px). */
-  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); float:right; margin:0 0 12px 18px; }
+  /* Phase 71: "Take the tour" / "What's new" moved out of .nav to sit
+     right under the profile photo instead — .header-avatar-col is the
+     float now (the photo itself no longer floats, it's just this
+     column's first child), so the two buttons stack directly beneath it
+     as one unit wherever the column ends up, desktop or the stacked
+     mobile layout below. */
+  .header-avatar-col { float:right; margin:0 0 12px 18px; display:flex; flex-direction:column; align-items:stretch; gap:8px; width:156px; }
+  .header-avatar, .header-avatar-placeholder { width:156px; height:156px; border-radius:50%; object-fit:cover; background:#fff; border:1px solid var(--line); float:none; margin:0; }
   .header-avatar-placeholder { display:flex; align-items:center; justify-content:center; font-family:"Georgia",serif; font-size:62px; color:var(--ink-faint); }
+  .header-avatar-actions { display:flex; flex-direction:column; gap:6px; }
   @media (max-width: 620px) {
     /* At this size the photo no longer fits beside the wordmark on a real
        phone width (confirmed by measuring, not by eye — it ran off the
@@ -572,7 +580,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
        in the markup for the desktop float-wrap above to work). */
     .page-head { display:flex; flex-direction:column; }
     .page-head .brand { order:1; }
-    .header-avatar, .header-avatar-placeholder { order:2; float:none; width:122px; height:122px; font-size:49px; margin:4px 0 10px auto; }
+    .header-avatar-col { order:2; float:none; width:122px; margin:4px 0 10px auto; }
+    .header-avatar, .header-avatar-placeholder { width:122px; height:122px; font-size:49px; }
     .page-head .nav { order:3; }
     .page-head .page-head-heading { order:4; }
     /* The vertical divider before "Signed in as" only makes sense when it
@@ -600,6 +609,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      option of the two rather than competing with "Take the tour". */
   .nav .linklet-btn.ghost { background:transparent; color:var(--accent); }
   .nav .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
+  /* Phase 71: same pill treatment as .nav .linklet-btn above, duplicated
+     here since these two buttons no longer live inside .nav -- they sit
+     in .header-avatar-actions, under the profile photo, instead. */
+  .header-avatar-actions .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; text-align:center; }
+  .header-avatar-actions .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
+  .header-avatar-actions .linklet-btn.ghost { background:transparent; color:var(--accent); }
+  .header-avatar-actions .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
 
   /* Phase 48: "Send a postcard" -- a compose pop-up styled like a
      physical postcard, front (photo) and back (handwritten note) as two
@@ -1184,11 +1200,21 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               it renders top-right) because that's what lets it float and
               have .brand and .nav wrap up against it — see the .page-head
               comment in <style> above. */ ?>
-      <?php if (!empty($target['avatar_path'])): ?>
-        <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
-      <?php else: ?>
-        <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
-      <?php endif; ?>
+      <div class="header-avatar-col">
+        <?php if (!empty($target['avatar_path'])): ?>
+          <img class="header-avatar" src="/avatar.php?person_id=<?= (int) $target['id'] ?>&v=<?= urlencode((string) $target['avatar_path']) ?>" alt="<?= htmlspecialchars($targetName, ENT_QUOTES) ?>">
+        <?php else: ?>
+          <div class="header-avatar-placeholder" aria-hidden="true"><?= htmlspecialchars(mb_substr($targetName, 0, 1) ?: '?', ENT_QUOTES) ?></div>
+        <?php endif; ?>
+        <?php // Phase 71: "Take the tour" / "What's new" moved here, under
+              // the profile photo, out of the nav row below. ?>
+        <?php if ($isOwner): ?>
+          <div class="header-avatar-actions">
+            <button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button>
+            <button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost">What's new</button>
+          </div>
+        <?php endif; ?>
+      </div>
 
       <div class="brand" style="display:flex;align-items:center;gap:14px;margin:0 0 22px;">
         <svg class="brand-mark" width="44" height="44" viewBox="0 0 32 32" aria-hidden="true" style="flex:none;display:block;">
@@ -1211,13 +1237,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <a href="/tree.php" id="tourMyTree">My tree</a>
           <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
           <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn" class="linklet-btn">Memory planner</button><?php endif; ?>
-          <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
-          <?php // Phase 70: "just see the 5 most recently added features" --
-                // a short version of the same tour, over just the newest
-                // feature groups (see ourthology_tour_recent_step_indices()
-                // in includes/tour_steps.php); wired up in /tour.js
-                // alongside #tourReplayBtn above. ?>
-          <?php if ($isOwner): ?><button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost">What's new</button><?php endif; ?>
           <button type="button" id="sendPostcardBtn" class="linklet-btn">Send a postcard</button>
           <span class="whoami">
             Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>

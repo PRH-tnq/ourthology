@@ -400,6 +400,43 @@
   // to measure right away.
   var ACTION_SETTLE_MS = { flip_postcard: 760, open_card_inside: 620 };
 
+  // Bug fix (post-Phase 70): the hand-written close_* actions above were
+  // only ever placed at the specific bridging steps the FIXED full-tour
+  // group order needed (postcards_letters -> greeting_cards ->
+  // memory_planner). "What's new" mode chains the same groups in
+  // recency order instead, which can pair any two groups back to back --
+  // e.g. greeting_cards -> postcards_letters, the reverse of the full
+  // tour's order -- and since both composers live on timeline.php with
+  // no page reload between them, nothing ever closed the one left open,
+  // so its overlay sat on screen covering the next step's real target.
+  // This sweep is generic and group-driven instead of position-driven:
+  // on every single placement (not just detected transitions) it closes
+  // whichever of the three known overlays is open and doesn't match the
+  // step's own group. It's a safe no-op within a group (the desired
+  // surface already matches, nothing closes) and correct for any future
+  // reordering, not just this one reported pair -- so the existing
+  // close_postcard_composer/close_card_composer/close_trip_planner
+  // actions on bridging steps become redundant but harmless rather than
+  // load-bearing.
+  function surfaceForGroup(g) {
+    if (g === "postcards_letters") { return "postcard"; }
+    if (g === "greeting_cards") { return "gcard"; }
+    if (g === "memory_planner") { return "trip"; }
+    return null;
+  }
+  function sweepOtherOverlays(desired) {
+    if (desired !== "postcard" && document.getElementById("postcardComposeOverlay")) {
+      TOUR_ACTIONS.close_postcard_composer();
+    }
+    if (desired !== "gcard" && document.getElementById("gcardComposeOverlay")) {
+      TOUR_ACTIONS.close_card_composer();
+    }
+    if (desired !== "trip") {
+      var scrim = document.getElementById("tripScrim");
+      if (scrim && scrim.classList.contains("open")) { TOUR_ACTIONS.close_trip_planner(); }
+    }
+  }
+
   function place() {
     var s = curStep();
     titleEl.textContent = s.title;
@@ -414,6 +451,7 @@
     if (prevBtn) { prevBtn.disabled = step <= 0; }
 
     clickTabIfNeeded(s);
+    sweepOtherOverlays(surfaceForGroup(s.group));
 
     var acted = false;
     if (s.action && TOUR_ACTIONS[s.action]) { acted = TOUR_ACTIONS[s.action](); }
