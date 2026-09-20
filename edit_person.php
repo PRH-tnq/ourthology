@@ -1161,7 +1161,12 @@ if ($postedProfile) {
               </label>
               <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);margin:0 0 12px;">
                 <input type="checkbox" name="notify_postcards" value="1" style="margin-top:2px;" <?= $notifyPostcards ? 'checked' : '' ?>>
-                <span>Email me when someone sends me a postcard or letter</span>
+                <!-- Phase 77: now also covers an anytime greetings card
+                     (ourthology_notify_card_received()) -- a birthday or
+                     key-date card still sends no email at send-time (see
+                     card.php's own comment on why), so this label
+                     shouldn't promise one for those. -->
+                <span>Email me when someone sends me a postcard, letter, or card</span>
               </label>
               <button type="submit" class="btn-primary" style="margin-top:0;">Save Notification Settings</button>
             </form>

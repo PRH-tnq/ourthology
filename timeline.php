@@ -1274,6 +1274,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .trip-event-col h4 { margin:0 0 8px; font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); }
   .trip-event-col textarea { width:100%; margin-top:10px; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:13.5px; font-family:inherit; color:var(--ink); resize:vertical; box-sizing:border-box; }
   .trip-picker { min-height:0; }
+  /* Phase 79: Plans' "...receipts/tickets here" and Memories' "...photos/
+     videos here" are different lengths, so at the two-column width one
+     wraps its Paste button onto a second line and the other doesn't --
+     an empty planner row then shows two differently-tall drop-zones with
+     their textareas starting at different heights. Reserving room for
+     the taller (wrapped) state on both sides keeps the two columns level
+     regardless of which side's copy text is longer. */
+  .trip-picker .media-picker-empty { min-height:85px; }
   @media (max-width: 760px) {
     .trip-top-fields { grid-template-columns:1fr 1fr; }
     .trip-event-columns { display:block; }

@@ -473,3 +473,260 @@ function ourthology_render_letter_email(string $recipientFirstName, string $send
 
     return [$subject, $html, $text];
 }
+
+/**
+ * Phase 77: "someone sent you a card" email -- same best-effort,
+ * never-throws shape and same notify_postcards gating as
+ * ourthology_notify_postcard_received()/ourthology_notify_letter_received()
+ * above, but called from card.php ONLY for an anytime card (deliver_on =
+ * today, sent from the "Send a message" pop-up's Greetings card tab --
+ * see Phase 75/76). A birthday or key-date card deliberately does NOT
+ * call this: card.php's own send action comment explains why (deliver_on
+ * is days out, and this app has no background job to fire an email on
+ * that later date instead of the moment it's sent -- an immediate email
+ * would give the birthday surprise away early). An anytime card has no
+ * such surprise to spoil -- it lands in the recipient's Pending queue
+ * right away, exactly like a postcard or letter does -- so it gets the
+ * same "you've got mail" treatment those two already have.
+ */
+function ourthology_notify_card_received(PDO $pdo, int $recipientPersonId, string $senderName): void
+{
+    try {
+        $stmt = $pdo->prepare('SELECT claimed_by_user_id FROM persons WHERE id = :id');
+        $stmt->execute(['id' => $recipientPersonId]);
+        $recipientUserId = $stmt->fetchColumn();
+        if (!$recipientUserId) {
+            return; // unclaimed recipient -- no account, so nowhere to email
+        }
+        $recipientUserId = (int) $recipientUserId;
+
+        $prefStmt = $pdo->prepare('SELECT notify_postcards, notify_email_enc FROM users WHERE id = :id');
+        $prefStmt->execute(['id' => $recipientUserId]);
+        $prefs = $prefStmt->fetch();
+        if ($prefs === null || !$prefs['notify_postcards']) {
+            return; // opted out (or never opted in) -- the default
+        }
+
+        $toEmail = ourthology_decrypt_notify_email($prefs['notify_email_enc']);
+        if ($toEmail === null || $toEmail === '') {
+            return; // opted in but never actually saved an address
+        }
+
+        $recipStmt = $pdo->prepare('SELECT first_name FROM persons WHERE id = :id');
+        $recipStmt->execute(['id' => $recipientPersonId]);
+        $recipientFirstName = (string) ($recipStmt->fetchColumn() ?: '');
+
+        [$subject, $html, $text] = ourthology_render_card_email($recipientFirstName, $senderName);
+        ourthology_send_email($toEmail, trim($recipientFirstName), $subject, $html, $text);
+    } catch (Throwable $e) {
+        error_log('ourthology: card notification failed for person ' . $recipientPersonId . ': ' . $e->getMessage());
+    }
+}
+
+/** Returns [subject, htmlBody, textBody] for the "you've got a card" email, same branded shell as ourthology_render_postcard_email() above. */
+function ourthology_render_card_email(string $recipientFirstName, string $senderName): array
+{
+    $pendingUrl = ourthology_absolute_url('/pending.php?goto=waiting-on-you');
+    $subject = "$senderName sent you a card — ourthology.com";
+    $greetName = $recipientFirstName !== '' ? $recipientFirstName : 'there';
+
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= htmlspecialchars($subject, ENT_QUOTES) ?></title>
+</head>
+<body style="margin:0; padding:0; background-color:#F1ECDF; font-family:Georgia, 'Times New Roman', serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F1ECDF; padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px; background-color:#FBF8F1; border:1px solid #e4ddcb; border-radius:14px; overflow:hidden;">
+          <tr>
+            <td style="background-color:#9A2A2A; padding:22px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:20px; font-weight:bold; color:#FBF8F1;">
+                    ourthology<span style="color:#e8c9c9; font-weight:normal;">.com</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:12.5px; font-style:italic; color:#e8c9c9; padding-top:2px;">
+                    an anthology of us.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 28px 8px;">
+              <p style="margin:0 0 16px; font-size:16px; line-height:1.5; color:#1a1714;">Hi <?= htmlspecialchars($greetName, ENT_QUOTES) ?>,</p>
+              <p style="margin:0 0 20px; font-size:15px; line-height:1.6; color:#1a1714;">
+                <strong><?= htmlspecialchars($senderName, ENT_QUOTES) ?></strong> just sent you a card on ourthology.com — waiting for you to open.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 28px 8px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-radius:999px; background-color:#9A2A2A;">
+                    <a href="<?= htmlspecialchars($pendingUrl, ENT_QUOTES) ?>" style="display:inline-block; padding:13px 30px; font-family:Georgia, 'Times New Roman', serif; font-size:15px; font-weight:bold; color:#FBF8F1; text-decoration:none; border-radius:999px;">Open your card</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 28px 32px;">
+              <p style="margin:0; font-size:12px; line-height:1.6; color:#a39c8c;">
+                You're getting this because postcard, letter, and card emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree → Edit → Account Settings.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    <?php
+    $html = (string) ob_get_clean();
+
+    $text = implode("\n", [
+        "Hi {$greetName},",
+        '',
+        "{$senderName} just sent you a card on ourthology.com — waiting for you to open.",
+        '',
+        'Open it here: ' . $pendingUrl,
+        '',
+        "You're getting this because postcard, letter, and card emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree -> Edit -> Account Settings.",
+    ]);
+
+    return [$subject, $html, $text];
+}
+
+/**
+ * Phase 78: "someone's sent you a birthday/key-date card" heads-up email --
+ * for the two kinds Phase 77's ourthology_notify_card_received() deliberately
+ * left alone, because that email says "waiting for you to open" and this
+ * app has no cron to hold it back until deliver_on actually arrives (see
+ * card.php's own send-action comment). Phil's fix for that: send the
+ * heads-up right away, same as any other card, but word it so there's
+ * nothing TO open early -- no "open your card" link, no occasion spoiled,
+ * just "a card's coming, it'll be there on <date>, no peeking before
+ * then." Same best-effort shape and same notify_postcards gating as every
+ * other notify_*() in this file.
+ */
+function ourthology_notify_card_scheduled(PDO $pdo, int $recipientPersonId, string $senderName, string $occasionLabel, DateTimeImmutable $deliverOn): void
+{
+    try {
+        $stmt = $pdo->prepare('SELECT claimed_by_user_id FROM persons WHERE id = :id');
+        $stmt->execute(['id' => $recipientPersonId]);
+        $recipientUserId = $stmt->fetchColumn();
+        if (!$recipientUserId) {
+            return; // unclaimed recipient -- no account, so nowhere to email
+        }
+        $recipientUserId = (int) $recipientUserId;
+
+        $prefStmt = $pdo->prepare('SELECT notify_postcards, notify_email_enc FROM users WHERE id = :id');
+        $prefStmt->execute(['id' => $recipientUserId]);
+        $prefs = $prefStmt->fetch();
+        if ($prefs === null || !$prefs['notify_postcards']) {
+            return; // opted out (or never opted in) -- the default
+        }
+
+        $toEmail = ourthology_decrypt_notify_email($prefs['notify_email_enc']);
+        if ($toEmail === null || $toEmail === '') {
+            return; // opted in but never actually saved an address
+        }
+
+        $recipStmt = $pdo->prepare('SELECT first_name FROM persons WHERE id = :id');
+        $recipStmt->execute(['id' => $recipientPersonId]);
+        $recipientFirstName = (string) ($recipStmt->fetchColumn() ?: '');
+
+        [$subject, $html, $text] = ourthology_render_card_scheduled_email($recipientFirstName, $senderName, $occasionLabel, $deliverOn);
+        ourthology_send_email($toEmail, trim($recipientFirstName), $subject, $html, $text);
+    } catch (Throwable $e) {
+        error_log('ourthology: scheduled-card notification failed for person ' . $recipientPersonId . ': ' . $e->getMessage());
+    }
+}
+
+/** Returns [subject, htmlBody, textBody] for the "a card's coming, don't peek early" email, same branded shell as the others above -- deliberately no "open it" link/button, since there's nothing to open yet. */
+function ourthology_render_card_scheduled_email(string $recipientFirstName, string $senderName, string $occasionLabel, DateTimeImmutable $deliverOn): array
+{
+    $subject = "$senderName has a card coming your way — ourthology.com";
+    $greetName = $recipientFirstName !== '' ? $recipientFirstName : 'there';
+    $dateLabel = $deliverOn->format('j F Y');
+
+    ob_start();
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= htmlspecialchars($subject, ENT_QUOTES) ?></title>
+</head>
+<body style="margin:0; padding:0; background-color:#F1ECDF; font-family:Georgia, 'Times New Roman', serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F1ECDF; padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px; background-color:#FBF8F1; border:1px solid #e4ddcb; border-radius:14px; overflow:hidden;">
+          <tr>
+            <td style="background-color:#9A2A2A; padding:22px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:20px; font-weight:bold; color:#FBF8F1;">
+                    ourthology<span style="color:#e8c9c9; font-weight:normal;">.com</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-family:Georgia, 'Times New Roman', serif; font-size:12.5px; font-style:italic; color:#e8c9c9; padding-top:2px;">
+                    an anthology of us.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 28px 8px;">
+              <p style="margin:0 0 16px; font-size:16px; line-height:1.5; color:#1a1714;">Hi <?= htmlspecialchars($greetName, ENT_QUOTES) ?>,</p>
+              <p style="margin:0 0 16px; font-size:15px; line-height:1.6; color:#1a1714;">
+                <strong><?= htmlspecialchars($senderName, ENT_QUOTES) ?></strong> has sent you a card on ourthology.com for <?= htmlspecialchars($occasionLabel, ENT_QUOTES) ?>.
+              </p>
+              <p style="margin:0 0 20px; font-size:15px; line-height:1.6; color:#1a1714;">
+                It's tucked away for now — it'll land in your Pending queue on <strong><?= htmlspecialchars($dateLabel, ENT_QUOTES) ?></strong>. No peeking before then!
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 28px 32px;">
+              <p style="margin:0; font-size:12px; line-height:1.6; color:#a39c8c;">
+                You're getting this because postcard, letter, and card emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree → Edit → Account Settings.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    <?php
+    $html = (string) ob_get_clean();
+
+    $text = implode("\n", [
+        "Hi {$greetName},",
+        '',
+        "{$senderName} has sent you a card on ourthology.com for {$occasionLabel}.",
+        '',
+        "It's tucked away for now -- it'll land in your Pending queue on {$dateLabel}. No peeking before then!",
+        '',
+        "You're getting this because postcard, letter, and card emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree -> Edit -> Account Settings.",
+    ]);
+
+    return [$subject, $html, $text];
+}

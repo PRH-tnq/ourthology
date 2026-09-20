@@ -8,6 +8,7 @@ require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/postcards.php'; // fetch_postcard_recipient_options() -- the same "everyone living in my family group" pool a card may be addressed to
 require_once __DIR__ . '/includes/calendar.php'; // Phase 68: fetch_calendar_event_for_group(), ourthology_next_annual_occurrence() -- a key-date card's own date math
 require_once __DIR__ . '/includes/cards.php';
+require_once __DIR__ . '/includes/notifications.php'; // Phase 77: ourthology_notify_card_received() -- anytime cards only, see the send action below
 
 /**
  * Phase 67: every greeting-card mutation in one file -- send (from the
@@ -171,20 +172,33 @@ if ($action === 'send') {
         $eventRow !== null ? (int) $eventRow['id'] : null
     );
 
-    // Phase 67: deliberately no "you've got mail" email here, unlike
-    // postcard.php/letter.php's own send actions -- this app has no
-    // background job to fire one on deliver_on itself (everything here
-    // is computed fresh on page load, never on a schedule -- see
-    // fetch_pending_cards_for_person()'s own doc comment), and emailing
-    // the recipient the moment it's SENT would give the surprise away
-    // days early. They'll see it land in their own Pending queue (and its
-    // banner/count) the next time they visit on or after the delivery
-    // date, same as how the reminder banner itself already works with no
-    // notification of its own.
+    // Phase 67: no background job on this hosting to fire an email exactly
+    // on deliver_on (everything here is computed fresh on page load, never
+    // on a schedule -- see fetch_pending_cards_for_person()'s own doc
+    // comment), and a birthday/key-date card's deliver_on is days out --
+    // so an "open your card" email sent the moment it's SENT would give
+    // the surprise away early.
+    //
+    // Phase 77: an ANYTIME card has no such surprise to spoil -- deliver_on
+    // is today, so it gets the same "you've got mail, go open it" email
+    // postcard.php/letter.php already send.
+    //
+    // Phase 78: rather than build a cron this hosting doesn't have, the
+    // birthday/key-date branch gets its OWN heads-up email too -- sent
+    // right away like every other notification, but worded so there's
+    // nothing to spoil: no "open it" link, no occasion given away early,
+    // just "a card's coming, it'll be there on <date>, don't peek before
+    // then" (ourthology_notify_card_scheduled()). The card itself still
+    // only becomes visible in the recipient's Pending queue once
+    // deliver_on actually arrives -- this only changes whether they're
+    // told it's coming, not when they can open it.
+    $senderName = person_display_name(['first_name' => $me['first_name'], 'surname' => $me['surname']]);
     if ($isAnytime) {
+        ourthology_notify_card_received($pdo, (int) $recipientId, $senderName);
         $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue right away.';
     } else {
         $occasionLabel = $eventRow !== null ? $occasion : 'their birthday';
+        ourthology_notify_card_scheduled($pdo, (int) $recipientId, $senderName, $occasionLabel, $deliverOn);
         $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue the day before ' . $occasionLabel . '.';
     }
     header('Location: /timeline.php');

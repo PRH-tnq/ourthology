@@ -403,6 +403,14 @@ $hasAnyStepTag = !empty($stepTagsByChild);
         <a href="/link_existing.php">Link to existing account</a>
         <a href="/calendar.php" id="tourCalendarLink">Family calendar</a>
         <a href="/pending.php" id="tourPendingLink" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
+        <!-- Phase 76: same trigger as timeline.php's #sendMessageBtn and
+             calendar.php's own link -- tree.php has no postcard/letter/
+             greetings-card composer of its own, so this just navigates to
+             timeline.php's unified pop-up (defaults to the postcard view)
+             rather than duplicating that markup/JS here. Unrelated to
+             this page's own per-person .birthday-send-card-btn links
+             (?send_card_to=...), which stay exactly as they are. -->
+        <a href="/timeline.php?send_message=1" class="linklet-btn" style="text-decoration:none;">Send a message</a>
         <button type="button" id="printTreeBtn" class="linklet-btn" onclick="window.print()">Print tree</button>
       </div>
       <div class="whoami">
