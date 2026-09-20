@@ -636,3 +636,23 @@ CREATE INDEX idx_entries_copied_from ON timeline_entries(copied_from_entry_id);
 -- ---------------------------------------------------------------------
 ALTER TABLE users
   MODIFY COLUMN person_id INT UNSIGNED NULL;
+
+-- ---------------------------------------------------------------------
+-- Phase 68: "extend [send a card] to all pages and for all events that
+-- appear on the calendar" -- a card can now be sent for a non-birthday
+-- key date (an anniversary, etc.) too, not only a person's own birthday.
+-- A key date isn't bound to one person, so event_id records which
+-- calendar_events row (if any) a card was triggered from -- nullable,
+-- since a birthday-triggered card still has none. ON DELETE SET NULL
+-- (not CASCADE): removing a key date later shouldn't take an
+-- already-sent card down with it, the same "the send already happened,
+-- it's real" reasoning deliver_on's own delivery gate is built on.
+--
+-- This ALTER has to come after calendar_events' own CREATE TABLE above
+-- (Phase 56) in file order, since it references that table -- unlike
+-- greeting_cards' initial CREATE TABLE further up, which predates it in
+-- this file even though calendar_events shipped first.
+-- ---------------------------------------------------------------------
+ALTER TABLE greeting_cards
+  ADD COLUMN event_id INT UNSIGNED NULL AFTER recipient_person_id,
+  ADD CONSTRAINT fk_card_event FOREIGN KEY (event_id) REFERENCES calendar_events(id) ON DELETE SET NULL;

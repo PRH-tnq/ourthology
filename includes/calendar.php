@@ -148,6 +148,95 @@ function ourthology_calendar_key_dates(array $eventRows): array
 }
 
 /**
+ * Phase 68: "extend [send a card] to all pages and for all events that
+ * appear on the calendar" -- widens Phase 67's birthday-only banner rows
+ * (ourthology_birthday_banner_rows(), graph.php) into one shared list
+ * covering BOTH birthdays and key dates within $withinDays, shaped for
+ * the card composer wherever it's triggered from: timeline.php's and
+ * tree.php's own reminder banners, and this page's (calendar.php's) own
+ * "Coming up" list. A birthday row keeps a single implied recipient (the
+ * person themselves, same as Phase 67, via person_id) -- a key-date row
+ * has no person bound to it at all, so it carries event_id instead, and
+ * the composer shows a recipient picker for those rather than a fixed
+ * name. Each row's occasion/cover_default/greeting_default default to
+ * "Birthday"/"Happy Birthday" for a birthday, or the key date's own title
+ * (capped to occasion's own 60-char column width) for anything else --
+ * both stay fully editable in the composer either way.
+ */
+function ourthology_calendar_reminder_rows(PDO $pdo, array $persons, int $familyGroupId, int $withinDays = 7): array
+{
+    $birthdays = ourthology_calendar_birthdays($persons);
+    $keyDates = ourthology_calendar_key_dates(fetch_calendar_events_for_group($pdo, $familyGroupId));
+    $all = array_merge($birthdays, $keyDates);
+    $all = array_values(array_filter($all, fn(array $e): bool => $e['days_away'] >= 0 && $e['days_away'] <= $withinDays));
+    usort($all, fn(array $a, array $b): int => $a['days_away'] <=> $b['days_away']);
+
+    $rows = [];
+    foreach ($all as $e) {
+        $when = match (true) {
+            $e['days_away'] === 0 => 'today',
+            $e['days_away'] === 1 => 'tomorrow',
+            default => 'in ' . $e['days_away'] . ' days',
+        };
+        $dateLabel = $e['next_date']->format('D j M');
+
+        if ($e['kind'] === 'birthday') {
+            $name = person_display_name($e['person']);
+            $rows[] = [
+                'kind'             => 'birthday',
+                'person_id'        => (int) $e['person']['id'],
+                'event_id'         => null,
+                'name'             => $name,
+                'first_name'       => (string) ($e['person']['first_name'] ?? $name),
+                'when'             => $when,
+                'date_label'       => $dateLabel,
+                'text'             => "{$name} turns {$e['turning_age']} {$when} ({$dateLabel})",
+                'occasion'         => 'Birthday',
+                'cover_default'    => 'Happy Birthday!',
+                'greeting_default' => 'Happy Birthday',
+            ];
+            continue;
+        }
+
+        $title = (string) $e['title'];
+        $rows[] = [
+            'kind'             => 'key_date',
+            'person_id'        => null,
+            'event_id'         => (int) $e['id'],
+            'name'             => $title,
+            'first_name'       => '',
+            'when'             => $when,
+            'date_label'       => $dateLabel,
+            'text'             => $e['years'] !== null
+                ? "{$title} {$when} — {$e['years']} years ({$dateLabel})"
+                : "{$title} {$when} ({$dateLabel})",
+            'occasion'         => mb_substr($title, 0, 60),
+            'cover_default'    => mb_substr($title, 0, 60),
+            'greeting_default' => mb_substr($title, 0, 60),
+        ];
+    }
+    return $rows;
+}
+
+/**
+ * One calendar_events row, scoped to $familyGroupId -- the ownership
+ * check IS the query, same defensive pattern every other family-scoped
+ * fetch in this app uses. Used by card.php's send action to look up a
+ * key date's own month/day/title server-side rather than trusting
+ * anything posted by the browser -- the same "never trust the client for
+ * the date" rule the birthday flow already follows. Null if the id
+ * doesn't exist or belongs to a different family group.
+ */
+function fetch_calendar_event_for_group(PDO $pdo, int $eventId, int $familyGroupId): ?array
+{
+    $stmt = $pdo->prepare(
+        'SELECT id, title, event_month, event_day, event_year FROM calendar_events WHERE id = :id AND family_group_id = :gid'
+    );
+    $stmt->execute(['id' => $eventId, 'gid' => $familyGroupId]);
+    return $stmt->fetch() ?: null;
+}
+
+/**
  * Adds a key date. $eventYear is null when left blank. Title is
  * capped/trimmed by the caller (calendar.php) before this is called,
  * same "validate at the edge, trust it here" convention every other

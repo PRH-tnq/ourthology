@@ -203,6 +203,11 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-upcoming-item .cal-when { flex:0 0 auto; font-weight:700; color:#8A5A0A; min-width:72px; }
   .cal-upcoming-item .cal-what { flex:1 1 auto; }
   .cal-upcoming-empty { color:var(--ink-faint); font-size:13.5px; }
+  /* Phase 68: same pill as timeline.php's/tree.php's own banner "Send a
+     card" link -- this page had no such class of its own before, since
+     its "Coming up" list never offered a card option at all. */
+  .cal-send-card-btn { flex:none; font-size:12px; font-weight:700; padding:5px 11px; border-radius:999px; border:1px solid #8A5A0A; color:#FBF8F1; background:#C2790F; cursor:pointer; font-family:inherit; text-decoration:none; white-space:nowrap; }
+  .cal-send-card-btn:hover { background:#A9670C; }
 
   /* ---------- month-by-month list ---------- */
   .cal-year { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:16px; }
@@ -324,6 +329,16 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
                 <?= htmlspecialchars($e['title'], ENT_QUOTES) ?><?php if ($e['kind'] === 'birthday'): ?> — turning <?= (int) $e['turning_age'] ?><?php elseif ($e['years'] !== null): ?> — <?= (int) $e['years'] ?> years<?php endif; ?>
                 <span style="opacity:.75;"> (<?= htmlspecialchars($e['next_date']->format('D j M'), ENT_QUOTES) ?>)</span>
               </span>
+              <?php /* Phase 68: this list reaches 31 days out -- further
+                       than timeline.php's/tree.php's own 7-day banners --
+                       so timeline.php's own $directOpenCardRow lookup (not
+                       a matching banner button) is what makes a link like
+                       this work even for something further out than a week. */ ?>
+              <?php if ($e['kind'] === 'birthday'): ?>
+                <a class="cal-send-card-btn" href="/timeline.php?send_card_to=<?= (int) $e['person']['id'] ?>">🎉 Send a card</a>
+              <?php else: ?>
+                <a class="cal-send-card-btn" href="/timeline.php?send_card_for_event=<?= (int) $e['id'] ?>">🎉 Send a card</a>
+              <?php endif; ?>
             </div>
           <?php endforeach; ?>
         </div>

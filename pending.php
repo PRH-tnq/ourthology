@@ -722,7 +722,11 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="req-card">
         <span class="req-when"><?= htmlspecialchars(human_time_ago($gc['sent_at']), ENT_QUOTES) ?></span>
         <p style="margin:0;font-size:14px;">
-          Card sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]), ENT_QUOTES) ?></strong>
+          <?php /* Phase 68: $gc['occasion'] now varies (a key date's own
+                   title, not just "Birthday") since a card can be sent
+                   for any calendar event, not only a birthday -- same
+                   field the incoming-card row above already shows. */ ?>
+          <?= htmlspecialchars((string) $gc['occasion'], ENT_QUOTES) ?> card sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]), ENT_QUOTES) ?></strong>
           <?php if ($gc['deliver_on'] > date('Y-m-d')): ?>
             <span style="color:var(--ink-faint);font-size:12px;">(will land in their Pending queue on <?= htmlspecialchars(date('d M Y', strtotime($gc['deliver_on'])), ENT_QUOTES) ?>)</span>
           <?php else: ?>

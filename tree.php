@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/calendar.php'; // Phase 68: ourthology_calendar_reminder_rows() -- the banner's "Send a card" now covers key dates too, not just birthdays
 require_once __DIR__ . '/includes/tree_layout.php';
 require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/tour_engine.php';
@@ -103,10 +104,12 @@ $unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']
 // birthday falls in the next week -- shown as a reminder banner next
 // to the "Your tree" heading below (see graph_upcoming_birthdays() in
 // includes/graph.php for the date math).
-$upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
-// Phase 67: per-person rows for the banner's "Send a card" links -- see
-// ourthology_birthday_banner_rows()'s own doc comment in graph.php.
-$birthdayCardRows = ourthology_birthday_banner_rows($upcomingBirthdays);
+// Phase 68: widened to also cover non-birthday key dates (an
+// anniversary, a memorial, ...) within the same week -- see
+// ourthology_calendar_reminder_rows()'s own doc comment in
+// includes/calendar.php. Each row already carries everything the
+// per-row "Send a card" link below needs, for either kind.
+$reminderCardRows = ourthology_calendar_reminder_rows($pdo, $graph['persons'], $myGroup);
 
 // Phase 28: the onboarding tour (see includes/tour_steps.php) walks onto
 // this page partway through — this page never starts it (that only ever
@@ -516,13 +519,17 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
       <h3 style="margin-bottom:4px;">Your tree (<?= count($graph['persons']) ?> <?= count($graph['persons']) === 1 ? 'person' : 'people' ?>)</h3>
-      <?php if ($birthdayCardRows): ?>
+      <?php if ($reminderCardRows): ?>
         <div class="birthday-banner-group">
-          <?php foreach ($birthdayCardRows as $row): ?>
+          <?php foreach ($reminderCardRows as $row): ?>
             <div class="birthday-banner" role="status">
-              <span aria-hidden="true">🎂</span>
+              <span aria-hidden="true"><?= $row['kind'] === 'birthday' ? '&#127874;' : '&#128197;' ?></span>
               <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
-              <a class="birthday-send-card-btn" href="/timeline.php?send_card_to=<?= (int) $row['person_id'] ?>">🎉 Send a card</a>
+              <?php if ($row['kind'] === 'birthday'): ?>
+                <a class="birthday-send-card-btn" href="/timeline.php?send_card_to=<?= (int) $row['person_id'] ?>">🎉 Send a card</a>
+              <?php else: ?>
+                <a class="birthday-send-card-btn" href="/timeline.php?send_card_for_event=<?= (int) $row['event_id'] ?>">🎉 Send a card</a>
+              <?php endif; ?>
             </div>
           <?php endforeach; ?>
         </div>

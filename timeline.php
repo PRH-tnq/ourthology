@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/postcards.php';
 require_once __DIR__ . '/includes/letters.php';
 require_once __DIR__ . '/includes/cards.php';
+require_once __DIR__ . '/includes/calendar.php'; // Phase 68: ourthology_calendar_reminder_rows(), fetch_calendar_event_for_group() -- the reminder banner now covers key dates too, not just birthdays
 require_once __DIR__ . '/includes/tour_engine.php';
 
 require_login();
@@ -310,14 +311,69 @@ $targetName = person_display_name($target);
 // also shown here per Phil's request -- $myGroup matches tree.php's own
 // scoping (the viewer's own family group; always the same group $target
 // belongs to, per the access check above).
-$graph = fetch_family_graph($pdo, $myGroup);
-$upcomingBirthdays = graph_upcoming_birthdays($graph['persons']);
-// Phase 67: per-person rows for the banner's new "Send a card" buttons --
-// see ourthology_birthday_banner_rows()'s own doc comment in graph.php.
+//
+// Phase 68: "extend [send a card] to all pages and for all events that
+// appear on the calendar" -- widened from birthdays alone to
+// ourthology_calendar_reminder_rows()'s merged birthday + key-date list
+// (see that function's own doc comment in includes/calendar.php).
 // Sender's own first name feeds the card composer's default closing line
 // ("lots of love, Phil"), computed once here rather than per-row.
-$birthdayCardRows = ourthology_birthday_banner_rows($upcomingBirthdays);
+$graph = fetch_family_graph($pdo, $myGroup);
+$reminderCardRows = ourthology_calendar_reminder_rows($pdo, $graph['persons'], $myGroup);
 $myFirstName = (string) ($me['first_name'] ?? '');
+
+// Phase 68: a "Send a card" link from a page OTHER than this one
+// (tree.php's own banner, or calendar.php's "Coming up" list) can point
+// at a birthday or key date that's outside this page's own 7-day
+// reminder window (calendar.php's list reaches out to 31 days) -- so
+// rather than requiring a matching row to already be rendered in
+// $reminderCardRows, this looks the specific requested person/event up
+// directly and hands the composer everything it needs via
+// window.ourthologyOpenCardComposer() on load, regardless of whether it
+// would otherwise appear in the banner at all right now.
+$directOpenCardRow = null;
+if (isset($_GET['send_card_to'])) {
+    $wantPersonId = filter_var($_GET['send_card_to'], FILTER_VALIDATE_INT);
+    if ($wantPersonId !== false) {
+        foreach ($graph['persons'] as $p) {
+            if ((int) $p['id'] === $wantPersonId && empty($p['died']) && !empty($p['born'])) {
+                $name = person_display_name($p);
+                // Keys here are camelCase (personId, not person_id) to match
+                // what window.ourthologyOpenCardComposer() already expects
+                // from the .birthday-send-card-btn click handler below --
+                // this array is handed to that same function via
+                // json_encode(), so the two call sites need the same shape.
+                $directOpenCardRow = [
+                    'kind'            => 'birthday',
+                    'personId'        => (int) $p['id'],
+                    'eventId'         => null,
+                    'name'            => $name,
+                    'firstName'       => (string) ($p['first_name'] ?? $name),
+                    'coverDefault'    => 'Happy Birthday!',
+                    'greetingDefault' => 'Happy Birthday',
+                ];
+                break;
+            }
+        }
+    }
+} elseif (isset($_GET['send_card_for_event'])) {
+    $wantEventId = filter_var($_GET['send_card_for_event'], FILTER_VALIDATE_INT);
+    if ($wantEventId !== false) {
+        $wantedEvent = fetch_calendar_event_for_group($pdo, $wantEventId, $myGroup);
+        if ($wantedEvent !== null) {
+            $eventTitle = (string) $wantedEvent['title'];
+            $directOpenCardRow = [
+                'kind'            => 'key_date',
+                'personId'        => null,
+                'eventId'         => (int) $wantedEvent['id'],
+                'name'            => $eventTitle,
+                'firstName'       => '',
+                'coverDefault'    => mb_substr($eventTitle, 0, 60),
+                'greetingDefault' => mb_substr($eventTitle, 0, 60),
+            ];
+        }
+    }
+}
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
 function ourthology_entry_date(array $entry): string
@@ -700,6 +756,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .gcard-close { position:absolute; top:10px; right:12px; z-index:6; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
   .gcard-close:hover { background:var(--paper-2); }
   .gcard-title { margin:0 0 12px; }
+
+  /* Phase 68: only shown for a key-date card (no single implied
+     recipient the way a birthday card has) -- sits above the scene since
+     the sender needs to pick who it's for before the "To........." field
+     inside means anything. */
+  .gcard-recipient-picker { display:flex; flex-direction:column; gap:4px; margin:0 0 14px; }
+  .gcard-recipient-picker label { font-size:12.5px; color:var(--ink-faint); }
+  .gcard-recipient-picker select { padding:9px 10px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:14px; background:#fff; color:var(--ink-soft); }
 
   /* Taller than wide (5:7 is a standard greeting-card proportion) -- the
      cover sits on top (z-index above the inside), hinged on its LEFT
@@ -1123,16 +1187,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <span id="customZoomLabel"></span>
         <span class="zoom-pill-x">×</span>
       </button>
-      <?php if ($birthdayCardRows): ?>
+      <?php if ($reminderCardRows): ?>
         <div class="birthday-banner-group">
-          <?php foreach ($birthdayCardRows as $row): ?>
+          <?php foreach ($reminderCardRows as $row): ?>
             <div class="birthday-banner" role="status">
-              <span aria-hidden="true">&#127874;</span>
+              <span aria-hidden="true"><?= $row['kind'] === 'birthday' ? '&#127874;' : '&#128197;' ?></span>
               <span><?= htmlspecialchars($row['text'], ENT_QUOTES) ?></span>
               <button
                 type="button"
                 class="birthday-send-card-btn"
-                data-person-id="<?= (int) $row['person_id'] ?>"
+                data-kind="<?= htmlspecialchars($row['kind'], ENT_QUOTES) ?>"
+                data-person-id="<?= $row['person_id'] !== null ? (int) $row['person_id'] : '' ?>"
+                data-event-id="<?= $row['event_id'] !== null ? (int) $row['event_id'] : '' ?>"
                 data-first-name="<?= htmlspecialchars($row['first_name'], ENT_QUOTES) ?>"
                 data-name="<?= htmlspecialchars($row['name'], ENT_QUOTES) ?>"
                 data-cover-default="<?= htmlspecialchars($row['cover_default'], ENT_QUOTES) ?>"
@@ -2934,12 +3000,27 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="send">
           <input type="hidden" name="recipient_id" id="gcardRecipientId" value="">
-          <input type="hidden" name="occasion" value="Birthday">
+          <input type="hidden" name="event_id" id="gcardEventIdField" value="">
           <input type="hidden" name="cover_message" id="gcardCoverMessageField">
           <input type="hidden" name="to_line" id="gcardToLineField">
           <input type="hidden" name="greeting_line" id="gcardGreetingLineField">
           <input type="hidden" name="message" id="gcardMessageField">
           <input type="hidden" name="from_line" id="gcardFromLineField">
+
+          <!-- Phase 68: a key-date card has no single implied recipient
+               (unlike a birthday card, where opening the composer already
+               says who it's for) -- shown only for that case; occasion/
+               deliver_on are computed server-side from the event itself
+               either way, this picker is purely about who receives it. -->
+          <div class="gcard-recipient-picker" id="gcardRecipientPicker" style="display:none;">
+            <label for="gcardRecipientSelect">Who's this for?</label>
+            <select id="gcardRecipientSelect">
+              <option value="">Choose a person…</option>
+              <?php foreach ($postcardRecipientOptions as $opt): ?>
+                <option value="<?= (int) $opt['id'] ?>" data-first-name="<?= htmlspecialchars((string) $opt['first_name'], ENT_QUOTES) ?>"><?= htmlspecialchars(person_display_name($opt), ENT_QUOTES) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
 
           <div class="gcard-scene" id="gcardScene">
             <div class="gcard-cover" id="gcardCover">
@@ -3200,6 +3281,37 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       }
 
+      // Phase 68: a key-date card has no implied recipient (unlike a
+      // birthday card, where opening the composer already says who it's
+      // for) -- #gcardRecipientPicker is shown only for that case, and
+      // "Add your message" stays disabled until a person's actually
+      // chosen there. Mirrors the letter composer's own
+      // salutationTouched pattern above: the To......... field still
+      // auto-fills from whoever's picked, but only until the sender
+      // types their own text in there.
+      function wireRecipientPicker(root) {
+        var select = root.querySelector("#gcardRecipientSelect");
+        var recipientField = root.querySelector("#gcardRecipientId");
+        var toLine = root.querySelector("#gcardToLine");
+        var openBtn = root.querySelector("#gcardOpenBtn");
+        if (!select) return;
+
+        var toLineTouched = false;
+        if (toLine) {
+          toLine.addEventListener("input", function () { toLineTouched = true; });
+        }
+
+        select.addEventListener("change", function () {
+          var opt = select.options[select.selectedIndex];
+          var chosenId = opt ? opt.value : "";
+          if (recipientField) recipientField.value = chosenId;
+          if (toLine && !toLineTouched) {
+            toLine.textContent = opt ? (opt.getAttribute("data-first-name") || "") : "";
+          }
+          if (openBtn) openBtn.disabled = chosenId === "";
+        });
+      }
+
       window.ourthologyOpenCardComposer = function (data) {
         closeOverlay();
         document.body.appendChild(tpl.content.cloneNode(true));
@@ -3215,15 +3327,32 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
         document.addEventListener("keydown", onEscape);
 
+        var isKeyDate = data.kind === "key_date";
+
         var recipientField = document.getElementById("gcardRecipientId");
-        if (recipientField) recipientField.value = data.personId || "";
+        if (recipientField) recipientField.value = isKeyDate ? "" : (data.personId || "");
+        var eventField = document.getElementById("gcardEventIdField");
+        if (eventField) eventField.value = isKeyDate ? (data.eventId || "") : "";
         var title = document.getElementById("gcardTitle");
-        if (title && data.name) title.textContent = "Send " + data.name + " a card";
+        if (title && data.name) {
+          title.textContent = isKeyDate ? ("Send a card for " + data.name) : ("Send " + data.name + " a card");
+        }
+
+        // A key date isn't "about" any one person, so nothing here is
+        // picked yet -- the picker shows and "Add your message" starts
+        // disabled; wireRecipientPicker() re-enables it once a recipient
+        // is actually chosen.
+        var picker = document.getElementById("gcardRecipientPicker");
+        if (picker) picker.style.display = isKeyDate ? "" : "none";
+        var select = document.getElementById("gcardRecipientSelect");
+        if (select) select.value = "";
+        var openBtn = document.getElementById("gcardOpenBtn");
+        if (openBtn) openBtn.disabled = isKeyDate;
 
         var coverText = document.getElementById("gcardCoverMessageText");
         if (coverText) coverText.textContent = data.coverDefault || "Happy Birthday!";
         var toLine = document.getElementById("gcardToLine");
-        if (toLine) toLine.textContent = data.firstName || "";
+        if (toLine) toLine.textContent = isKeyDate ? "" : (data.firstName || "");
         var greetingLine = document.getElementById("gcardGreetingLine");
         if (greetingLine) greetingLine.textContent = data.greetingDefault || "Happy Birthday";
         var message = document.getElementById("gcardMessage");
@@ -3235,13 +3364,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
         wireImagePicker(overlay);
         wireOpening(overlay);
+        wireRecipientPicker(overlay);
         wireSend(overlay);
       };
 
       document.querySelectorAll(".birthday-send-card-btn").forEach(function (btn) {
         btn.addEventListener("click", function () {
           window.ourthologyOpenCardComposer({
+            kind: btn.getAttribute("data-kind"),
             personId: btn.getAttribute("data-person-id"),
+            eventId: btn.getAttribute("data-event-id"),
             firstName: btn.getAttribute("data-first-name"),
             name: btn.getAttribute("data-name"),
             coverDefault: btn.getAttribute("data-cover-default"),
@@ -3250,17 +3382,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         });
       });
 
-      // tree.php's own per-birthday "Send a card" link can't host this
-      // whole composer itself -- it just navigates here with
-      // ?send_card_to=<id>, and this reopens the same composer for that
-      // same person by reusing whichever banner button already carries
-      // their data, rather than re-fetching anything.
-      var params = new URLSearchParams(window.location.search);
-      var wantId = params.get("send_card_to");
-      if (wantId) {
-        var selector = '.birthday-send-card-btn[data-person-id="' + (window.CSS && CSS.escape ? CSS.escape(wantId) : wantId) + '"]';
-        var matchBtn = document.querySelector(selector);
-        if (matchBtn) matchBtn.click();
+      // Phase 68: tree.php's and calendar.php's own per-entry "Send a
+      // card" links can't host this whole composer themselves -- they
+      // just navigate here with ?send_card_to=<person id> or
+      // ?send_card_for_event=<event id>, and $directOpenCardRow (looked
+      // up server-side above, straight from the database -- never from
+      // whatever a rendered banner button happens to carry) hands this
+      // everything needed to reopen the same composer for that same
+      // birthday or key date, even one further out than this page's own
+      // 7-day banner would otherwise show.
+      var directOpenRow = <?= $directOpenCardRow !== null ? json_encode($directOpenCardRow) : 'null' ?>;
+      if (directOpenRow) {
+        window.ourthologyOpenCardComposer(directOpenRow);
       }
     })();
   </script>

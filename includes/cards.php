@@ -7,12 +7,20 @@ require_once __DIR__ . '/media.php';
 
 /**
  * Phase 67: "send a card" -- a taller, more ceremonial greeting card,
- * triggered from the birthday reminder banner (see
- * ourthology_birthday_banner_rows() in graph.php) rather than composed
- * freely the way a postcard/letter is. Modeled on letters.php (one row
- * per card, addressed to exactly one recipient) rather than postcards'
- * multi-recipient junction table -- a card is always for one specific
- * person's one specific occasion, never a broadcast.
+ * triggered from the birthday reminder banner rather than composed freely
+ * the way a postcard/letter is. Modeled on letters.php (one row per card,
+ * addressed to exactly one recipient) rather than postcards' multi-
+ * recipient junction table -- a card is always for one specific person's
+ * one specific occasion, never a broadcast.
+ *
+ * Phase 68 widened the trigger from "a person's own birthday" to any
+ * calendar entry -- a key date (anniversary, etc.) can trigger a card
+ * too, on any page that shows one. See
+ * ourthology_calendar_reminder_rows() in includes/calendar.php for the
+ * shared "what's coming up, and what would a card for it look like" list
+ * both kinds now come from, and card.php's send action for how a
+ * key-date card's occasion/deliver_on/recipient differ from a birthday
+ * card's.
  *
  * Its front image reuses store_postcard_image()/
  * store_postcard_copy_as_media() from media.php as-is: a card's own photo
@@ -25,8 +33,7 @@ require_once __DIR__ . '/media.php';
  * up in the recipient's Pending queue today. See
  * fetch_pending_cards_for_person() below for the actual gate, and
  * card.php's send action for how deliver_on is computed (server-side,
- * from the recipient's own persons.born -- never trusted from the
- * client).
+ * never trusted from the client either way).
  */
 
 /**
@@ -36,6 +43,12 @@ require_once __DIR__ . '/media.php';
  * $deliverOn is a DateTimeImmutable computed by the caller (card.php),
  * never derived from anything posted by the browser. Returns the new
  * card's id.
+ *
+ * Phase 68: $eventId records which calendar_events row (if any) triggered
+ * this card -- null for the original birthday flow, where deliver_on
+ * comes from the recipient's own persons.born instead and there's no
+ * calendar_events row involved at all. See card.php's send action for how
+ * the two flows compute occasion/deliver_on differently.
  */
 function create_greeting_card(
     PDO $pdo,
@@ -50,7 +63,8 @@ function create_greeting_card(
     string $greetingLine,
     string $message,
     string $fromLine,
-    DateTimeImmutable $deliverOn
+    DateTimeImmutable $deliverOn,
+    ?int $eventId = null
 ): int {
     // Phase 67: same "hand-stamped, not machine-straight" postmark angle
     // a postcard gets (see create_postcard() in postcards.php) -- the
@@ -59,11 +73,11 @@ function create_greeting_card(
 
     $stmt = $pdo->prepare(
         'INSERT INTO greeting_cards
-            (sender_person_id, created_by_user_id, family_group_id, recipient_person_id,
+            (sender_person_id, created_by_user_id, family_group_id, recipient_person_id, event_id,
              occasion, image_path, image_mime_type, image_byte_size, image_width, image_height,
              cover_message, to_line, greeting_line, message, from_line, postmark_angle, deliver_on)
          VALUES
-            (:sender, :uid, :gid, :rid,
+            (:sender, :uid, :gid, :rid, :eid,
              :occasion, :path, :mime, :size, :w, :h,
              :cover, :toln, :greet, :msg, :froml, :angle, :deliver)'
     );
@@ -72,6 +86,7 @@ function create_greeting_card(
         'uid'      => $senderUserId,
         'gid'      => $familyGroupId,
         'rid'      => $recipientPersonId,
+        'eid'      => $eventId,
         'occasion' => $occasion,
         'path'     => $storedImage['file_path'],
         'mime'     => $storedImage['mime_type'],
@@ -150,7 +165,7 @@ function fetch_card_for_recipient(PDO $pdo, int $cardId, int $recipientPersonId)
 function fetch_outgoing_cards_for_person(PDO $pdo, int $senderPersonId): array
 {
     $stmt = $pdo->prepare(
-        "SELECT gc.id AS card_id, gc.status, gc.created_at AS sent_at, gc.deliver_on,
+        "SELECT gc.id AS card_id, gc.status, gc.occasion, gc.created_at AS sent_at, gc.deliver_on,
                 rp.first_name AS recipient_first, rp.surname AS recipient_surname
          FROM greeting_cards gc
          JOIN persons rp ON rp.id = gc.recipient_person_id
@@ -171,7 +186,7 @@ function fetch_outgoing_cards_for_person(PDO $pdo, int $senderPersonId): array
 function fetch_sent_greeting_cards_for_person(PDO $pdo, int $senderPersonId, int $limit = 60): array
 {
     $stmt = $pdo->prepare(
-        "SELECT gc.id AS card_id, gc.status, gc.created_at AS sent_at,
+        "SELECT gc.id AS card_id, gc.status, gc.occasion, gc.created_at AS sent_at,
                 rp.first_name AS recipient_first, rp.surname AS recipient_surname
          FROM greeting_cards gc
          JOIN persons rp ON rp.id = gc.recipient_person_id
