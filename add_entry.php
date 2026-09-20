@@ -620,7 +620,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 
       <div class="entry-columns">
         <div class="entry-col">
-          <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 10 files max)</span></label>
+          <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 25 files max)</span></label>
           <div class="photo-drop media-picker" id="photoDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
             <div class="media-picker-empty" id="photoDropEmpty" hidden>
               <div class="thumb">
@@ -713,7 +713,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   </div>
   <script>
   (function () {
-    var MAX_FILES = 10;
+    var MAX_FILES = 25; // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
     var MAX_BYTES = 25 * 1024 * 1024;
     var dropzone = document.getElementById('photoDrop');
     var emptyState = document.getElementById('photoDropEmpty');

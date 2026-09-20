@@ -29,7 +29,7 @@ const MEDIA_MAX_BYTES = 25 * 1024 * 1024; // 25MB, per file
 // A single timeline entry can carry more than one attachment (see
 // store_uploaded_media_files() below) — capped so one submission can't be
 // used to dump an unbounded number of files on the server in one request.
-const MEDIA_MAX_FILES_PER_ENTRY = 10;
+const MEDIA_MAX_FILES_PER_ENTRY = 25;
 
 /** extension => [allowed mime types] — used to validate the file's REAL content, not the client-supplied name/type. */
 const MEDIA_ALLOWED = [

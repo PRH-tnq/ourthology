@@ -2867,7 +2867,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           if (e) {
             e.media = (e.media || []).concat(data.media || []);
             viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
-            vamRemainingSlots = Math.max(0, 10 - e.media.length);
+            vamRemainingSlots = Math.max(0, 25 - e.media.length); // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
           }
           vamReset();
           vamShowStatus(data.notice || "Added.");
@@ -2929,7 +2929,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerMyNoteText.value = e.myNote || "";
         viewerAddMediaForm.hidden = false;
         viewerAddMediaEntryId.value = e.id;
-        vamRemainingSlots = Math.max(0, 10 - (e.media || []).length);
+        vamRemainingSlots = Math.max(0, 25 - (e.media || []).length); // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
         vamReset();
       } else {
         viewerMyNoteForm.hidden = true;
