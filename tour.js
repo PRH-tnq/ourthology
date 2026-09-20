@@ -60,6 +60,27 @@
   };
 
   var TOUR_STEPS = JSON.parse(stepsEl.textContent);
+  // Phase 70: the "what's new" shortcut's own step list, precomputed
+  // server-side (see ourthology_tour_recent_step_indices() in includes/
+  // tour_steps.php) -- an array of indices INTO TOUR_STEPS, newest
+  // feature group first. RECENT_INDEXES may be empty (nothing tagged
+  // yet), in which case "What's new" just has nothing to show.
+  var RECENT_INDEXES = window.OURTHOLOGY_TOUR_RECENT_INDEXES || [];
+  var FULL_INDEXES = TOUR_STEPS.map(function (_, i) { return i; });
+
+  // MODE picks which of the two index lists above is "active" right
+  // now; ACTIVE_INDEXES is that list. From here on, `step` is a
+  // position WITHIN ACTIVE_INDEXES, never a raw index into TOUR_STEPS
+  // -- curStep() below is the one place that maps position -> the real
+  // step object, so the rest of this file doesn't need to care which
+  // mode it's in.
+  var MODE = "full";
+  var ACTIVE_INDEXES = FULL_INDEXES;
+  function setMode(mode) {
+    MODE = mode === "recent" ? "recent" : "full";
+    ACTIVE_INDEXES = MODE === "recent" ? RECENT_INDEXES : FULL_INDEXES;
+  }
+  function curStep() { return TOUR_STEPS[ACTIVE_INDEXES[step]]; }
 
   var step = -1;
   var highlight = document.getElementById("tourHighlight");
@@ -69,8 +90,10 @@
   var diagramEl = document.getElementById("tourDiagram");
   var stepLabel = document.getElementById("tourStepLabel");
   var nextBtn = document.getElementById("tourNextBtn");
+  var prevBtn = document.getElementById("tourPrevBtn");
   var skipBtn = document.getElementById("tourSkipBtn");
   var replayBtn = document.getElementById("tourReplayBtn"); // only present on timeline.php
+  var whatsNewBtn = document.getElementById("tourWhatsNewBtn"); // only present on timeline.php
   var annoLayer = document.getElementById("tourAnnoLayer");
   // Phase 44: the post-tour "get started" nudge and its dismiss button --
   // like replayBtn above, these only exist on timeline.php's own markup,
@@ -86,12 +109,14 @@
     try {
       sessionStorage.setItem("ourthologyTourStep", String(i));
       sessionStorage.setItem("ourthologyTourActive", "1");
+      sessionStorage.setItem("ourthologyTourMode", MODE);
     } catch (e) { /* private browsing etc — the tour just won't survive a page change */ }
   }
   function clearState() {
     try {
       sessionStorage.removeItem("ourthologyTourStep");
       sessionStorage.removeItem("ourthologyTourActive");
+      sessionStorage.removeItem("ourthologyTourMode");
     } catch (e) {}
   }
 
@@ -309,17 +334,74 @@
       if (btn) { btn.click(); return true; }
       return false;
     },
+
+    // Phase 70: the greeting-card composer -- opened directly via its
+    // own global window.ourthologyOpenCardComposer() (timeline.php),
+    // the same function a real "Send a card" button calls, rather than
+    // clicking a button on screen -- unlike the postcard composer,
+    // there's no single fixed launcher always present on the page (a
+    // real one only appears next to an actual upcoming birthday/key
+    // date), so the tour can't rely on one existing. Synthetic "key
+    // date" data both demonstrates the recipient picker (a birthday
+    // card skips it, already knowing who it's for) and keeps this safe
+    // to run on any account, even one with no real key dates yet.
+    open_card_composer: function () {
+      if (document.getElementById("gcardComposeOverlay")) { return false; }
+      if (typeof window.ourthologyOpenCardComposer !== "function") { return false; }
+      window.ourthologyOpenCardComposer({
+        kind: "key_date",
+        eventId: "",
+        name: "an upcoming date",
+        coverDefault: "Happy Birthday!",
+        greetingDefault: "Happy Birthday"
+      });
+      return true;
+    },
+    // "Add your message" starts disabled until a recipient's chosen in
+    // the picker the step above points at -- fine for a real sender,
+    // but this walkthrough never actually picks one (it's a demo, nothing
+    // gets sent), so it just lifts that requirement here rather than
+    // forcing a real family member to be selected for the tour's sake.
+    open_card_inside: function () {
+      var btn = document.getElementById("gcardOpenBtn");
+      var cover = document.getElementById("gcardCover");
+      if (btn && cover && !cover.classList.contains("is-open")) {
+        btn.disabled = false;
+        btn.click();
+        return true;
+      }
+      return false;
+    },
+    close_card_composer: function () {
+      var btn = document.getElementById("gcardComposeClose");
+      if (btn) { btn.click(); return true; }
+      return false;
+    },
+
+    // Phase 70: the Memory planner modal.
+    open_trip_planner: function () {
+      var btn = document.getElementById("tripPlannerOpenBtn");
+      var scrim = document.getElementById("tripScrim");
+      if (btn && scrim && !scrim.classList.contains("open")) { btn.click(); return true; }
+      return false;
+    },
+    close_trip_planner: function () {
+      var btn = document.getElementById("tripCloseBtn");
+      if (btn) { btn.click(); return true; }
+      return false;
+    },
   };
 
-  // Only the flip genuinely animates (.postcard-flip-inner's 0.7s CSS
-  // transition) -- measuring the target immediately after toggling its
-  // class would catch it mid-turn and the highlight/tooltip would jump
-  // once the transition finished. Every other action is an instant style/
-  // DOM change, safe to measure right away.
-  var ACTION_SETTLE_MS = { flip_postcard: 760 };
+  // Only a genuine CSS-transition-driven flip/open animates (0.7s for
+  // the postcard, 0.5s for the greeting card's own cover) -- measuring
+  // the target immediately after toggling its class would catch it
+  // mid-turn and the highlight/tooltip would jump once the transition
+  // finished. Every other action is an instant style/DOM change, safe
+  // to measure right away.
+  var ACTION_SETTLE_MS = { flip_postcard: 760, open_card_inside: 620 };
 
   function place() {
-    var s = TOUR_STEPS[step];
+    var s = curStep();
     titleEl.textContent = s.title;
     bodyEl.textContent = s.body;
     if (diagramEl) {
@@ -327,8 +409,9 @@
       diagramEl.innerHTML = svg || "";
       diagramEl.hidden = !svg;
     }
-    stepLabel.textContent = (step + 1) + " of " + TOUR_STEPS.length;
-    nextBtn.textContent = (step === TOUR_STEPS.length - 1) ? "Done" : "Next";
+    stepLabel.textContent = (step + 1) + " of " + ACTIVE_INDEXES.length;
+    nextBtn.textContent = (step === ACTIVE_INDEXES.length - 1) ? "Done" : "Next";
+    if (prevBtn) { prevBtn.disabled = step <= 0; }
 
     clickTabIfNeeded(s);
 
@@ -424,6 +507,11 @@
     clearState();
     clearAnnotations();
     scrim.classList.remove("open");
+    // Phase 70: "What's new" is a quick feature peek, not the onboarding
+    // tour -- finishing (or skipping) it shouldn't mark the account as
+    // past onboarding, show the post-tour "get started" nudge, or force
+    // a navigation back to the timeline from wherever it was opened.
+    if (MODE === "recent") { return; }
     var fd = new FormData();
     fd.append("action", "dismiss_tour");
     fd.append("csrf_token", document.getElementById("tourCsrf").value);
@@ -458,15 +546,24 @@
   }
 
   function goToStep(i) {
-    if (i >= TOUR_STEPS.length) { finishTour(); return; }
-    var s = TOUR_STEPS[i];
+    // i is a position WITHIN ACTIVE_INDEXES (see the MODE/curStep()
+    // comment above), not a raw TOUR_STEPS index. Below the first step
+    // is a no-op (the Back button is disabled there anyway -- this is
+    // just a safety net) rather than wrapping or ending the tour.
+    if (i < 0) { return; }
+    if (i >= ACTIVE_INDEXES.length) { finishTour(); return; }
+    var realIdx = ACTIVE_INDEXES[i];
+    var s = TOUR_STEPS[realIdx];
     if (s.page !== TOUR_PAGE) {
       // The next step lives on another page — hand off via sessionStorage
       // and navigate there for real; that page's own copy of this same
       // engine picks the tour back up on load (see the resume check
-      // below). A page this account can't reach yet (edit_person.php with
-      // no known person id, in the unlikely case OURTHOLOGY_MY_PERSON_ID
-      // wasn't set) just ends the tour rather than navigating to "null".
+      // below). Works identically whether i is ahead of or behind the
+      // current step, so the Back button crosses pages the same way
+      // Next does. A page this account can't reach yet (edit_person.php
+      // with no known person id, in the unlikely case
+      // OURTHOLOGY_MY_PERSON_ID wasn't set) just ends the tour rather
+      // than navigating to "null".
       var url = TOUR_URLS[s.page];
       if (!url) { finishTour(); return; }
       saveState(i);
@@ -478,25 +575,40 @@
     open_();
   }
 
+  function startTour(mode) {
+    setMode(mode);
+    goToStep(0);
+  }
+
   nextBtn.addEventListener("click", function () { goToStep(step + 1); });
+  if (prevBtn) {
+    prevBtn.addEventListener("click", function () { goToStep(step - 1); });
+  }
   skipBtn.addEventListener("click", finishTour);
   window.addEventListener("resize", function () { if (step >= 0) place(); });
   if (replayBtn) {
-    replayBtn.addEventListener("click", function () { goToStep(0); });
+    replayBtn.addEventListener("click", function () { startTour("full"); });
+  }
+  if (whatsNewBtn) {
+    whatsNewBtn.addEventListener("click", function () { startTour("recent"); });
   }
 
   var resumeActive = false;
   try { resumeActive = sessionStorage.getItem("ourthologyTourActive") === "1"; } catch (e) {}
   if (resumeActive) {
+    var savedMode = "full";
+    try { savedMode = sessionStorage.getItem("ourthologyTourMode") || "full"; } catch (e) {}
+    setMode(savedMode);
     var savedStep = 0;
     try { savedStep = parseInt(sessionStorage.getItem("ourthologyTourStep") || "0", 10); } catch (e) {}
-    if (TOUR_STEPS[savedStep] && TOUR_STEPS[savedStep].page === TOUR_PAGE) {
+    var savedReal = ACTIVE_INDEXES[savedStep];
+    if (savedReal != null && TOUR_STEPS[savedReal] && TOUR_STEPS[savedReal].page === TOUR_PAGE) {
       step = savedStep;
       saveState(step);
       open_();
     }
   } else if (window.OURTHOLOGY_AUTOSTART_TOUR) {
-    goToStep(0);
+    startTour("full");
   }
 
   // Phase 44: independent of the resume/autostart check above -- this

@@ -27,6 +27,11 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
     $tourSteps = ourthology_tour_steps();
     $tourStepsJson = json_encode($tourSteps, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $tourStepsJsonSafe = str_replace('</', '<\/', (string) $tourStepsJson);
+    // Phase 70: the "what's new" shortcut's own step list -- see
+    // ourthology_tour_recent_step_indices()'s own doc comment in
+    // includes/tour_steps.php. Computed once, here, so every page embeds
+    // the exact same list regardless of which one happens to load it.
+    $tourRecentIndices = ourthology_tour_recent_step_indices($tourSteps, 5);
     ?>
     <div class="tour-scrim" id="tourScrim">
       <div class="tour-highlight" id="tourHighlight" hidden></div>
@@ -46,7 +51,10 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
         <div class="tour-footer">
           <button type="button" class="tour-skip" id="tourSkipBtn">Skip tour</button>
           <span class="tour-step-label" id="tourStepLabel"></span>
-          <button type="button" class="tour-next" id="tourNextBtn"></button>
+          <div class="tour-nav-btns">
+            <button type="button" class="tour-prev" id="tourPrevBtn">&larr; Back</button>
+            <button type="button" class="tour-next" id="tourNextBtn"></button>
+          </div>
         </div>
       </div>
     </div>
@@ -56,7 +64,8 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
     window.OURTHOLOGY_TOUR_PAGE = <?= json_encode($page) ?>;
     window.OURTHOLOGY_AUTOSTART_TOUR = <?= $autostart ? 'true' : 'false' ?>;
     window.OURTHOLOGY_MY_PERSON_ID = <?= $myPersonId ?>;
+    window.OURTHOLOGY_TOUR_RECENT_INDEXES = <?= json_encode($tourRecentIndices) ?>;
     </script>
-    <script src="/tour.js?v=3"></script>
+    <script src="/tour.js?v=4"></script>
     <?php
 }

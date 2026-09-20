@@ -595,6 +595,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      among plain nav links, kept here so it's not just a plain-looking pill. */
   .nav .linklet-btn { font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--accent); color:var(--on-accent); background:var(--accent); cursor:pointer; font-family:inherit; }
   .nav .linklet-btn:hover { background:var(--accent-glow); border-color:var(--accent-glow); }
+  /* Phase 70: #tourWhatsNewBtn sits right next to #tourReplayBtn -- ghost
+     (outline, not filled) so it reads as the lighter-weight, secondary
+     option of the two rather than competing with "Take the tour". */
+  .nav .linklet-btn.ghost { background:transparent; color:var(--accent); }
+  .nav .linklet-btn.ghost:hover { background:var(--paper-2); border-color:var(--accent); color:var(--accent); }
 
   /* Phase 48: "Send a postcard" -- a compose pop-up styled like a
      physical postcard, front (photo) and back (handwritten note) as two
@@ -1207,6 +1212,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
           <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn" class="linklet-btn">Memory planner</button><?php endif; ?>
           <?php if ($isOwner): ?><button type="button" id="tourReplayBtn" class="linklet-btn">Take the tour</button><?php endif; ?>
+          <?php // Phase 70: "just see the 5 most recently added features" --
+                // a short version of the same tour, over just the newest
+                // feature groups (see ourthology_tour_recent_step_indices()
+                // in includes/tour_steps.php); wired up in /tour.js
+                // alongside #tourReplayBtn above. ?>
+          <?php if ($isOwner): ?><button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost">What's new</button><?php endif; ?>
           <button type="button" id="sendPostcardBtn" class="linklet-btn">Send a postcard</button>
           <span class="whoami">
             Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>

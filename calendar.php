@@ -220,17 +220,21 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-entry:last-child { border-bottom:none; }
   .cal-entry.is-today { background:var(--error-bg); margin:0 -8px; padding:6px 8px; border-radius:8px; border-bottom-color:transparent; }
   .cal-entry-day { flex:0 0 auto; font-weight:700; color:var(--ink-soft); min-width:22px; text-align:right; }
-  .cal-entry-body { flex:1 1 auto; min-width:0; }
+  .cal-entry-body { flex:1 1 auto; min-width:0; display:block; }
   .cal-entry-title { color:var(--ink); }
-  .cal-entry-meta { display:block; font-size:11.5px; color:var(--ink-faint); margin-top:1px; }
-  /* Phase 70: .cal-entry's own align-items:center vertically centers
-     .cal-entry-remove against the WHOLE two-line body (title + meta),
-     which reads as "Edit"/"Remove" floating too low relative to the
-     title text they actually belong to -- align-self:flex-start pins
-     them to the top of the row instead, level with .cal-entry-title's
-     own line, with a small top nudge so the smaller button text lines
-     up by eye with the title line rather than just its box top. */
-  .cal-entry-remove { flex:0 0 auto; align-self:flex-start; display:flex; align-items:center; gap:8px; margin-top:1px; }
+  /* Phase 70: each .cal-month card is only ~260px wide (see .cal-year's
+     own grid below), so a longer title routinely wraps onto a second
+     line -- .cal-entry-remove used to sit at the OUTER row level,
+     vertically centered (or, briefly, top-pinned) against that whole
+     variable-height title, which drifted out of line with anything
+     whenever the title wrapped differently. Nesting .cal-entry-remove
+     into its own row alongside .cal-entry-meta instead means "Edit"/
+     "Remove" always sit level with the meta line specifically, however
+     many lines the title itself takes above it -- the one reference
+     line that's always exactly one line tall. */
+  .cal-entry-meta-row { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-top:1px; }
+  .cal-entry-meta { font-size:11.5px; color:var(--ink-faint); }
+  .cal-entry-remove { flex:0 0 auto; display:flex; align-items:baseline; gap:8px; }
   .cal-entry-remove button { font-size:11px; }
 
   /* ---------- Phase 62: inline "Edit" form for a key date ---------- */
@@ -366,23 +370,25 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
                 <span class="cal-entry-day"><?= (int) $e['day'] ?></span>
                 <span class="cal-entry-body">
                   <span class="cal-entry-title"><?= htmlspecialchars($e['title'], ENT_QUOTES) ?></span>
-                  <?php if ($e['kind'] === 'birthday'): ?>
-                    <span class="cal-entry-meta">turns <?= (int) $e['turning_age'] ?></span>
-                  <?php else: ?>
-                    <span class="cal-entry-meta"><?= $e['years'] !== null ? ((int) $e['years']) . ' years · ' : '' ?>added by <?= htmlspecialchars($e['added_by'], ENT_QUOTES) ?></span>
-                  <?php endif; ?>
-                </span>
-                <?php if ($e['kind'] === 'key_date'): ?>
-                  <span class="cal-entry-remove">
-                    <button type="button" class="linklet cal-edit-toggle" data-target="calEdit<?= (int) $e['id'] ?>">Edit</button>
-                    <form method="post" onsubmit="return confirm('Remove this date from the family calendar?');">
-                      <?= csrf_field() ?>
-                      <input type="hidden" name="action" value="delete">
-                      <input type="hidden" name="event_id" value="<?= (int) $e['id'] ?>">
-                      <button type="submit" class="linklet">Remove</button>
-                    </form>
+                  <span class="cal-entry-meta-row">
+                    <?php if ($e['kind'] === 'birthday'): ?>
+                      <span class="cal-entry-meta">turns <?= (int) $e['turning_age'] ?></span>
+                    <?php else: ?>
+                      <span class="cal-entry-meta"><?= $e['years'] !== null ? ((int) $e['years']) . ' years · ' : '' ?>added by <?= htmlspecialchars($e['added_by'], ENT_QUOTES) ?></span>
+                    <?php endif; ?>
+                    <?php if ($e['kind'] === 'key_date'): ?>
+                      <span class="cal-entry-remove">
+                        <button type="button" class="linklet cal-edit-toggle" data-target="calEdit<?= (int) $e['id'] ?>">Edit</button>
+                        <form method="post" onsubmit="return confirm('Remove this date from the family calendar?');">
+                          <?= csrf_field() ?>
+                          <input type="hidden" name="action" value="delete">
+                          <input type="hidden" name="event_id" value="<?= (int) $e['id'] ?>">
+                          <button type="submit" class="linklet">Remove</button>
+                        </form>
+                      </span>
+                    <?php endif; ?>
                   </span>
-                <?php endif; ?>
+                </span>
               </div>
               <?php if ($e['kind'] === 'key_date'): ?>
                 <div class="cal-entry-edit" id="calEdit<?= (int) $e['id'] ?>">
