@@ -895,7 +895,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   /* "Overlay a message ... make it so this is the first thing the
      creator sees" -- a large editable line sat over the bottom of the
      photo with a dark scrim behind it so it reads on any picture. */
-  .gcard-cover-message { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:34px 14px 16px; box-sizing:border-box; text-align:center; background:linear-gradient(to top, rgba(20,16,10,0.65), rgba(20,16,10,0) 90%); pointer-events:none; }
+  /* Phase 73: the wrapper's own pointer-events was :none, with only
+     the text span itself (pointer-events:auto) clickable -- so tapping
+     anywhere in this band that WASN'T exactly on the (often short,
+     placeholder-only) text fell straight through to .gcard-drop-zone
+     underneath, which covers the whole front face and opens the OS
+     file picker on any click while no photo's attached yet. That's
+     what made the front message look impossible to edit: most taps
+     near it just popped a file-chooser dialog instead. auto + cursor:
+     text here, plus the click-delegation in wireImagePicker() below,
+     make the whole band edit the message, not just the text itself. */
+  .gcard-cover-message { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:34px 14px 16px; box-sizing:border-box; text-align:center; background:linear-gradient(to top, rgba(20,16,10,0.65), rgba(20,16,10,0) 90%); pointer-events:auto; cursor:text; }
   .gcard-cover-message-text { display:inline-block; min-width:50%; max-width:100%; outline:none; font-family:"Fraunces", Georgia, serif; font-size:24px; font-weight:700; line-height:1.2; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,0.55); pointer-events:auto; }
   .gcard-cover-message-text:empty::before { content:attr(data-placeholder); color:rgba(255,255,255,0.8); }
 
@@ -3982,7 +3992,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var changeBtn = root.querySelector(".gcard-change-photo");
         var pasteBtn = root.querySelector(".gcard-paste-btn");
         var pasteStatusEl = root.querySelector("#gcardCoverFront .card-paste-status");
+        var coverMessageWrap = root.querySelector(".gcard-cover-message");
+        var coverMessageText = root.querySelector("#gcardCoverMessageText");
         if (!fileInput || !frontFace || !previewImg || !dropZone) return;
+
+        // Phase 73: .gcard-cover-message now claims pointer events across
+        // its whole band (see the CSS comment), so a tap anywhere in it
+        // -- not just exactly on the placeholder/typed text -- lands
+        // here instead of falling through to the drop zone underneath.
+        // Delegate it to actually focusing the message, and stop it so
+        // it can't also reach dropZone's "click opens the file picker"
+        // listener below.
+        if (coverMessageWrap && coverMessageText) {
+          coverMessageWrap.addEventListener("click", function (evt) {
+            evt.stopPropagation();
+            if (evt.target !== coverMessageText) coverMessageText.focus();
+          });
+        }
 
         function setDropZoneLabel(text) {
           if (dropZoneLabel) dropZoneLabel.textContent = text;
