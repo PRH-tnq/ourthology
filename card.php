@@ -52,6 +52,12 @@ $action = (string) ($_POST['action'] ?? '');
 if ($action === 'send') {
     $recipientId = filter_var($_POST['recipient_id'] ?? '', FILTER_VALIDATE_INT);
     $eventId = filter_var($_POST['event_id'] ?? '', FILTER_VALIDATE_INT); // false when absent/blank -- a birthday card has none
+    // Phase 72: a third flow -- "Send a card" on the calendar page, not
+    // tied to any birthday or calendar_events row at all. Checked before
+    // either of the other two below, so an anytime card never falls
+    // through into the birthday branch just because it also has no
+    // event_id.
+    $isAnytime = ($_POST['kind'] ?? '') === 'anytime';
     $coverMessage = mb_substr(trim((string) ($_POST['cover_message'] ?? '')), 0, 120);
     $toLine = mb_substr(trim((string) ($_POST['to_line'] ?? '')), 0, 80);
     $greetingLine = mb_substr(trim((string) ($_POST['greeting_line'] ?? '')), 0, 80);
@@ -112,7 +118,15 @@ if ($action === 'send') {
     $deliverOn = null;
     $occasion = null;
     if ($error === null) {
-        if ($eventRow !== null) {
+        if ($isAnytime) {
+            // No occasion to wait for -- deliver_on is simply today, so
+            // the delivery gate in fetch_pending_cards_for_person() (see
+            // includes/cards.php) lets it straight through the next time
+            // the recipient loads their Pending queue, same as any other
+            // card once its date arrives.
+            $deliverOn = new DateTimeImmutable('today');
+            $occasion = 'Just because';
+        } elseif ($eventRow !== null) {
             $occ = ourthology_next_annual_occurrence((int) $eventRow['event_month'], (int) $eventRow['event_day']);
             $deliverOn = $occ['date']->modify('-1 day');
             $occasion = mb_substr((string) $eventRow['title'], 0, 60);
@@ -167,8 +181,12 @@ if ($action === 'send') {
     // banner/count) the next time they visit on or after the delivery
     // date, same as how the reminder banner itself already works with no
     // notification of its own.
-    $occasionLabel = $eventRow !== null ? $occasion : 'their birthday';
-    $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue the day before ' . $occasionLabel . '.';
+    if ($isAnytime) {
+        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue right away.';
+    } else {
+        $occasionLabel = $eventRow !== null ? $occasion : 'their birthday';
+        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue the day before ' . $occasionLabel . '.';
+    }
     header('Location: /timeline.php');
     exit;
 }

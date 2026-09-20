@@ -147,8 +147,14 @@ function ourthology_extract_letter_image_ids(string $sanitizedHtml): array
  * regardless of status (same "nothing deleted, just marked closed" rule
  * a postcard's own image follows) -- this is only ever a readable
  * summary for timeline card previews, never the letter's canonical copy.
+ *
+ * Phase 72: $closingPhrase is the sign-off phrase on its own line ("Best
+ * regards," by default, now editable) -- kept as a separate parameter
+ * from $senderDisplayName (the name on the line after it) rather than one
+ * pre-joined string, so a caller with no customized phrase can keep
+ * passing the literal default without building it itself.
  */
-function ourthology_letter_plain_text(string $bodyHtml, string $recipientFirstName, string $senderDisplayName): string
+function ourthology_letter_plain_text(string $bodyHtml, string $recipientFirstName, string $closingPhrase, string $senderDisplayName): string
 {
     $withBreaks = (string) preg_replace('/<br\s*\/?>/i', "\n", $bodyHtml);
     $withBreaks = (string) preg_replace('/<\/(p|div)>/i', "\n\n", $withBreaks);
@@ -157,7 +163,7 @@ function ourthology_letter_plain_text(string $bodyHtml, string $recipientFirstNa
     $plain = (string) preg_replace("/\n{3,}/", "\n\n", $plain);
 
     $greetName = $recipientFirstName !== '' ? $recipientFirstName : 'you';
-    return "Dear {$greetName},\n\n{$plain}\n\nBest regards,\n{$senderDisplayName}";
+    return "Dear {$greetName},\n\n{$plain}\n\n{$closingPhrase}\n{$senderDisplayName}";
 }
 
 /**
@@ -181,24 +187,26 @@ function create_letter(
     string $rawBodyHtml,
     bool $recordToOwnTimeline,
     ?string $toLine = null,
-    ?string $fromLine = null
+    ?string $fromLine = null,
+    ?string $closingLine = null
 ): int {
     $bodyHtml = ourthology_sanitize_letter_body_html($rawBodyHtml);
 
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO letters (sender_person_id, created_by_user_id, family_group_id, recipient_person_id, body_html, to_line, from_line)
-             VALUES (:sender, :uid, :gid, :rid, :body, :toln, :froml)'
+            'INSERT INTO letters (sender_person_id, created_by_user_id, family_group_id, recipient_person_id, body_html, to_line, from_line, closing_line)
+             VALUES (:sender, :uid, :gid, :rid, :body, :toln, :froml, :closing)'
         );
         $stmt->execute([
-            'sender' => $senderPersonId,
-            'uid'    => $senderUserId,
-            'gid'    => $familyGroupId,
-            'rid'    => $recipientPersonId,
-            'body'   => $bodyHtml,
-            'toln'   => $toLine !== null && $toLine !== '' ? $toLine : null,
-            'froml'  => $fromLine !== null && $fromLine !== '' ? $fromLine : null,
+            'sender'  => $senderPersonId,
+            'uid'     => $senderUserId,
+            'gid'     => $familyGroupId,
+            'rid'     => $recipientPersonId,
+            'body'    => $bodyHtml,
+            'toln'    => $toLine !== null && $toLine !== '' ? $toLine : null,
+            'froml'   => $fromLine !== null && $fromLine !== '' ? $fromLine : null,
+            'closing' => $closingLine !== null && $closingLine !== '' ? $closingLine : null,
         ]);
         $letterId = (int) $pdo->lastInsertId();
 
@@ -212,7 +220,7 @@ function create_letter(
         }
 
         if ($recordToOwnTimeline) {
-            save_letter_copy_to_timeline($pdo, $letterId, $bodyHtml, $recipientPersonId, $senderPersonId, $senderPersonId, $senderUserId, $toLine, $fromLine);
+            save_letter_copy_to_timeline($pdo, $letterId, $bodyHtml, $recipientPersonId, $senderPersonId, $senderPersonId, $senderUserId, $toLine, $fromLine, $closingLine);
         }
 
         $pdo->commit();
@@ -241,8 +249,13 @@ function create_letter(
  * recipient-first-name/sender-display-name exactly like the live read
  * view does, so a saved copy's "Dear ___," / "Best regards, ___" always
  * matches what the letter actually showed when it was read.
+ *
+ * Phase 72: $closingLine is the sign-off PHRASE itself ("Best regards,"
+ * by default, editable independently of $fromLine's name) -- falls back
+ * to the original literal "Best regards," when not set, same as every
+ * other render site.
  */
-function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml, int $recipientPersonId, int $senderPersonId, int $ownerPersonId, int $ownerUserId, ?string $toLine = null, ?string $fromLine = null): int
+function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml, int $recipientPersonId, int $senderPersonId, int $ownerPersonId, int $ownerUserId, ?string $toLine = null, ?string $fromLine = null, ?string $closingLine = null): int
 {
     $senderRow = person_row($pdo, $senderPersonId);
     $recipientRow = person_row($pdo, $recipientPersonId);
@@ -251,7 +264,8 @@ function save_letter_copy_to_timeline(PDO $pdo, int $letterId, string $bodyHtml,
 
     $greetName = $toLine !== null && $toLine !== '' ? $toLine : $recipientFirst;
     $closeName = $fromLine !== null && $fromLine !== '' ? $fromLine : $senderName;
-    $plainBody = ourthology_letter_plain_text($bodyHtml, $greetName, $closeName);
+    $closePhrase = $closingLine !== null && $closingLine !== '' ? $closingLine : 'Best regards,';
+    $plainBody = ourthology_letter_plain_text($bodyHtml, $greetName, $closePhrase, $closeName);
     $title = $ownerPersonId === $senderPersonId
         ? 'Letter to ' . ($recipientRow !== null ? person_display_name($recipientRow) : 'a family member')
         : 'Letter from ' . ($senderName !== '' ? $senderName : 'a family member');
@@ -367,7 +381,7 @@ function fetch_letter_for_recipient(PDO $pdo, int $letterId, int $recipientPerso
 {
     $stmt = $pdo->prepare(
         "SELECT l.id AS letter_id, l.status, l.body_html, l.timeline_entry_id, l.created_at,
-                l.sender_person_id, l.recipient_person_id, l.to_line, l.from_line,
+                l.sender_person_id, l.recipient_person_id, l.to_line, l.from_line, l.closing_line,
                 sp.first_name AS sender_first, sp.surname AS sender_surname
          FROM letters l
          JOIN persons sp ON sp.id = l.sender_person_id
@@ -398,7 +412,8 @@ function save_letter_to_timeline(PDO $pdo, array $letterRow, int $personId, int 
             $personId,
             $userId,
             $letterRow['to_line'] ?? null,
-            $letterRow['from_line'] ?? null
+            $letterRow['from_line'] ?? null,
+            $letterRow['closing_line'] ?? null
         );
         $pdo->prepare("UPDATE letters SET status = 'saved', timeline_entry_id = :eid, resolved_at = NOW() WHERE id = :id")
             ->execute(['eid' => $entryId, 'id' => $letterRow['letter_id']]);

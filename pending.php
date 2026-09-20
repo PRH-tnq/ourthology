@@ -883,10 +883,15 @@ function ourthology_pending_memory_preview_html(array $row): string
           // pattern postcards' to_line/from_line already use.
           $letterGreetName = ($openLetter['to_line'] ?? '') !== '' ? $openLetter['to_line'] : (string) $me['first_name'];
           $letterCloseName = ($openLetter['from_line'] ?? '') !== '' ? $openLetter['from_line'] : person_display_name(['first_name' => $openLetter['sender_first'], 'surname' => $openLetter['sender_surname']]);
+          // Phase 72: the sign-off phrase, independent of the name above --
+          // falls back to the original literal "Best regards," so a
+          // letter sent before this phase (closing_line always NULL) reads
+          // exactly as it always did.
+          $letterClosePhrase = ($openLetter['closing_line'] ?? '') !== '' ? $openLetter['closing_line'] : 'Best regards,';
         ?>
         <p class="letter-salutation">Dear <?= htmlspecialchars((string) $letterGreetName, ENT_QUOTES) ?>,</p>
         <div class="letter-body-read"><?= $openLetter['body_html'] !== '' ? $openLetter['body_html'] : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
-        <p class="letter-closing">Best regards,<br><?= htmlspecialchars((string) $letterCloseName, ENT_QUOTES) ?></p>
+        <p class="letter-closing"><?= htmlspecialchars((string) $letterClosePhrase, ENT_QUOTES) ?><br><?= htmlspecialchars((string) $letterCloseName, ENT_QUOTES) ?></p>
         <?php if (in_array($openLetter['status'], ['pending', 'read'], true)): ?>
         <div class="letter-read-footer">
           <form method="post" action="/letter.php" style="display:inline;">

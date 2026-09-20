@@ -750,3 +750,21 @@ CREATE TABLE trip_event_media (
 CREATE INDEX idx_tripplan_person ON trip_plans(person_id);
 CREATE INDEX idx_tripevent_plan_sort ON trip_events(trip_plan_id, sort_order);
 CREATE INDEX idx_tripmedia_event_role ON trip_event_media(trip_event_id, role, sort_order);
+
+-- ---------------------------------------------------------------------
+-- Phase 72: "allow the 'Best regards' prefilled text to be edited" -- the
+-- letter composer's closing sentence used to be a hard-coded "Best
+-- regards," (see pending.php's read view / ourthology_letter_plain_text()
+-- in includes/letters.php) with only the signer's NAME after it editable
+-- via from_line. closing_line separates that out: the sign-off phrase
+-- itself, edited the same single-line contenteditable way to_line/
+-- from_line already are, independent of from_line (which keeps meaning
+-- just the name) so a shortened name and a customized phrase can each be
+-- edited without disturbing the other. NULL on every letter sent before
+-- this phase -- every render site falls back to the original literal
+-- "Best regards," in that case, so old letters look exactly as they
+-- always did. See create_letter()/save_letter_copy_to_timeline() in
+-- includes/letters.php and letter.php's send action.
+-- ---------------------------------------------------------------------
+ALTER TABLE letters
+  ADD COLUMN closing_line VARCHAR(80) NULL AFTER from_line;

@@ -402,6 +402,21 @@ if (isset($_GET['send_card_to'])) {
             ];
         }
     }
+} elseif (isset($_GET['send_card_anytime'])) {
+    // Phase 72: calendar.php's standalone "Send a card" button -- no
+    // birthday, no key date, nothing to look up server-side at all.
+    // card.php's send action delivers this kind the moment it's sent
+    // (deliver_on = today) instead of computing one from either of the
+    // other two flows.
+    $directOpenCardRow = [
+        'kind'            => 'anytime',
+        'personId'        => null,
+        'eventId'         => null,
+        'name'            => '',
+        'firstName'       => '',
+        'coverDefault'    => '',
+        'greetingDefault' => '',
+    ];
 }
 
 /** occurred_on if set, otherwise the date the entry was created — same fallback the plain-list view used. */
@@ -519,6 +534,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css?v=26">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+<!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
+     because, unlike that one, this page's own inline scripts further
+     down call into it eagerly at parse time (wiring the memory-viewer's
+     Paste button) rather than only from a later user-triggered handler
+     -- it has to already exist by then, not just by the time the user
+     clicks something. -->
+<script src="/clipboard_paste.js?v=1"></script>
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -641,7 +663,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .postcard-recipient-list.is-open { display:flex; }
   .postcard-recipient-list label { display:flex; align-items:center; gap:6px; font-size:13.5px; cursor:pointer; }
 
-  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; }
+  /* overflow:hidden here (not just on .postcard-face) keeps the rotating
+     3D face clipped to the scene's own box throughout the flip -- without
+     it, the mid-flip geometry of the preserve-3d face briefly reads as
+     taller than the box to .postcard-box's own overflow:auto (see above),
+     which pops a vertical scrollbar in and out and jumps the content. */
+  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; overflow:hidden; }
   .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
   .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
   .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
@@ -672,6 +699,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   }
   .postcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; }
   .postcard-drop-zone.is-dragover { background:var(--paper-2); }
+  /* Phase 72: same explicit tap-to-paste button as .picker-paste-btn
+     (see styles.css), styled to sit inside a card's photo well instead
+     of a picker row -- see /clipboard_paste.js. */
+  .card-paste-btn { position:relative; z-index:1; display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:6px 13px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
+  .card-paste-btn:hover { background:var(--paper-2); }
+  .card-paste-btn svg { width:13px; height:13px; flex:0 0 auto; }
+  .card-paste-status { position:absolute; left:8px; right:8px; bottom:6px; z-index:1; font-size:11px; color:var(--accent); text-align:center; }
+  .card-paste-status[hidden] { display:none; }
   .postcard-face-front.has-image .postcard-drop-zone { display:none; }
   .postcard-front-preview { position:absolute; inset:0; display:none; width:100%; height:100%; object-fit:cover; }
   .postcard-face-front.has-image .postcard-front-preview { display:block; }
@@ -1211,6 +1246,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   .trip-empty-events { font-size:13.5px; color:var(--ink-faint); text-align:center; padding:18px 0; }
   .trip-actions { display:flex; align-items:center; gap:12px; padding-top:6px; border-top:1px solid var(--line); margin-top:4px; padding-top:16px; }
+  /* .btn-primary's own width:100% (styles.css) outranks .btn-small's
+     width:auto on specificity alone (button.btn-primary beats a bare
+     class) -- so "Save trip plan" was stretching to fill the row instead
+     of sitting inline beside Close/Delete trip like a normal action
+     button. Targeting the id settles it regardless of class order. */
+  .trip-actions #tripSaveBtn { width:auto; margin-top:0; }
   .trip-error { color:var(--accent); font-size:13.5px; margin:0 0 12px; }
   .trip-readonly-note { font-size:13px; color:var(--ink-faint); background:var(--paper-2, #f7f2ea); border:1px solid var(--line); border-radius:9px; padding:8px 12px; margin-bottom:14px; }
 
@@ -1454,6 +1495,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                   <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
                 </div>
                 <div class="copy"><b>Click to attach</b> or drop files here<span class="paste-hint">You can also paste from your clipboard, and add more than one</span></div>
+                <button type="button" class="picker-paste-btn" id="viewerAddMediaPasteBtn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>
               </div>
               <div class="media-picker-grid" id="viewerAddMediaGrid" hidden></div>
               <input type="file" id="viewerAddMediaInput" name="media[]" multiple hidden
@@ -1554,7 +1596,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
              so deleting a trip needs no code of its own there at all (see
              trip_plan.php's own header comment). -->
         <div class="trip-actions">
-          <button type="submit" form="tripForm" class="btn-primary" id="tripSaveBtn">Save trip plan</button>
+          <button type="submit" form="tripForm" class="btn-primary btn-small" id="tripSaveBtn">Save trip plan</button>
           <form method="post" id="tripDeleteForm" onsubmit="return confirm('Delete this whole trip, including every plan and memory in it?');" style="margin:0;" hidden>
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="delete_entry">
@@ -2689,6 +2731,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     if (vamInput) {
       vamInput.addEventListener("change", function () { vamAddFiles(vamInput.files); });
     }
+    var vamPasteBtn = document.getElementById("viewerAddMediaPasteBtn");
+    if (vamPasteBtn && window.ourthologyClipboardPaste) {
+      window.ourthologyClipboardPaste.wire(vamPasteBtn, { onFiles: vamAddFiles, onMessage: vamShowError });
+    }
     document.addEventListener("paste", function (e) {
       if (!viewerScrim.classList.contains("open") || viewerAddMediaForm.hidden || !e.clipboardData) return;
       var files = [];
@@ -2846,6 +2892,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var TRIP_DOC_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 2.5h6.5L15 6v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke-linejoin="round"/><path d="M11 2.5V6h4" stroke-linejoin="round"/></svg>';
     var TRIP_ADD_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 4v12M4 10h12" stroke-linecap="round"/></svg>';
     var TRIP_MAX_FILES = 10;
+    // Every event row can have up to 10 of these pickers live on the page
+    // at once (2 per event x up to 5 events shown at a time), so this is
+    // built once and stamped into each row's template rather than
+    // constructed per-instance.
+    var TRIP_PASTE_BTN_HTML = '<button type="button" class="picker-paste-btn trip-picker-paste-btn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>';
     var TRIP_MAX_BYTES = 25 * 1024 * 1024;
     var TRIP_HEIC_RE = /\.(heic|heif)$/i;
 
@@ -3040,6 +3091,23 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         ['dragenter', 'dragover'].forEach(function (n) { root.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); root.classList.add('dragover'); }); });
         ['dragleave', 'drop'].forEach(function (n) { root.addEventListener(n, function (e) { e.preventDefault(); e.stopPropagation(); if (n === 'dragleave' && e.target !== root) return; root.classList.remove('dragover'); }); });
         root.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+        // This picker's own Paste button -- unlike the document-level
+        // paste LISTENER above (which only ever knows the last-focused/
+        // hovered picker via activeTripPicker, since up to 10 of these
+        // can be open at once), a tap on THIS button always targets THIS
+        // picker, so it just calls this instance's own addFiles() with
+        // no ambiguity about which one the user meant.
+        var pasteBtn = root.querySelector('.trip-picker-paste-btn');
+        if (pasteBtn && window.ourthologyClipboardPaste) {
+          window.ourthologyClipboardPaste.wire(pasteBtn, {
+            onFiles: function (files) { addFiles(files); },
+            onMessage: function (msg) {
+              if (!tripError) return;
+              tripError.textContent = msg || '';
+              tripError.hidden = !msg;
+            }
+          });
+        }
       }
       render();
     }
@@ -3067,7 +3135,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             '<div class="trip-event-col trip-event-plan">' +
               '<h4>Plans</h4>' +
               '<div class="photo-drop media-picker trip-picker" tabindex="0" role="button" aria-label="Attach booking receipts or tickets">' +
-                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop receipts/tickets here</div></div>' +
+                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop receipts/tickets here</div>' + (readOnlyMode ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
                 '<div class="media-picker-grid" hidden></div>' +
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][plan_media][]" data-kept-name="events[' + index + '][existing_plan_media_ids][]" multiple hidden accept="image/*,.heic,.heif,application/pdf,.pdf">' +
               '</div>' +
@@ -3077,7 +3145,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             '<div class="trip-event-col trip-event-memory">' +
               '<h4>Memories</h4>' +
               '<div class="photo-drop media-picker trip-picker" tabindex="0" role="button" aria-label="Attach photos or videos">' +
-                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop photos/videos here</div></div>' +
+                '<div class="media-picker-empty"><div class="thumb"><svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></div><div class="copy"><b>Click to attach</b> or drop photos/videos here</div>' + (readOnlyMode ? '' : TRIP_PASTE_BTN_HTML) + '</div>' +
                 '<div class="media-picker-grid" hidden></div>' +
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][memory_media][]" data-kept-name="events[' + index + '][existing_memory_media_ids][]" multiple hidden accept="image/*,.heic,.heif,video/*">' +
               '</div>' +
@@ -3255,8 +3323,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                   <div class="postcard-photo-mat">
                     <div class="postcard-drop-zone">
                       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                      <span>Drop a photo here, or click to choose one</span>
+                      <span>Drop a photo here, paste one, or click to choose one</span>
+                      <button type="button" class="card-paste-btn postcard-paste-btn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>
                     </div>
+                    <p class="card-paste-status" hidden></p>
                     <img class="postcard-front-preview" alt="">
                   </div>
                   <button type="button" class="postcard-change-photo">Change photo</button>
@@ -3308,6 +3378,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <input type="hidden" name="body_html" id="letterBodyHtmlField">
             <input type="hidden" name="to_line" id="letterToLineField">
             <input type="hidden" name="from_line" id="letterFromLineField">
+            <input type="hidden" name="closing_line" id="letterClosingLineField">
 
             <div class="letterhead">
               <svg class="letter-brand-mark" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
@@ -3339,7 +3410,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 <input type="file" id="letterImageInput" accept="image/*" hidden>
               </div>
               <div class="letter-body-editor" id="letterBodyEditor" contenteditable="true" data-placeholder="Write your letter here…"></div>
-              <p class="letter-closing">Best regards,<br><span class="letter-name-editable" id="letterClosingName" contenteditable="true" data-placeholder="your name"><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span></p>
+              <!-- Phase 72: "allow the 'Best regards' prefilled text to be
+                   edited" -- the sign-off phrase is now its own editable
+                   span too, same single-line contenteditable treatment as
+                   the name beside it (see wireLetterForm()), just synced
+                   into its own closing_line field instead of from_line so
+                   editing one never touches the other. -->
+              <p class="letter-closing"><span class="letter-name-editable" id="letterClosingPhrase" contenteditable="true" data-placeholder="Best regards,">Best regards,</span><br><span class="letter-name-editable" id="letterClosingName" contenteditable="true" data-placeholder="your name"><?= htmlspecialchars(person_display_name($me), ENT_QUOTES) ?></span></p>
               <div class="letter-footer">
                 <label><input type="checkbox" name="record_to_timeline" value="1"> Also add this to my own timeline</label>
                 <button type="submit" class="btn-primary letter-send-btn">Send letter</button>
@@ -3407,6 +3484,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var previewImg = root.querySelector(".postcard-front-preview");
         var dropZone = root.querySelector(".postcard-drop-zone");
         var changeBtn = root.querySelector(".postcard-change-photo");
+        var pasteBtn = root.querySelector(".postcard-paste-btn");
+        var pasteStatusEl = root.querySelector(".postcard-face-front .card-paste-status");
         if (fileInput && frontFace && previewImg && dropZone) {
           function showPreview(files) {
             if (!files || !files[0] || files[0].type.indexOf("image/") !== 0) return;
@@ -3416,6 +3495,19 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               frontFace.classList.add("has-image");
             };
             reader.readAsDataURL(files[0]);
+          }
+          // Shared by drop and paste (and the Paste button below) -- puts
+          // one File into the real hidden <input> (so it's actually part
+          // of the form submit) and shows the preview, same as picking a
+          // file through the OS dialog does via the "change" listener.
+          function setFile(file) {
+            if (!file) return;
+            try {
+              var dt = new DataTransfer();
+              dt.items.add(file);
+              fileInput.files = dt.files;
+            } catch (e) { /* older browser -- preview still shows, it just won't carry into the submit */ }
+            showPreview([file]);
           }
           dropZone.addEventListener("click", function () { fileInput.click(); });
           if (changeBtn) changeBtn.addEventListener("click", function (evt) { evt.stopPropagation(); fileInput.click(); });
@@ -3433,15 +3525,33 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             evt.preventDefault();
             dropZone.classList.remove("is-dragover");
             var files = evt.dataTransfer ? evt.dataTransfer.files : null;
-            if (files && files[0]) {
-              try {
-                var dt = new DataTransfer();
-                dt.items.add(files[0]);
-                fileInput.files = dt.files;
-              } catch (e) { /* older browser -- preview still shows, the drop just won't carry into the form submit */ }
-              showPreview(files);
+            if (files && files[0]) setFile(files[0]);
+          });
+          // "the user should be able to drag, paste or select" -- a
+          // clipboard image paste anywhere in the postcard form drops
+          // straight onto the front photo, same as the greeting-card
+          // composer below.
+          root.addEventListener("paste", function (evt) {
+            var items = (evt.clipboardData || window.clipboardData || {}).items;
+            if (!items) return;
+            for (var i = 0; i < items.length; i++) {
+              if (items[i].type && items[i].type.indexOf("image/") === 0) {
+                var file = items[i].getAsFile();
+                if (file) { evt.preventDefault(); setFile(file); }
+                break;
+              }
             }
           });
+          if (pasteBtn && window.ourthologyClipboardPaste) {
+            window.ourthologyClipboardPaste.wire(pasteBtn, {
+              onFiles: function (files) { setFile(files[0]); },
+              onMessage: function (msg) {
+                if (!pasteStatusEl) return;
+                pasteStatusEl.textContent = msg || "";
+                pasteStatusEl.hidden = !msg;
+              }
+            });
+          }
         }
 
         var flipInner = root.querySelector(".postcard-flip-inner");
@@ -3530,8 +3640,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var select = root.querySelector("#letterRecipientSelect");
         var salutationName = root.querySelector("#letterSalutationName");
         var closingName = root.querySelector("#letterClosingName");
+        var closingPhrase = root.querySelector("#letterClosingPhrase");
         var toLineField = root.querySelector("#letterToLineField");
         var fromLineField = root.querySelector("#letterFromLineField");
+        var closingLineField = root.querySelector("#letterClosingLineField");
         var editor = root.querySelector("#letterBodyEditor");
         var hiddenBody = root.querySelector("#letterBodyHtmlField");
         var insertBtn = root.querySelector("#letterInsertPhotoBtn");
@@ -3555,8 +3667,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
         // Same contenteditable-as-a-plain-single-line-field treatment the
         // postcard's To/From fields use (see wireForm() above): no
-        // Enter-inserted line breaks, paste drops formatting.
-        [salutationName, closingName].forEach(function (el) {
+        // Enter-inserted line breaks, paste drops formatting. Phase 72
+        // added closingPhrase (the "Best regards," itself) alongside the
+        // name it already applied to.
+        [salutationName, closingName, closingPhrase].forEach(function (el) {
           if (!el) return;
           el.addEventListener("keydown", function (evt) {
             if (evt.key === "Enter") evt.preventDefault();
@@ -3640,6 +3754,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           if (hiddenBody) hiddenBody.value = editor.innerHTML;
           if (toLineField) toLineField.value = (salutationName ? salutationName.textContent : "").trim();
           if (fromLineField) fromLineField.value = (closingName ? closingName.textContent : "").trim();
+          if (closingLineField) closingLineField.value = (closingPhrase ? closingPhrase.textContent : "").trim();
 
           // Phase 61: "folds the page up and puts it into the envelope,
           // and then flies it off the screen ... and then returns the
@@ -3699,6 +3814,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <input type="hidden" name="action" value="send">
           <input type="hidden" name="recipient_id" id="gcardRecipientId" value="">
           <input type="hidden" name="event_id" id="gcardEventIdField" value="">
+          <!-- Phase 72: set only when this composer was opened from the
+               calendar page's standalone "Send a card" button -- see
+               card.php's send action, which delivers this kind straight
+               away instead of computing a deliver_on from a birthday or
+               calendar_events row. -->
+          <input type="hidden" name="kind" id="gcardKindField" value="">
           <input type="hidden" name="cover_message" id="gcardCoverMessageField">
           <input type="hidden" name="to_line" id="gcardToLineField">
           <input type="hidden" name="greeting_line" id="gcardGreetingLineField">
@@ -3726,7 +3847,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 <div class="gcard-drop-zone">
                   <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="M5 16l4.5-4.5 3 3L16 10l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   <span>Drop a photo here, paste one, or click to choose one</span>
+                  <button type="button" class="card-paste-btn gcard-paste-btn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>
                 </div>
+                <p class="card-paste-status" hidden></p>
                 <img class="gcard-front-preview" alt="">
                 <button type="button" class="gcard-change-photo">Change photo</button>
                 <input type="file" name="image" class="gcard-image-input" accept="image/*,.heic,.heif" hidden>
@@ -3857,6 +3980,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var dropZoneLabel = dropZone ? dropZone.querySelector("span") : null;
         var dropZoneLabelDefault = dropZoneLabel ? dropZoneLabel.textContent : "";
         var changeBtn = root.querySelector(".gcard-change-photo");
+        var pasteBtn = root.querySelector(".gcard-paste-btn");
+        var pasteStatusEl = root.querySelector("#gcardCoverFront .card-paste-status");
         if (!fileInput || !frontFace || !previewImg || !dropZone) return;
 
         function setDropZoneLabel(text) {
@@ -3939,6 +4064,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             }
           }
         });
+
+        if (pasteBtn && window.ourthologyClipboardPaste) {
+          window.ourthologyClipboardPaste.wire(pasteBtn, {
+            onFiles: function (files) { handleIncomingFile(files[0]); },
+            onMessage: function (msg) {
+              if (!pasteStatusEl) return;
+              pasteStatusEl.textContent = msg || "";
+              pasteStatusEl.hidden = !msg;
+            }
+          });
+        }
       }
 
       // "Make it so this is the first thing the creator sees and add a
@@ -4078,33 +4214,45 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         document.addEventListener("keydown", onEscape);
 
         var isKeyDate = data.kind === "key_date";
+        // Phase 72: the calendar page's standalone "Send a card" button --
+        // like a key date, it isn't "about" any one person either, so it
+        // shares the same recipient-picker treatment below. Unlike a key
+        // date, card.php delivers it right away instead of computing a
+        // deliver_on from a calendar_events row -- see gcardKindField.
+        var isAnytime = data.kind === "anytime";
+        var needsRecipientPicker = isKeyDate || isAnytime;
 
         var recipientField = document.getElementById("gcardRecipientId");
-        if (recipientField) recipientField.value = isKeyDate ? "" : (data.personId || "");
+        if (recipientField) recipientField.value = needsRecipientPicker ? "" : (data.personId || "");
         var eventField = document.getElementById("gcardEventIdField");
         if (eventField) eventField.value = isKeyDate ? (data.eventId || "") : "";
+        var kindField = document.getElementById("gcardKindField");
+        if (kindField) kindField.value = isAnytime ? "anytime" : "";
         var title = document.getElementById("gcardTitle");
-        if (title && data.name) {
-          title.textContent = isKeyDate ? ("Send a card for " + data.name) : ("Send " + data.name + " a card");
+        if (title) {
+          title.textContent = isAnytime ? "Send a card" : (data.name ? (isKeyDate ? ("Send a card for " + data.name) : ("Send " + data.name + " a card")) : "Send a card");
         }
 
-        // A key date isn't "about" any one person, so nothing here is
-        // picked yet -- the picker shows and "Add your message" starts
-        // disabled; wireRecipientPicker() re-enables it once a recipient
-        // is actually chosen.
+        // Nothing here is "about" any one person yet for a key date or an
+        // anytime card, so nothing's picked yet either -- the picker shows
+        // and "Add your message" starts disabled; wireRecipientPicker()
+        // re-enables it once a recipient is actually chosen.
         var picker = document.getElementById("gcardRecipientPicker");
-        if (picker) picker.style.display = isKeyDate ? "" : "none";
+        if (picker) picker.style.display = needsRecipientPicker ? "" : "none";
         var select = document.getElementById("gcardRecipientSelect");
         if (select) select.value = "";
         var openBtn = document.getElementById("gcardOpenBtn");
-        if (openBtn) openBtn.disabled = isKeyDate;
+        if (openBtn) openBtn.disabled = needsRecipientPicker;
 
         var coverText = document.getElementById("gcardCoverMessageText");
-        if (coverText) coverText.textContent = data.coverDefault || "Happy Birthday!";
+        if (coverText) {
+          coverText.textContent = data.coverDefault || "";
+          coverText.setAttribute("data-placeholder", isAnytime ? "Just saying hello!" : "Happy Birthday!");
+        }
         var toLine = document.getElementById("gcardToLine");
-        if (toLine) toLine.textContent = isKeyDate ? "" : (data.firstName || "");
+        if (toLine) toLine.textContent = needsRecipientPicker ? "" : (data.firstName || "");
         var greetingLine = document.getElementById("gcardGreetingLine");
-        if (greetingLine) greetingLine.textContent = data.greetingDefault || "Happy Birthday";
+        if (greetingLine) greetingLine.textContent = data.greetingDefault || (isAnytime ? "Hi" : "Happy Birthday");
         var message = document.getElementById("gcardMessage");
         var closing = document.getElementById("gcardClosing");
         if (closing) closing.textContent = myFirstName ? ("lots of love, " + myFirstName) : "";

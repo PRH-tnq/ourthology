@@ -437,6 +437,11 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
      library has ever published. If this fails to load (offline, blocked),
      the photo-drop widget below still accepts the file -- the server has
      its own Imagick-based conversion fallback (see includes/media.php). -->
+<!-- Phase 72: loaded here, not bottom-of-body like date_autotab.js --
+     the photo-drop wiring below calls into this eagerly at parse time
+     (wiring the Paste button) rather than only from a later
+     user-triggered handler, so it has to already exist by then. -->
+<script src="/clipboard_paste.js?v=1"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root { --accent-bg: #F1DCDC; }
@@ -622,6 +627,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
                 <svg viewBox="0 0 20 20" fill="none"><path d="M4 15.5 8 10l3 3 3-4 2 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3.5" width="15" height="13" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
               </div>
               <div class="copy"><b>Click to attach</b> or drop files here<span class="paste-hint">You can also paste from your clipboard, and add more than one</span></div>
+              <button type="button" class="picker-paste-btn" id="photoDropPasteBtn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>
             </div>
             <div class="media-picker-grid" id="photoGrid" hidden></div>
             <input type="file" id="photoInput" name="media[]" multiple hidden
@@ -921,6 +927,11 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       }
       if (files.length) { e.preventDefault(); addFiles(files); }
     });
+
+    var pasteBtn = document.getElementById('photoDropPasteBtn');
+    if (pasteBtn && window.ourthologyClipboardPaste) {
+      window.ourthologyClipboardPaste.wire(pasteBtn, { onFiles: addFiles, onMessage: showError });
+    }
 
     render();
   })();

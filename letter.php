@@ -52,6 +52,9 @@ if ($action === 'send') {
     // (default or shortened) is what gets frozen into to_line/from_line.
     $toLine = mb_substr(trim((string) ($_POST['to_line'] ?? '')), 0, 80);
     $fromLine = mb_substr(trim((string) ($_POST['from_line'] ?? '')), 0, 80);
+    // Phase 72: the sign-off PHRASE, independent of from_line's name --
+    // see create_letter()'s own doc comment.
+    $closingLine = mb_substr(trim((string) ($_POST['closing_line'] ?? '')), 0, 80);
 
     $options = fetch_postcard_recipient_options($pdo, $myGroup, $myPersonId);
     $validIds = array_map(fn($p) => (int) $p['id'], $options);
@@ -70,7 +73,7 @@ if ($action === 'send') {
     }
 
     try {
-        $letterId = create_letter($pdo, $myPersonId, $myUserId, $myGroup, (int) $recipientId, $bodyHtml, $recordToOwnTimeline, $toLine, $fromLine);
+        $letterId = create_letter($pdo, $myPersonId, $myUserId, $myGroup, (int) $recipientId, $bodyHtml, $recordToOwnTimeline, $toLine, $fromLine, $closingLine);
     } catch (RuntimeException $e) {
         $_SESSION['flash_letter_error'] = $e->getMessage();
         header('Location: /timeline.php');
