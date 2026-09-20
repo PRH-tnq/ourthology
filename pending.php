@@ -464,11 +464,23 @@ function ourthology_pending_memory_preview_html(array $row): string
      intro animation above (letter-envelope-scene, envelope-anim-flap,
      envelope-anim-body, letter-reveal) byte-for-byte, just wrapping a taller, card-shaped
      scene instead of a single flat letter sheet. Read-only: no editing,
-     no drop zone -- the front cover starts already "open" (.is-open, no
-     animation) so the inside message is what a recipient sees first,
-     with a small toggle to peek at the front cover/photo instead. Class
-     names match timeline.php's own composer (gcard-*) for everything
-     that isn't specific to editing. */
+     no drop zone. Class names match timeline.php's own composer
+     (gcard-*) for everything that isn't specific to editing.
+
+     Phase 70: "make the card open for the recipient on the image when
+     they first look at it, so they see that image first and then must
+     click see the message" -- .gcard-cover now starts CLOSED (no
+     .is-open class in the markup below), so the photo + cover message
+     is what a recipient sees first. #cardOpenBtn is the prominent call
+     to action over the photo that reveals the message by adding
+     .is-open, which plays .gcard-cover's own rotateY transition (see
+     that rule just below) -- the SAME transition, run forwards to open
+     and backwards to close, so "opening" and "closing" automatically
+     share one look and feel with nothing extra to keep in sync.
+     #cardCloseBtn (styled like the small pill this replaced) removes
+     .is-open again to go back to the cover; only one of the two buttons
+     is visible at a time, toggled via .gcard-scene's own .is-card-open
+     class rather than duplicating the open/closed logic in CSS twice. */
   .gcard-read-box { position:relative; width:min(92vw, 380px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
   .gcard-title { margin:0 0 12px; }
   .gcard-scene { position:relative; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
@@ -488,6 +500,15 @@ function ourthology_pending_memory_preview_html(array $row): string
   .gcard-message-value { flex:1 1 auto; border-bottom:none; font-size:18px; line-height:1.5; overflow:auto; }
   .gcard-closing-value { border-bottom:none; font-size:20px; text-align:right; }
   .gcard-peek-toggle { position:absolute; top:8px; right:8px; z-index:6; }
+  /* Phase 70: the primary "see the message" call to action, sitting over
+     the bottom of the cover photo (same spot the postcard's own
+     "Read the message ->" flip button uses) so it reads as the obvious
+     next step rather than a secondary control. */
+  .gcard-open-cta { position:absolute; left:50%; bottom:14px; z-index:6; transform:translateX(-50%); font-size:13.5px; font-weight:600; padding:9px 22px; border-radius:999px; border:1px solid var(--accent); color:#fff; background:var(--accent); cursor:pointer; font-family:inherit; box-shadow:0 8px 20px -8px rgba(0,0,0,0.55); }
+  .gcard-open-cta:hover { opacity:0.92; }
+  .gcard-scene.is-card-open .gcard-open-cta { display:none; }
+  .gcard-peek-toggle#cardCloseBtn { display:none; }
+  .gcard-scene.is-card-open .gcard-peek-toggle#cardCloseBtn { display:block; }
   .gcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
@@ -927,9 +948,10 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="envelope-anim-body" aria-hidden="true"></div>
       <div class="letter-reveal">
         <h3 class="gcard-title"><?= htmlspecialchars((string) $openCard['occasion'], ENT_QUOTES) ?> card from <?= htmlspecialchars(person_display_name(['first_name' => $openCard['sender_first'], 'surname' => $openCard['sender_surname']]), ENT_QUOTES) ?></h3>
-        <div class="gcard-scene">
-          <button type="button" class="postcard-flip-btn gcard-peek-toggle" id="cardPeekToggleBtn">View cover &rarr;</button>
-          <div class="gcard-cover is-open" id="cardReadCover">
+        <div class="gcard-scene" id="cardScene">
+          <button type="button" class="gcard-open-cta" id="cardOpenBtn">Open card &amp; read message &rarr;</button>
+          <button type="button" class="postcard-flip-btn gcard-peek-toggle" id="cardCloseBtn" aria-label="Close card, back to the cover">&larr; Close card</button>
+          <div class="gcard-cover" id="cardReadCover">
             <div class="gcard-cover-face gcard-cover-front">
               <img class="gcard-read-photo" src="/card_media.php?id=<?= (int) $openCard['card_id'] ?>" alt="">
               <div class="gcard-cover-message"><span class="gcard-cover-message-text"><?= htmlspecialchars((string) $openCard['cover_message'], ENT_QUOTES) ?></span></div>
@@ -996,13 +1018,24 @@ function ourthology_pending_memory_preview_html(array $row): string
       document.getElementById("cardReadClose").addEventListener("click", close);
       document.addEventListener("keydown", onEsc);
 
+      // Phase 70: the cover starts closed (see the CSS above) so the
+      // recipient sees the photo first, exactly as a real card arrives
+      // face-up -- #cardOpenBtn reveals the message inside, #cardCloseBtn
+      // reverses it, and both just toggle the same .is-open class that
+      // .gcard-cover's own transition animates either direction, so
+      // "opening" and "closing" always look like the same motion in
+      // reverse rather than two animations to keep matching by hand.
+      var cardScene = document.getElementById("cardScene");
       var cover = document.getElementById("cardReadCover");
-      var toggleBtn = document.getElementById("cardPeekToggleBtn");
-      if (cover && toggleBtn) {
-        toggleBtn.addEventListener("click", function () {
-          var nowOpen = cover.classList.toggle("is-open");
-          toggleBtn.innerHTML = nowOpen ? "View cover &rarr;" : "&larr; Back to message";
-        });
+      var openBtn = document.getElementById("cardOpenBtn");
+      var closeBtn = document.getElementById("cardCloseBtn");
+      if (cardScene && cover && openBtn && closeBtn) {
+        var setCardOpen = function (open) {
+          cover.classList.toggle("is-open", open);
+          cardScene.classList.toggle("is-card-open", open);
+        };
+        openBtn.addEventListener("click", function () { setCardOpen(true); });
+        closeBtn.addEventListener("click", function () { setCardOpen(false); });
       }
 
       // Same "run the envelope-open animation" treatment letters get

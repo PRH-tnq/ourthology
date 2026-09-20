@@ -223,7 +223,14 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-entry-body { flex:1 1 auto; min-width:0; }
   .cal-entry-title { color:var(--ink); }
   .cal-entry-meta { display:block; font-size:11.5px; color:var(--ink-faint); margin-top:1px; }
-  .cal-entry-remove { flex:0 0 auto; display:flex; align-items:center; gap:8px; }
+  /* Phase 70: .cal-entry's own align-items:center vertically centers
+     .cal-entry-remove against the WHOLE two-line body (title + meta),
+     which reads as "Edit"/"Remove" floating too low relative to the
+     title text they actually belong to -- align-self:flex-start pins
+     them to the top of the row instead, level with .cal-entry-title's
+     own line, with a small top nudge so the smaller button text lines
+     up by eye with the title line rather than just its box top. */
+  .cal-entry-remove { flex:0 0 auto; align-self:flex-start; display:flex; align-items:center; gap:8px; margin-top:1px; }
   .cal-entry-remove button { font-size:11px; }
 
   /* ---------- Phase 62: inline "Edit" form for a key date ---------- */
