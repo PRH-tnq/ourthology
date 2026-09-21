@@ -189,6 +189,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "You don't have an approved tag on that memory.";
             }
         }
+    } elseif ($action === 'remove_my_tag') {
+        // Phase 83: "when I have approved someone else's memory to go on my
+        // timeline, I want the option later to remove it" -- the memory
+        // itself is never copied onto my timeline (see fetch_entries_for_
+        // person()'s approved-tag UNION), so "removing" it from mine just
+        // means deleting MY OWN memory_tags row, exactly the same delete a
+        // decline or sync_memory_tags() drop already does elsewhere -- no
+        // trace kept, including any note I'd already written on it. The
+        // memory itself, its media, and anyone ELSE's tag on it are
+        // completely untouched; the owner never even needs to be told. The
+        // WHERE clause is the entire permission check, same as
+        // save_tag_note just above: it only ever matches a row that is
+        // both this memory and an APPROVED tag belonging to me, so a
+        // memory I own (which never has a memory_tags row of my own on it)
+        // simply can't be touched by this action.
+        $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+        if ($entryId === false) {
+            $errors[] = 'Invalid request.';
+        } else {
+            $stmt = $pdo->prepare(
+                "DELETE FROM memory_tags WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'approved'"
+            );
+            $stmt->execute(['eid' => $entryId, 'pid' => $myPersonId]);
+            if ($stmt->rowCount() > 0) {
+                $notice = 'Removed from your timeline.';
+            } else {
+                $errors[] = "You don't have an approved tag on that memory.";
+            }
+        }
     } elseif ($action === 'add_tagged_media') {
         // Phase 41: a person with an APPROVED tag on a memory may add --
         // never remove or replace -- media on it, same spirit as their own
@@ -1615,6 +1644,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           <input type="hidden" name="entry_id" id="viewerDeleteEntryId" value="">
           <button type="submit" class="btn-ghost" style="color:var(--accent);border-color:var(--accent);">Delete</button>
         </form>
+        <form method="post" id="viewerRemoveTagForm" onsubmit="return confirm('Remove this memory from your own timeline? It will stay exactly as it is for everyone else — you can always ask to be tagged again later.');" style="margin:0;" hidden>
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="remove_my_tag">
+          <input type="hidden" name="entry_id" id="viewerRemoveTagEntryId" value="">
+          <button type="submit" class="btn-ghost" style="color:var(--accent);border-color:var(--accent);">Remove from my timeline</button>
+        </form>
         <button class="btn-ghost" id="viewerCloseBtn" style="margin-left:auto;">Close</button>
       </div>
     </div>
@@ -2705,6 +2740,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var viewerDeleteForm = document.getElementById("viewerDeleteForm");
     var viewerDeleteEntryId = document.getElementById("viewerDeleteEntryId");
     var viewerEditLink = document.getElementById("viewerEditLink");
+    var viewerRemoveTagForm = document.getElementById("viewerRemoveTagForm");
+    var viewerRemoveTagEntryId = document.getElementById("viewerRemoveTagEntryId");
     var viewerTagNotes = document.getElementById("viewerTagNotes");
     var viewerMyNoteForm = document.getElementById("viewerMyNoteForm");
     var viewerMyNoteEntryId = document.getElementById("viewerMyNoteEntryId");
@@ -3102,6 +3139,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       } else {
         viewerDeleteForm.hidden = true;
         viewerEditLink.hidden = true;
+      }
+
+      // Phase 83: "when I have approved someone else's memory to go on my
+      // timeline, I want the option later to remove it" -- only makes
+      // sense for a memory I'm tagged on but don't own/manage (e.iAmTagged
+      // && !e.canEdit); a memory I DO own or manage never has a tag row of
+      // mine to remove in the first place, and Delete above already covers
+      // that case. This never touches the memory itself or anyone else's
+      // tag on it -- see the remove_my_tag handler above.
+      viewerRemoveTagForm.hidden = !(e.iAmTagged && !e.canEdit);
+      if (e.iAmTagged && !e.canEdit) {
+        viewerRemoveTagEntryId.value = e.id;
       }
       viewerScrim.classList.add("open");
     }
