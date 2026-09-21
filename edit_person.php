@@ -868,7 +868,7 @@ if ($postedProfile) {
             ?>
             <label style="margin-top:10px;display:flex;align-items:center;gap:7px;font-weight:400;text-transform:none;font-size:13.5px;color:var(--ink-soft);">
               <input type="checkbox" name="deceased_year_unknown" value="1" style="width:auto;" <?= $pDeceasedYearUnknown ? 'checked' : '' ?>>
-              Deceased, but I don't know the year yet
+              Deceased, I'll enter the date later
             </label>
           <?php endif; ?>
 
