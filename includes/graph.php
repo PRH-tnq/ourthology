@@ -33,11 +33,28 @@ function person_display_name(array $p): string
     return trim(($p['first_name'] ?? '') . ' ' . ($p['surname'] ?? ''));
 }
 
+/**
+ * Phase 84: true if $p is recorded as deceased at all -- whether or not
+ * the actual date of death is known yet (persons.died) or only that they
+ * passed away, with the year still to be filled in
+ * (persons.deceased_year_unknown). Everywhere the app used to check
+ * `!empty($p['died'])` alone to mean "deceased" (no invite link, no
+ * birthday reminder, not offered as a postcard/letter/card recipient)
+ * should use this instead, so a "year unknown" record is treated exactly
+ * the same as one with a full date. $p needs only 'died' and
+ * 'deceased_year_unknown' -- a full persons row, or that shape trimmed
+ * down, both work.
+ */
+function person_is_deceased(array $p): bool
+{
+    return !empty($p['died']) || !empty($p['deceased_year_unknown']);
+}
+
 /** All persons sharing a family_group_id, plus the confirmed edges among them. */
 function fetch_family_graph(PDO $pdo, int $familyGroupId): array
 {
     $persons = $pdo->prepare(
-        'SELECT id, first_name, middle_name, surname, born, died, claimed_by_user_id, avatar_path
+        'SELECT id, first_name, middle_name, surname, born, died, deceased_year_unknown, claimed_by_user_id, avatar_path
          FROM persons WHERE family_group_id = :gid ORDER BY id'
     );
     $persons->execute(['gid' => $familyGroupId]);
@@ -299,7 +316,7 @@ function graph_upcoming_birthdays(array $persons, int $withinDays = 7): array
     $upcoming = [];
 
     foreach ($persons as $p) {
-        if (empty($p['born']) || !empty($p['died'])) {
+        if (empty($p['born']) || person_is_deceased($p)) {
             continue;
         }
         $bornStr = substr((string) $p['born'], 0, 10);

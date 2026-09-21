@@ -15,7 +15,7 @@ $claim = null;
 
 if ($token !== '') {
     $stmt = $pdo->prepare(
-        "SELECT ct.person_id, ct.expires_at, ct.used_at, p.first_name, p.surname, p.claimed_by_user_id, p.died,
+        "SELECT ct.person_id, ct.expires_at, ct.used_at, p.first_name, p.surname, p.claimed_by_user_id, p.died, p.deceased_year_unknown,
                 cu.first_name AS added_by_first, cu.surname AS added_by_surname
          FROM claim_tokens ct
          JOIN persons p ON p.id = ct.person_id
@@ -31,11 +31,13 @@ if ($claim === null) {
     $errors[] = 'This invite link is invalid.';
 } elseif ($claim['used_at'] !== null || $claim['claimed_by_user_id'] !== null) {
     $errors[] = 'This record has already been claimed.';
-} elseif (!empty($claim['died'])) {
+} elseif (!empty($claim['died']) || !empty($claim['deceased_year_unknown'])) {
     // Phase 30: a death date can be added to a person's record any time
     // after their invite link was generated — even a still-valid,
     // unexpired link must stop working the moment that happens, since a
-    // profile recorded as deceased is never claimable, by anyone.
+    // profile recorded as deceased is never claimable, by anyone. Phase
+    // 84: recorded as deceased with the year still unknown counts exactly
+    // the same as a full date of death here.
     $errors[] = "This record can't be claimed — it's recorded as belonging to someone who has passed away.";
 } elseif (strtotime($claim['expires_at']) < time()) {
     $errors[] = 'This invite link has expired — ask whoever added you for a fresh one.';
@@ -71,7 +73,7 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             // where someone adds a date of death in the moments between
             // this page loading and this form being submitted.
             $lock = $pdo->prepare(
-                'SELECT ct.used_at, p.died
+                'SELECT ct.used_at, p.died, p.deceased_year_unknown
                  FROM claim_tokens ct JOIN persons p ON p.id = ct.person_id
                  WHERE ct.token = :token FOR UPDATE'
             );
@@ -80,7 +82,7 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$row || $row['used_at'] !== null) {
                 throw new RuntimeException('already_used');
             }
-            if (!empty($row['died'])) {
+            if (!empty($row['died']) || !empty($row['deceased_year_unknown'])) {
                 throw new RuntimeException('deceased');
             }
 

@@ -14,6 +14,11 @@ require_once __DIR__ . '/graph.php';
  * to mark -- which anyone in the family group can add to the new
  * calendar_events table.
  *
+ * Phase 84: "died not set" above really means person_is_deceased() (see
+ * includes/graph.php) -- someone recorded as deceased with the year still
+ * unknown is excluded from birthdays exactly the same as someone with a
+ * full date of death on file.
+ *
  * A key date is always an annually-recurring month/day, exactly like a
  * birthday is: there's no "one-off" vs "recurring" flag, since a family
  * calendar's whole point is things that come back every year. The
@@ -63,7 +68,7 @@ function ourthology_calendar_birthdays(array $persons): array
     $today = new DateTimeImmutable('today');
     $out = [];
     foreach ($persons as $p) {
-        if (empty($p['born']) || !empty($p['died'])) {
+        if (empty($p['born']) || person_is_deceased($p)) {
             continue;
         }
         $bornStr = substr((string) $p['born'], 0, 10);

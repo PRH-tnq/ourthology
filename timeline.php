@@ -394,7 +394,7 @@ if (isset($_GET['send_card_to'])) {
     $wantPersonId = filter_var($_GET['send_card_to'], FILTER_VALIDATE_INT);
     if ($wantPersonId !== false) {
         foreach ($graph['persons'] as $p) {
-            if ((int) $p['id'] === $wantPersonId && empty($p['died']) && !empty($p['born'])) {
+            if ((int) $p['id'] === $wantPersonId && !person_is_deceased($p) && !empty($p['born'])) {
                 $name = person_display_name($p);
                 // Keys here are camelCase (personId, not person_id) to match
                 // what window.ourthologyOpenCardComposer() already expects

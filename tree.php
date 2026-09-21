@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'get_l
         // control is also hidden below, this is the same rule enforced
         // server-side rather than trusted from the UI alone.
         $linkPerson = person_row($pdo, (int) $personId);
-        if ($linkPerson !== null && empty($linkPerson['claimed_by_user_id']) && empty($linkPerson['died'])) {
+        if ($linkPerson !== null && empty($linkPerson['claimed_by_user_id']) && !person_is_deceased($linkPerson)) {
             $token = create_claim_token($pdo, (int) $personId, (int) $me['user_id']);
             $_SESSION['flash_claim_link'] = claim_link_url($token);
             $_SESSION['flash_claim_for'] = (int) $personId;
@@ -161,19 +161,33 @@ function ourthology_name_lines(string $name, int $threshold = 20): array
 
 /** "b. 1965" / "d. 2020" / "1965 – 2020" / "" — year-only, same compact
  *  convention the prototype's formatLifespan() uses (full dates would
- *  crowd a node this small). */
-function ourthology_lifespan(?string $born, ?string $died): string
+ *  crowd a node this small).
+ *
+ *  Phase 84: $deceasedYearUnknown covers "recorded as deceased, but the
+ *  year isn't known yet" (persons.deceased_year_unknown, only ever set
+ *  while $died itself is still null) — shown as a literal "d. ____" so it
+ *  reads as an intentional placeholder, not a missing/broken value, and
+ *  is expected to later be replaced by a real year once $died is filled
+ *  in (at which point this function is never called with the flag true
+ *  again, since it's cleared the moment a real date is saved). */
+function ourthology_lifespan(?string $born, ?string $died, bool $deceasedYearUnknown = false): string
 {
     $b = $born ? substr($born, 0, 4) : '';
     $d = $died ? substr($died, 0, 4) : '';
     if ($b && $d) {
         return $b . ' – ' . $d;
     }
+    if ($b && !$d && $deceasedYearUnknown) {
+        return $b . ' – d. ____';
+    }
     if ($b) {
         return 'b. ' . $b;
     }
     if ($d) {
         return 'd. ' . $d;
+    }
+    if ($deceasedYearUnknown) {
+        return 'd. ____';
     }
     return '';
 }
@@ -680,7 +694,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
               $hitH = $isYou ? TREE_ME_H : $treeNodeH;
 
               $stepPrefix = !empty($stepTagsByChild[$pid]) ? implode(' ', $stepTagsByChild[$pid]) : '';
-              $lifespan = ourthology_lifespan($person['born'] ?? null, $person['died'] ?? null);
+              $lifespan = ourthology_lifespan($person['born'] ?? null, $person['died'] ?? null, !empty($person['deceased_year_unknown']));
               $datesText = trim($stepPrefix . ' ' . $lifespan);
 
               $lines = [];
@@ -773,11 +787,12 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <?php foreach ($unclaimed as $p): ?>
             <li>
               <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
-              <?php if (!empty($p['died'])): ?>
+              <?php if (person_is_deceased($p)): ?>
                 <?php
                   // Phase 30: recorded as deceased — nobody can claim this
                   // profile (see claim.php and the get_link handler above),
-                  // so there's no invite link to offer here either.
+                  // so there's no invite link to offer here either. Phase
+                  // 84: "deceased, year not yet known" counts too.
                 ?>
                 <span style="color:var(--ink-faint);font-size:12.5px;">— can't be claimed (recorded as deceased)</span>
               <?php else: ?>

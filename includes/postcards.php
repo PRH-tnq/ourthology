@@ -42,7 +42,7 @@ function fetch_postcard_recipient_options(PDO $pdo, int $familyGroupId, int $exc
     $stmt = $pdo->prepare(
         'SELECT id, first_name, middle_name, surname
          FROM persons
-         WHERE family_group_id = :gid AND died IS NULL AND id <> :self
+         WHERE family_group_id = :gid AND died IS NULL AND deceased_year_unknown = 0 AND id <> :self
          ORDER BY first_name, surname'
     );
     $stmt->execute(['gid' => $familyGroupId, 'self' => $excludePersonId]);

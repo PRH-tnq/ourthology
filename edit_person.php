@@ -116,16 +116,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'The date of death is before the date of birth.';
         }
 
+        // Phase 84: "deceased, but I don't know the year yet" — only ever
+        // offered (and only ever honoured here) for a still-unclaimed
+        // profile, same as the checkbox itself is only rendered below when
+        // $person['claimed_by_user_id'] is empty; a tampered POST for a
+        // claimed person's record is silently ignored rather than erroring,
+        // matching how every other field here just saves what's valid. A
+        // real date of death, if one was entered above, always wins and
+        // clears this flag automatically — nobody has to remember to also
+        // untick the box once they've filled in the actual date.
+        $deceasedYearUnknown = ($diedValue === null && empty($person['claimed_by_user_id']) && !empty($_POST['deceased_year_unknown']))
+            ? 1 : 0;
+
         if (!$errors) {
             $pdo->prepare(
-                'UPDATE persons SET first_name = :f, middle_name = :m, surname = :s, born = :b, died = :d WHERE id = :id'
+                'UPDATE persons SET first_name = :f, middle_name = :m, surname = :s, born = :b, died = :d, deceased_year_unknown = :dyu WHERE id = :id'
             )->execute([
-                'f'  => $first,
-                'm'  => $middle !== '' ? $middle : null,
-                's'  => $surname !== '' ? $surname : null,
-                'b'  => $bornValue,
-                'd'  => $diedValue,
-                'id' => $personId,
+                'f'   => $first,
+                'm'   => $middle !== '' ? $middle : null,
+                's'   => $surname !== '' ? $surname : null,
+                'b'   => $bornValue,
+                'd'   => $diedValue,
+                'dyu' => $deceasedYearUnknown,
+                'id'  => $personId,
             ]);
             // Phase 30: a date of death means nobody can claim this profile
             // (claim.php itself enforces that, whatever tokens exist), but
@@ -134,8 +147,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // the moment the death date is what caused it to stop working.
             // Only relevant for a still-unclaimed person; a claimed one's
             // own record can't be re-claimed anyway, so there'd be nothing
-            // to clean up.
-            if ($diedValue !== null && empty($person['claimed_by_user_id'])) {
+            // to clean up. Phase 84: being recorded as deceased with the
+            // year still unknown revokes any standing invite link exactly
+            // the same way a full date of death always has.
+            if (($diedValue !== null || $deceasedYearUnknown) && empty($person['claimed_by_user_id'])) {
                 $pdo->prepare('DELETE FROM claim_tokens WHERE person_id = :pid')->execute(['pid' => $personId]);
             }
             $_SESSION['flash_edit_notice'] = 'Profile updated.';
@@ -590,14 +605,17 @@ if ($postedProfile) {
     $pDiedDay = trim((string) ($_POST['died_day'] ?? ''));
     $pDiedMonth = trim((string) ($_POST['died_month'] ?? ''));
     $pDiedYear = trim((string) ($_POST['died_year'] ?? ''));
+    $pDeceasedYearUnknown = !empty($_POST['deceased_year_unknown']);
 } elseif ($person !== null) {
     $pFirst = (string) $person['first_name'];
     $pMiddle = (string) ($person['middle_name'] ?? '');
     $pSurname = (string) ($person['surname'] ?? '');
     [$pBornDay, $pBornMonth, $pBornYear] = ourthology_split_date($person['born'] ?? null);
     [$pDiedDay, $pDiedMonth, $pDiedYear] = ourthology_split_date($person['died'] ?? null);
+    $pDeceasedYearUnknown = !empty($person['deceased_year_unknown']);
 } else {
     $pFirst = $pMiddle = $pSurname = $pBornDay = $pBornMonth = $pBornYear = $pDiedDay = $pDiedMonth = $pDiedYear = '';
+    $pDeceasedYearUnknown = false;
 }
 ?>
 <!doctype html>
@@ -836,6 +854,23 @@ if ($postedProfile) {
               <span>Year</span>
             </div>
           </div>
+
+          <?php if (empty($person['claimed_by_user_id'])): ?>
+            <?php
+              // Phase 84: "I know they're deceased but don't know the year
+              // yet" -- only offered for a still-unclaimed profile (the
+              // scenario this was asked for: filling in what's known about
+              // a relative while the rest is still being researched). Only
+              // meaningful while the Died fields above are left blank -- a
+              // real date, once entered and saved, always wins (see the
+              // POST handler above) and this checkbox simply stops
+              // applying, no need to also untick it by hand.
+            ?>
+            <label style="margin-top:10px;display:flex;align-items:center;gap:7px;font-weight:400;text-transform:none;font-size:13.5px;color:var(--ink-soft);">
+              <input type="checkbox" name="deceased_year_unknown" value="1" style="width:auto;" <?= $pDeceasedYearUnknown ? 'checked' : '' ?>>
+              Deceased, but I don't know the year yet
+            </label>
+          <?php endif; ?>
 
           <button type="submit" class="btn-primary" style="margin-top:14px;">Save profile</button>
         </form>

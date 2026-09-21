@@ -15,6 +15,15 @@ CREATE TABLE persons (
   surname             VARCHAR(60)  NULL,
   born                DATE         NULL,
   died                DATE         NULL,
+  -- Phase 84: "I know they're deceased but don't know the year yet" --
+  -- set on an unclaimed profile whenever `died` itself can't be filled in
+  -- yet. Only ever meaningful while died IS NULL; every write path that
+  -- sets a real `died` date clears this back to 0 in the same statement,
+  -- so the two are never both "on" at once. Treated everywhere `died IS
+  -- NOT NULL` already means "deceased, don't offer an invite link /
+  -- birthday reminder / postcard recipient slot" -- see person_is_deceased()
+  -- in includes/graph.php.
+  deceased_year_unknown TINYINT(1)  NOT NULL DEFAULT 0,
   avatar_path         VARCHAR(255) NULL,
   claimed_by_user_id  INT UNSIGNED NULL,
   created_by_user_id  INT UNSIGNED NULL,

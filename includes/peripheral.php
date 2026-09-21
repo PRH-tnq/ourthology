@@ -172,7 +172,7 @@ function ourthology_antecedent_target(array $plan): ?int
 function ourthology_in_law_household(PDO $pdo, int $personId): array
 {
     $partners = $pdo->prepare(
-        "SELECT p.id, p.first_name, p.middle_name, p.surname, p.born, p.died
+        "SELECT p.id, p.first_name, p.middle_name, p.surname, p.born, p.died, p.deceased_year_unknown
          FROM partnerships pt
          JOIN persons p ON p.id = (CASE WHEN pt.person_a_id = :pid THEN pt.person_b_id ELSE pt.person_a_id END)
          WHERE pt.status = 'confirmed' AND (pt.person_a_id = :pid2 OR pt.person_b_id = :pid3)"
@@ -180,7 +180,7 @@ function ourthology_in_law_household(PDO $pdo, int $personId): array
     $partners->execute(['pid' => $personId, 'pid2' => $personId, 'pid3' => $personId]);
 
     $childStmt = $pdo->prepare(
-        "SELECT p.id, p.first_name, p.middle_name, p.surname, p.born, p.died, r.relation_kind
+        "SELECT p.id, p.first_name, p.middle_name, p.surname, p.born, p.died, p.deceased_year_unknown, r.relation_kind
          FROM relationships r
          JOIN persons p ON p.id = r.child_id
          WHERE r.parent_id = :pid AND r.status = 'confirmed'"
@@ -208,6 +208,7 @@ function ourthology_in_law_household(PDO $pdo, int $personId): array
                     'surname'          => $row['surname'],
                     'born'             => $row['born'],
                     'died'             => $row['died'],
+                    'deceased_year_unknown' => $row['deceased_year_unknown'],
                     'relation_kind'    => $row['relation_kind'],
                     'parent_master_id' => $parentMasterId,
                     'depth'            => $depth,
@@ -250,8 +251,8 @@ function ourthology_descendant_label(int $depth): string
 function ourthology_mirror_person(PDO $pdo, array $source, int $groupId, int $createdByUserId): int
 {
     $stmt = $pdo->prepare(
-        'INSERT INTO persons (first_name, middle_name, surname, born, died, claimed_by_user_id, created_by_user_id, family_group_id)
-         VALUES (:first, :middle, :surname, :born, :died, NULL, :creator, :gid)'
+        'INSERT INTO persons (first_name, middle_name, surname, born, died, deceased_year_unknown, claimed_by_user_id, created_by_user_id, family_group_id)
+         VALUES (:first, :middle, :surname, :born, :died, :dyu, NULL, :creator, :gid)'
     );
     $stmt->execute([
         'first'   => $source['first_name'],
@@ -259,6 +260,7 @@ function ourthology_mirror_person(PDO $pdo, array $source, int $groupId, int $cr
         'surname' => $source['surname'] !== null && $source['surname'] !== '' ? $source['surname'] : null,
         'born'    => $source['born'] ?: null,
         'died'    => $source['died'] ?: null,
+        'dyu'     => !empty($source['deceased_year_unknown']) ? 1 : 0,
         'creator' => $createdByUserId,
         'gid'     => $groupId,
     ]);
@@ -303,8 +305,8 @@ function ourthology_create_peripheral_tree(
     // new family_group_id (same "insert then self-reference" convention
     // signup.php uses for a fresh account's own root person).
     $stmt = $pdo->prepare(
-        'INSERT INTO persons (first_name, middle_name, surname, born, died, claimed_by_user_id, created_by_user_id, family_group_id)
-         VALUES (:first, :middle, :surname, :born, :died, NULL, :creator, 0)'
+        'INSERT INTO persons (first_name, middle_name, surname, born, died, deceased_year_unknown, claimed_by_user_id, created_by_user_id, family_group_id)
+         VALUES (:first, :middle, :surname, :born, :died, :dyu, NULL, :creator, 0)'
     );
     $stmt->execute([
         'first'   => $inLawPerson['first_name'],
@@ -312,6 +314,7 @@ function ourthology_create_peripheral_tree(
         'surname' => $inLawPerson['surname'] !== null && $inLawPerson['surname'] !== '' ? $inLawPerson['surname'] : null,
         'born'    => $inLawPerson['born'] ?: null,
         'died'    => $inLawPerson['died'] ?: null,
+        'dyu'     => !empty($inLawPerson['deceased_year_unknown']) ? 1 : 0,
         'creator' => $actingUserId,
     ]);
     $peripheralPersonId = (int) $pdo->lastInsertId();
