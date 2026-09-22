@@ -591,7 +591,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
   }
   body { align-items: flex-start; }
-  .wide { max-width: 1220px; }
+  /* Phase 86: matches tree.php's own .wide exactly now -- was a fixed
+     1220px, one of three different container widths across My tree/My
+     timeline/Family calendar/Pending (tree.php: up to 1700px, this page:
+     1220px, calendar.php: up to 1100px, pending.php: 920px) that made the
+     page visibly grow or shrink as you moved between them. Standardized
+     on tree.php's (the widest, so the family-tree diagram gets the most
+     room) across all four -- see calendar.php's and pending.php's own
+     Phase 86 comments. */
+  .wide { max-width: min(95vw, 1700px); }
   /* Phase 27: the brand row and the "who's signed in" strip both used to
      leave the page's top-right corner empty — now the viewed person's
      profile picture sits there instead, and "Signed in as" moves down to

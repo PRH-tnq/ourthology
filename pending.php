@@ -335,9 +335,27 @@ function ourthology_pending_memory_preview_html(array $row): string
      side. .pending-col-left keeps every existing section (Waiting on you /
      Sent by you, waiting on them) exactly as it laid out before; only the
      new .pending-col-right is new markup. */
-  .pending-card { max-width:920px; }
-  .pending-layout { display:flex; align-items:flex-start; gap:28px; margin-top:4px; }
-  .pending-col-left { flex:1 1 480px; min-width:0; }
+  /* Phase 86: matches tree.php's/timeline.php's/calendar.php's own .wide
+     -- standardizing the page width across My tree/My timeline/Family
+     calendar/Pending so the page doesn't visibly grow or shrink as you
+     move between them (this page was previously capped narrowest, at
+     920px). .pending-col-left gets its own explicit cap below now that
+     the card itself can grow much wider than its old 920px -- without
+     it, flex-grow:1 would stretch every request card's text the full
+     width of a 1700px page, well past a comfortable reading line length;
+     the freed-up space becomes margin instead, same as .pending-col-
+     right's own pre-existing max-width already did for the sent-history
+     list. */
+  .pending-card { max-width: min(95vw, 1700px); }
+  /* justify-content:center: with .pending-col-left/.pending-col-right
+     both capped (immediately below) well under the card's new 1700px
+     ceiling, this keeps the two columns centered as a group instead of
+     stuck to the left edge with a lot of bare white space on the right.
+     A no-op once @media (max-width:820px) switches this to column mode
+     -- there's no leftover vertical space to center into, since the
+     card's height is just whatever the stacked content adds up to. */
+  .pending-layout { display:flex; align-items:flex-start; justify-content:center; gap:28px; margin-top:4px; }
+  .pending-col-left { flex:1 1 480px; min-width:0; max-width:640px; }
   .pending-col-right { flex:1 1 320px; min-width:0; max-width:340px; border-left:1px solid var(--line); padding-left:28px; }
   @media (max-width: 820px) {
     .pending-card { max-width:480px; }

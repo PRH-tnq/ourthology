@@ -168,7 +168,11 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 <link rel="stylesheet" href="/styles.css?v=27">
 <style>
   body { align-items: flex-start; }
-  .wide { max-width: min(95vw, 1100px); }
+  /* Phase 86: matches tree.php's/timeline.php's own .wide -- standardizing
+     the page width across My tree/My timeline/Family calendar/Pending so
+     the page doesn't visibly grow or shrink as you move between them
+     (this page was previously capped narrower, at 1100px). */
+  .wide { max-width: min(95vw, 1700px); }
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
