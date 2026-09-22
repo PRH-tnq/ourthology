@@ -620,7 +620,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 
       <div class="entry-columns">
         <div class="entry-col">
-          <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 25MB each, 25 files max)</span></label>
+          <label>Photos, videos or documents <span style="text-transform:none;font-weight:400;">(optional — up to 30MB each, 25 files max)</span></label>
           <div class="photo-drop media-picker" id="photoDrop" tabindex="0" role="button" aria-label="Attach photos, videos or documents">
             <div class="media-picker-empty" id="photoDropEmpty" hidden>
               <div class="thumb">
@@ -714,7 +714,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   <script>
   (function () {
     var MAX_FILES = 25; // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
-    var MAX_BYTES = 25 * 1024 * 1024;
+    var MAX_BYTES = 30 * 1024 * 1024;
     var dropzone = document.getElementById('photoDrop');
     var emptyState = document.getElementById('photoDropEmpty');
     var grid = document.getElementById('photoGrid');
@@ -860,7 +860,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       for (var i = 0; i < incoming.length; i++) {
         if (totalCount() >= MAX_FILES) { showError('You can attach at most ' + MAX_FILES + ' files to one entry.'); break; }
         var f = incoming[i];
-        if (f.size > MAX_BYTES) { showError('"' + f.name + '" is larger than 25MB and was skipped.'); continue; }
+        if (f.size > MAX_BYTES) { showError('"' + f.name + '" is larger than 30MB and was skipped.'); continue; }
         if (looksLikeHeic(f)) { addHeicFile(f); continue; }
         addOrdinaryFile(f);
       }

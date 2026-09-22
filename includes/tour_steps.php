@@ -140,7 +140,7 @@ function ourthology_tour_steps(): array
             'page' => 'add_entry',
             'target' => '#photoDrop',
             'title' => 'Attach photos, videos or documents',
-            'body' => 'Click to browse, or just drop files straight in — up to 10 files, 25MB each. This is optional; words alone are a memory too.',
+            'body' => 'Click to browse, or just drop files straight in — up to 10 files, 30MB each. This is optional; words alone are a memory too.',
             'group' => 'basics',
         ],
         [

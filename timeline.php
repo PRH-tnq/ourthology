@@ -2783,7 +2783,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var vamRemainingSlots = 10; // recomputed per-memory in openViewer() below
     var vamSubmitting = false;
     var vamStatusTimer = null;
-    var VAM_MAX_BYTES = 25 * 1024 * 1024;
+    var VAM_MAX_BYTES = 30 * 1024 * 1024;
     var VAM_HEIC_RE = /\.(heic|heif)$/i;
     var VAM_ADD_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 4v12M4 10h12" stroke-linecap="round"/></svg>';
 
@@ -2881,7 +2881,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           break;
         }
         var f = incoming[i];
-        if (f.size > VAM_MAX_BYTES) { vamShowError('"' + f.name + '" is larger than 25MB and was skipped.'); continue; }
+        if (f.size > VAM_MAX_BYTES) { vamShowError('"' + f.name + '" is larger than 30MB and was skipped.'); continue; }
         if (vamLooksLikeHeic(f)) { vamAddHeicFile(f); continue; }
         vamAddOrdinaryFile(f);
       }
@@ -3196,7 +3196,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // built once and stamped into each row's template rather than
     // constructed per-instance.
     var TRIP_PASTE_BTN_HTML = '<button type="button" class="picker-paste-btn trip-picker-paste-btn"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>';
-    var TRIP_MAX_BYTES = 25 * 1024 * 1024;
+    var TRIP_MAX_BYTES = 30 * 1024 * 1024;
     var TRIP_HEIC_RE = /\.(heic|heif)$/i;
 
     function escapeHtml(s) {

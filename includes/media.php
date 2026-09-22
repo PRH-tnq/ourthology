@@ -24,7 +24,7 @@ function ourthology_media_dir(): string
     return dirname(__DIR__) . '/private-media';
 }
 
-const MEDIA_MAX_BYTES = 25 * 1024 * 1024; // 25MB, per file
+const MEDIA_MAX_BYTES = 30 * 1024 * 1024; // 30MB, per file — matches the .htaccess upload_max_filesize ceiling
 
 // A single timeline entry can carry more than one attachment (see
 // store_uploaded_media_files() below) — capped so one submission can't be
@@ -101,6 +101,50 @@ function ourthology_looks_like_heic(string $path, ?string $detectedMime): bool
     return ourthology_sniff_heic_heif($path);
 }
 
+// Same idea as HEIC_HEIF_FTYP_BRANDS above, for MP4/MOV video: the
+// ISOBMFF 'ftyp' box's 4-byte major-brand code, for every brand that
+// means "this is a real MP4/MOV video" even when finfo/libmagic on this
+// particular host doesn't recognise it and reports something generic
+// instead (seen in the wild as application/octet-stream). 'qt  ' (its
+// trailing space is part of the real four-character code) is QuickTime's
+// own brand and maps to .mov; everything else here maps to .mp4, the
+// overwhelmingly common case -- including 'FACE', a nonstandard brand
+// Facebook/Messenger/Instagram stamp onto videos that have passed through
+// their servers, which is otherwise indistinguishable from a real,
+// playable MP4.
+const VIDEO_FTYP_BRAND_TO_EXTENSION = [
+    'isom' => 'mp4', 'iso2' => 'mp4', 'iso4' => 'mp4', 'iso5' => 'mp4', 'iso6' => 'mp4',
+    'mp41' => 'mp4', 'mp42' => 'mp4', 'avc1' => 'mp4', 'dash' => 'mp4',
+    'M4V ' => 'mp4', 'M4A ' => 'mp4', 'FACE' => 'mp4',
+    'qt  ' => 'mov',
+];
+
+/**
+ * Reads just the first 12 bytes of a file and checks for the ISOBMFF
+ * 'ftyp' box (offset 4) followed by a recognised MP4/MOV brand code
+ * (offset 8) -- the same cheap, dependency-free fallback as
+ * ourthology_sniff_heic_heif() above, used only once finfo has already
+ * failed to recognise the file as anything in MEDIA_ALLOWED. Returns the
+ * extension to store the file as ('mp4' or 'mov'), or null if this
+ * doesn't look like a recognised video brand at all.
+ */
+function ourthology_sniff_video_extension(string $path): ?string
+{
+    $handle = @fopen($path, 'rb');
+    if ($handle === false) {
+        return null;
+    }
+    $header = fread($handle, 12);
+    fclose($handle);
+    if ($header === false || strlen($header) < 12) {
+        return null;
+    }
+    if (substr($header, 4, 4) !== 'ftyp') {
+        return null;
+    }
+    return VIDEO_FTYP_BRAND_TO_EXTENSION[substr($header, 8, 4)] ?? null;
+}
+
 /**
  * Converts a HEIC/HEIF file at $sourcePath to a JPEG written directly
  * into $destDir (already inside private-media/, so this never touches
@@ -170,7 +214,7 @@ function store_uploaded_media(array $file, int $personId): array
         throw new RuntimeException('Upload failed — please try again.');
     }
     if ($file['size'] > MEDIA_MAX_BYTES) {
-        throw new RuntimeException('That file is larger than the 25MB limit.');
+        throw new RuntimeException('That file is larger than the 30MB limit.');
     }
 
     // Detect the REAL mime type from file content — never trust the
@@ -201,6 +245,17 @@ function store_uploaded_media(array $file, int $personId): array
             if (in_array($detectedMime, $mimes, true)) {
                 $extension = $ext;
                 break;
+            }
+        }
+        // finfo/libmagic didn't recognise it as anything in MEDIA_ALLOWED --
+        // before rejecting outright, check whether it's actually a real
+        // MP4/MOV video whose ftyp brand this particular host's libmagic
+        // just doesn't have in its own signature list (see
+        // ourthology_sniff_video_extension() above).
+        if ($extension === null) {
+            $extension = ourthology_sniff_video_extension($file['tmp_name']);
+            if ($extension !== null) {
+                $detectedMime = MEDIA_ALLOWED[$extension][0];
             }
         }
         if ($extension === null) {
