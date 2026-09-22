@@ -168,11 +168,16 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 <link rel="stylesheet" href="/styles.css?v=27">
 <style>
   body { align-items: flex-start; }
-  /* Phase 86: matches tree.php's/timeline.php's own .wide -- standardizing
-     the page width across My tree/My timeline/Family calendar/Pending so
-     the page doesn't visibly grow or shrink as you move between them
-     (this page was previously capped narrower, at 1100px). */
-  .wide { max-width: min(95vw, 1700px); }
+  /* Phase 87: capped back down from Phase 86's shared 1700px -- "never
+     more than 4 months wide". .cal-year's own grid (below) is
+     repeat(auto-fill, minmax(260px,1fr)) with a 16px gap, so a 5th column
+     would only ever appear once the container reaches 5*(260+16)-16 =
+     1364px; capping the page at 1200px keeps every screen wide enough to
+     hit the cap at a stable, comfortable 4 columns (each getting a bit of
+     extra room to grow past the 260px minimum) with real margin below
+     that threshold, while narrower screens still fall back to 3/2/1
+     columns exactly as before -- this is a ceiling, not a fixed count. */
+  .wide { max-width: min(95vw, 1200px); }
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }

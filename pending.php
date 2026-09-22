@@ -181,17 +181,20 @@ $outgoingCount = count($outgoing['relationships']) + count($outgoing['partnershi
 // recording when and to who" -- a permanent, chronological history, newest
 // first, regardless of whether the recipient has acted on it yet (unlike
 // $outgoingPostcards/$outgoingLetters above, which only cover the still-
-// unresolved ones under "waiting on them"). Shown in this page's new
-// right-hand column. Each of the two fetches is already capped and sorted
-// on its own; merging two already-sorted lists here rather than one SQL
-// UNION keeps fetch_sent_postcards_for_person()/fetch_sent_letters_for_
-// person() simple and independently reusable, and 120 rows tops is not
-// worth a fancier merge than usort().
+// unresolved ones under "waiting on them"). Shown in this page's middle
+// column. The two fetches are already capped and sorted on their own;
+// merging them here rather than one SQL UNION keeps
+// fetch_sent_postcards_for_person()/fetch_sent_letters_for_person() simple
+// and independently reusable, and 120 rows tops is not worth a fancier
+// merge than usort().
+//
+// Phase 87: greeting cards used to join this same merged list (a third
+// "type" alongside postcard/letter) in one shared column -- split out
+// into their own $sentCardsHistory/.pending-col-cards column instead, so
+// postcards & letters and greeting cards each get their own "sent"
+// history rather than being interleaved in one list.
 $sentPostcards = fetch_sent_postcards_for_person($pdo, $myPersonId);
 $sentLetters = fetch_sent_letters_for_person($pdo, $myPersonId);
-// Phase 67: cards join this same merged history -- a third type
-// alongside postcard/letter, same shape (type/sent_at/recipient).
-$sentCards = fetch_sent_greeting_cards_for_person($pdo, $myPersonId);
 $sentHistory = [];
 foreach ($sentPostcards as $pc) {
     $sentHistory[] = [
@@ -207,16 +210,24 @@ foreach ($sentLetters as $lt) {
         'recipient' => person_display_name(['first_name' => $lt['recipient_first'], 'surname' => $lt['recipient_surname']]),
     ];
 }
+usort($sentHistory, fn(array $a, array $b): int => strcmp($b['sent_at'], $a['sent_at']));
+$sentHistoryTotal = count_sent_postcards_for_person($pdo, $myPersonId) + count_sent_letters_for_person($pdo, $myPersonId);
+$sentHistoryShown = array_slice($sentHistory, 0, 40);
+
+// Phase 87: greeting cards' own "sent" history -- same shape (sent_at,
+// recipient) as $sentHistory above, minus 'type' since every row here is
+// already a card.
+$sentCards = fetch_sent_greeting_cards_for_person($pdo, $myPersonId);
+$sentCardsHistory = [];
 foreach ($sentCards as $gc) {
-    $sentHistory[] = [
-        'type'      => 'card',
+    $sentCardsHistory[] = [
         'sent_at'   => $gc['sent_at'],
         'recipient' => person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]),
     ];
 }
-usort($sentHistory, fn(array $a, array $b): int => strcmp($b['sent_at'], $a['sent_at']));
-$sentHistoryTotal = count_sent_postcards_for_person($pdo, $myPersonId) + count_sent_letters_for_person($pdo, $myPersonId) + count_sent_greeting_cards_for_person($pdo, $myPersonId);
-$sentHistoryShown = array_slice($sentHistory, 0, 40);
+usort($sentCardsHistory, fn(array $a, array $b): int => strcmp($b['sent_at'], $a['sent_at']));
+$sentCardsTotal = count_sent_greeting_cards_for_person($pdo, $myPersonId);
+$sentCardsShown = array_slice($sentCardsHistory, 0, 40);
 
 $openPostcard = $openPostcardRowId !== null
     ? fetch_postcard_recipient_row($pdo, (int) $openPostcardRowId, $myPersonId)
@@ -333,8 +344,7 @@ function ourthology_pending_memory_preview_html(array $row): string
      own, wider max-width now that there's a second column, plus a
      responsive fallback below for anything too narrow to hold both side by
      side. .pending-col-left keeps every existing section (Waiting on you /
-     Sent by you, waiting on them) exactly as it laid out before; only the
-     new .pending-col-right is new markup. */
+     Sent by you, waiting on them) exactly as it laid out before. */
   /* Phase 86: matches tree.php's/timeline.php's/calendar.php's own .wide
      -- standardizing the page width across My tree/My timeline/Family
      calendar/Pending so the page doesn't visibly grow or shrink as you
@@ -343,24 +353,32 @@ function ourthology_pending_memory_preview_html(array $row): string
      the card itself can grow much wider than its old 920px -- without
      it, flex-grow:1 would stretch every request card's text the full
      width of a 1700px page, well past a comfortable reading line length;
-     the freed-up space becomes margin instead, same as .pending-col-
-     right's own pre-existing max-width already did for the sent-history
-     list. */
+     the freed-up space becomes margin instead, same as the two right-
+     hand columns' own pre-existing max-width already did for the sent-
+     history lists.
+     Phase 87: a third column -- .pending-col-cards, greeting cards sent,
+     split out of what used to be one merged "postcards & letters & cards"
+     history in .pending-col-mid (renamed from .pending-col-right; postcards
+     and letters stay there, unchanged). .pending-col-left's own cap grows
+     from 640 to 760 to use a bit more of the freed-up width now that
+     there's a third column to balance against, rather than leaving all of
+     it as bare margin. */
   .pending-card { max-width: min(95vw, 1700px); }
-  /* justify-content:center: with .pending-col-left/.pending-col-right
-     both capped (immediately below) well under the card's new 1700px
-     ceiling, this keeps the two columns centered as a group instead of
-     stuck to the left edge with a lot of bare white space on the right.
-     A no-op once @media (max-width:820px) switches this to column mode
-     -- there's no leftover vertical space to center into, since the
-     card's height is just whatever the stacked content adds up to. */
+  /* justify-content:center: with all three columns capped (immediately
+     below) well under the card's 1700px ceiling, this keeps them centered
+     as a group instead of stuck to the left edge with a lot of bare white
+     space on the right. A no-op once @media (max-width:820px) switches
+     this to column mode -- there's no leftover vertical space to center
+     into, since the card's height is just whatever the stacked content
+     adds up to. */
   .pending-layout { display:flex; align-items:flex-start; justify-content:center; gap:28px; margin-top:4px; }
-  .pending-col-left { flex:1 1 480px; min-width:0; max-width:640px; }
-  .pending-col-right { flex:1 1 320px; min-width:0; max-width:340px; border-left:1px solid var(--line); padding-left:28px; }
+  .pending-col-left { flex:1 1 480px; min-width:0; max-width:760px; }
+  .pending-col-mid { flex:1 1 260px; min-width:0; max-width:300px; border-left:1px solid var(--line); padding-left:28px; }
+  .pending-col-cards { flex:1 1 260px; min-width:0; max-width:300px; border-left:1px solid var(--line); padding-left:28px; }
   @media (max-width: 820px) {
     .pending-card { max-width:480px; }
     .pending-layout { flex-direction:column; gap:0; }
-    .pending-col-right { max-width:none; border-left:none; padding-left:0; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
+    .pending-col-mid, .pending-col-cards { max-width:none; border-left:none; padding-left:0; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
   }
 
   /* The sent-history list itself: compact rows rather than full .req-card
@@ -799,7 +817,7 @@ function ourthology_pending_memory_preview_html(array $row): string
     <?php endforeach; ?>
     </div>
 
-    <div class="pending-col-right">
+    <div class="pending-col-mid">
       <h3 class="section-title" style="margin-top:0;">Postcards &amp; letters you've sent (<?= $sentHistoryTotal ?>)</h3>
       <?php if (!$sentHistoryShown): ?>
         <p class="sent-history-empty">Nothing sent yet — postcards and letters you send will show up here, with when and who to.</p>
@@ -807,13 +825,32 @@ function ourthology_pending_memory_preview_html(array $row): string
         <ul class="sent-history-list">
           <?php foreach ($sentHistoryShown as $h): ?>
             <li class="sent-history-row">
-              <span class="sent-history-what"><?= $h['type'] === 'postcard' ? 'Postcard' : ($h['type'] === 'letter' ? 'Letter' : 'Card') ?> to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
+              <span class="sent-history-what"><?= $h['type'] === 'postcard' ? 'Postcard' : 'Letter' ?> to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
               <span class="sent-history-date"><?= htmlspecialchars(date('d M Y', strtotime($h['sent_at'])), ENT_QUOTES) ?></span>
             </li>
           <?php endforeach; ?>
         </ul>
         <?php if ($sentHistoryTotal > count($sentHistoryShown)): ?>
           <p class="sent-history-more">and <?= $sentHistoryTotal - count($sentHistoryShown) ?> earlier one<?= ($sentHistoryTotal - count($sentHistoryShown)) === 1 ? '' : 's' ?>.</p>
+        <?php endif; ?>
+      <?php endif; ?>
+    </div>
+
+    <div class="pending-col-cards">
+      <h3 class="section-title" style="margin-top:0;">Greetings cards you've sent (<?= $sentCardsTotal ?>)</h3>
+      <?php if (!$sentCardsShown): ?>
+        <p class="sent-history-empty">Nothing sent yet — greetings cards you send will show up here, with when and who to.</p>
+      <?php else: ?>
+        <ul class="sent-history-list">
+          <?php foreach ($sentCardsShown as $h): ?>
+            <li class="sent-history-row">
+              <span class="sent-history-what">Card to <strong><?= htmlspecialchars($h['recipient'], ENT_QUOTES) ?></strong></span>
+              <span class="sent-history-date"><?= htmlspecialchars(date('d M Y', strtotime($h['sent_at'])), ENT_QUOTES) ?></span>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+        <?php if ($sentCardsTotal > count($sentCardsShown)): ?>
+          <p class="sent-history-more">and <?= $sentCardsTotal - count($sentCardsShown) ?> earlier one<?= ($sentCardsTotal - count($sentCardsShown)) === 1 ? '' : 's' ?>.</p>
         <?php endif; ?>
       <?php endif; ?>
     </div>
