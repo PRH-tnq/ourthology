@@ -125,7 +125,11 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             login_user($newUserId);
-            header('Location: /timeline.php');
+            // Phase 90: a claimed referral invite plays the welcome video
+            // too, but then offers the guided tour (rather than dropping
+            // straight onto the timeline) — see welcome.php's own doc
+            // comment for the full flow.
+            header('Location: /welcome.php?flow=claim');
             exit;
         } catch (RuntimeException $e) {
             $pdo->rollBack();

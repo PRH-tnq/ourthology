@@ -89,7 +89,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->commit();
 
             login_user($userId);
-            header('Location: /timeline.php');
+            // Phase 90: a brand-new tree has nothing on it yet, so the
+            // first-run welcome video plays first, then lands on /tree.php
+            // ("My Tree") rather than the (currently empty) timeline —
+            // see welcome.php's own doc comment for the full flow.
+            header('Location: /welcome.php?flow=signup');
             exit;
         } catch (PDOException $e) {
             $pdo->rollBack();
