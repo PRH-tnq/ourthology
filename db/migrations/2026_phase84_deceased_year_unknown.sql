@@ -1,0 +1,25 @@
+-- Phase 84: "the option on an unclaimed profile to click a 'deceased' tick
+-- box when I know they are deceased but don't know the year as yet" -- run
+-- this once via phpMyAdmin against the live database BEFORE deploying this
+-- phase's code -- db/schema.sql has already been updated to match, so a
+-- FRESH install never needs this file, only the already-live one.
+--
+-- IMPORTANT: this one is not optional to sequence correctly. Unlike most
+-- past migrations (which only affected one specific feature's INSERT),
+-- this column is read by fetch_family_graph() in includes/graph.php --
+-- the query behind nearly every page (tree.php, timeline.php's reminder
+-- banner, the postcard/letter/card recipient pickers, and more). If the
+-- new code is deployed before this migration runs, EVERY one of those
+-- pages will fail with a fatal "unknown column" database error. Run this
+-- first, confirm it succeeded, then deploy the code.
+--
+-- Only ever meaningful while `died` itself is still NULL -- every save
+-- that sets a real `died` date clears this back to 0 in the same
+-- statement (see edit_person.php's update_profile action), so the two
+-- are never both "on" at once. Everywhere the app already treated
+-- `died IS NOT NULL` as "this person is deceased" (no invite link, no
+-- birthday reminder, not offered as a postcard/letter/card recipient)
+-- now also treats deceased_year_unknown = 1 the same way -- see
+-- person_is_deceased() in includes/graph.php.
+ALTER TABLE persons
+  ADD COLUMN deceased_year_unknown TINYINT(1) NOT NULL DEFAULT 0 AFTER died;
