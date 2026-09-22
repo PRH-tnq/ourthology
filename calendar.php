@@ -251,7 +251,16 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-entry { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
   .cal-entry:last-child { border-bottom:none; }
   .cal-entry.is-today { background:var(--error-bg); margin:0 -8px; padding:6px 8px; border-radius:8px; border-bottom-color:transparent; }
-  .cal-entry-day { flex:0 0 auto; font-weight:700; color:var(--ink-soft); min-width:22px; text-align:right; white-space:nowrap; }
+  /* Phase 89 fix: a plain min-width only acts as a FLOOR -- once the
+     ordinal suffix was added, a wider day like "22nd" (measured ~27px,
+     the widest of the 1-31 range) grew right past the 22px floor while a
+     narrow one like "6th" (~17px) sat at the floor, so the two ended up
+     different overall widths and the divider just after them landed at a
+     different x for each. A fixed width (not min-width), sized to the
+     widest case with a little breathing room, makes every day box -- and
+     so the divider right after it -- line up at the same x regardless of
+     how many digits or how wide the "th"/"st"/"nd"/"rd" happens to be. */
+  .cal-entry-day { flex:0 0 auto; width:29px; font-weight:700; color:var(--ink-soft); text-align:right; white-space:nowrap; }
   /* Phase 89: the ordinal letters ("th"/"st"/"nd"/"rd") ride as a true
      superscript on the day number -- <sup> already shrinks/raises text by
      default, this just tightens the gap and keeps the weight lighter than
