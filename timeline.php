@@ -709,11 +709,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      it, the mid-flip geometry of the preserve-3d face briefly reads as
      taller than the box to .postcard-box's own overflow:auto (see above),
      which pops a vertical scrollbar in and out and jumps the content. */
-  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; overflow:hidden; }
-  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
-  .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
+  .postcard-flip-scene { -webkit-perspective:1600px; perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; overflow:hidden; }
+  /* Phase 89: -webkit- duplicates alongside every unprefixed 3D-transform
+     property here and on .postcard-flip-inner.is-flipped/.postcard-face-back
+     below -- see the matching comment in pending.php for why (Safari/iOS
+     mirrored-text bug on a compound preserve-3d + rotateY flip). */
+  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); -webkit-transform-style:preserve-3d; transform-style:preserve-3d; }
+  .postcard-flip-inner.is-flipped { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); }
   .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
-  .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
+  .postcard-face-back { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); display:flex; flex-direction:column; }
 
   /* Phase 49: the front's photo now sits "matted" on a card-coloured
      backdrop -- like a printed photo tucked onto a postcard -- instead
@@ -923,12 +927,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      cover sits on top (z-index above the inside), hinged on its LEFT
      edge (transform-origin) so opening it reads as a book/card cover
      swinging open, not a postcard-style centre flip. */
-  .gcard-scene { position:relative; perspective:1800px; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
-  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
-  .gcard-cover.is-open { transform:rotateY(-150deg); pointer-events:none; }
+  .gcard-scene { position:relative; -webkit-perspective:1800px; perspective:1800px; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
+  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); -webkit-transform-style:preserve-3d; transform-style:preserve-3d; }
+  .gcard-cover.is-open { -webkit-transform:rotateY(-150deg); transform:rotateY(-150deg); pointer-events:none; }
   .gcard-cover-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; overflow:hidden; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); }
   .gcard-cover-front { background:#fff; }
-  .gcard-cover-back { transform:rotateY(180deg); background:#fdfaf6; }
+  .gcard-cover-back { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); background:#fdfaf6; }
 
   .gcard-drop-zone { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:8px; cursor:pointer; color:var(--ink-faint); font-size:13.5px; text-align:center; padding:16px; box-sizing:border-box; background:#fff; }
   .gcard-drop-zone.is-dragover { background:var(--paper-2); }
@@ -4336,7 +4340,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 <button type="button" class="gcard-change-photo">Change photo</button>
                 <input type="file" name="image" class="gcard-image-input" accept="image/*,.heic,.heif" hidden>
                 <div class="gcard-cover-message">
-                  <span class="gcard-cover-message-text" id="gcardCoverMessageText" contenteditable="true" data-placeholder="Happy Birthday!"></span>
+                  <!-- Phase 88: matches card.php's own fallback now that
+                       leaving this blank no longer errors out -- see
+                       wireCardComposer()'s data-placeholder swap below for
+                       the birthday/key-date flows, which pre-fill real text
+                       here rather than relying on this placeholder. -->
+                  <span class="gcard-cover-message-text" id="gcardCoverMessageText" contenteditable="true" data-placeholder="Just Saying Hi!"></span>
                 </div>
               </div>
               <div class="gcard-cover-face gcard-cover-back" aria-hidden="true"></div>
@@ -4766,7 +4775,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var coverText = document.getElementById("gcardCoverMessageText");
         if (coverText) {
           coverText.textContent = data.coverDefault || "";
-          coverText.setAttribute("data-placeholder", isAnytime ? "Just saying hello!" : "Happy Birthday!");
+          // Phase 88: matches card.php's own fallback text for a card sent
+          // with this left blank -- the birthday/key-date flows don't
+          // normally hit this placeholder at all (coverText.textContent is
+          // pre-filled with real text just below), only if someone deletes
+          // what was pre-filled there.
+          coverText.setAttribute("data-placeholder", "Just Saying Hi!");
         }
         var toLine = document.getElementById("gcardToLine");
         if (toLine) toLine.textContent = needsRecipientPicker ? "" : (data.firstName || "");

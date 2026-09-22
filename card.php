@@ -93,8 +93,14 @@ if ($action === 'send') {
         }
     }
 
-    if ($error === null && $coverMessage === '') {
-        $error = 'Add a front-of-card message before sending.';
+    // Phase 88: used to refuse to send a card with no front-of-card
+    // message at all -- "don't error it out", default it instead, same
+    // as a card left blank in real life still says something on the
+    // front. Only kicks in when the sender genuinely left it empty;
+    // anything they typed (even just whitespace-trimmed-to-nothing is
+    // treated the same as never having typed anything) is kept as-is.
+    if ($coverMessage === '') {
+        $coverMessage = 'Just Saying Hi!';
     }
 
     $storedImage = null;

@@ -328,12 +328,30 @@ function ourthology_pending_memory_preview_html(array $row): string
      only ever linked back to tree.php via the plain .foot-link at the
      bottom. Same minimal rule as tree.php/timeline.php/calendar.php/
      edit_person.php, just for the one row holding the new shared
-     primary nav (includes/nav.php). */
-  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 4px 0 18px; }
+     primary nav (includes/nav.php).
+     Phase 89: margin was accidentally written backwards here (4px top /
+     18px bottom) -- every other page uses 18px top / 4px bottom, so the
+     nav row itself sat about 14px higher on this page alone, which is
+     exactly the kind of jump Phil flagged ("stay in the same place as I
+     switch between screens"). Matched to the others. */
+  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .req-card { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:14px; background:#fff; }
   .req-when { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-faint); margin-bottom:6px; }
-  .btn-small { width:auto; margin:0 8px 0 0; padding:6px 14px; }
+  /* Phase 89: button.btn-small (not just .btn-small) -- styles.css's own
+     button.btn-primary carries margin-top:22px (meant for a full-width
+     standalone auth-page submit button, stacked under a form above it),
+     and a plain class selector here loses to that element+class one on
+     specificity, so margin-top:22px was winning over this rule's own
+     margin:0 8px 0 0 for any button that has btn-primary but NOT ghost
+     (.btn-small.ghost's margin:0 already had enough specificity to win,
+     which is exactly why only ONE of a Discard/Save pair ever drifted).
+     Normal inline button pairs elsewhere (Approve/Decline, etc.) never
+     showed it, since margin-top on a plain inline box has no visible
+     effect -- but postcard/letter/card's *-read-footer wraps this same
+     pair in a flex row, where the wrapping form is blockified and DOES
+     respect it, pushing "Save to my timeline" ~22px below "Discard". */
+  button.btn-small { width:auto; margin:0 8px 0 0; padding:6px 14px; }
   .btn-small.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); margin:0; }
   h3.section-title { margin:24px 0 4px; font-size:15px; }
   h3.section-title:first-of-type { margin-top:16px; }
@@ -402,11 +420,20 @@ function ourthology_pending_memory_preview_html(array $row): string
   .postcard-box { position:relative; width:min(96vw, 640px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
   .postcard-close { position:absolute; top:10px; right:12px; z-index:2; width:32px; height:32px; border-radius:50%; border:1px solid var(--line); background:#fff; color:var(--ink-soft); font-size:18px; line-height:1; cursor:pointer; }
   .postcard-close:hover { background:var(--paper-2); }
-  .postcard-flip-scene { perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; }
-  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; }
-  .postcard-flip-inner.is-flipped { transform:rotateY(180deg); }
+  .postcard-flip-scene { -webkit-perspective:1600px; perspective:1600px; width:100%; aspect-ratio:3/2; margin:4px 0 14px; }
+  /* Phase 89: -webkit- duplicates alongside every unprefixed 3D-transform
+     property here and on .postcard-flip-inner.is-flipped/.postcard-face-back
+     below -- iOS/Safari (WebKit) can render the "back to photo" face's text
+     mirrored on a compound preserve-3d + rotateY(180deg) flip like this one
+     even though it composes correctly (net 0deg with the parent's own
+     rotation) on Chromium, unless transform/transform-style are ALSO given
+     their -webkit- form, not just backface-visibility (already prefixed
+     below). Same fix applied to the identical .gcard-cover pattern further
+     down, and to this same pattern in timeline.php. */
+  .postcard-flip-inner { position:relative; width:100%; height:100%; transition:transform 0.7s cubic-bezier(.4,.2,.2,1); -webkit-transform-style:preserve-3d; transform-style:preserve-3d; }
+  .postcard-flip-inner.is-flipped { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); }
   .postcard-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; background:#fff; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); overflow:hidden; }
-  .postcard-face-back { transform:rotateY(180deg); display:flex; flex-direction:column; }
+  .postcard-face-back { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); display:flex; flex-direction:column; }
 
   /* Phase 49: matches timeline.php's compose card byte-for-byte for
      every class shared between the two -- see that file for the
@@ -449,7 +476,12 @@ function ourthology_pending_memory_preview_html(array $row): string
 
   .postcard-flip-btn { font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
   .postcard-flip-btn:hover { background:var(--paper-2); }
-  .postcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+  /* align-items:center: Discard (ghost, with a 1px border all round) is
+     otherwise ~2px taller than Save to my timeline (no border, same
+     padding) -- default stretch/top alignment left that difference
+     showing at the bottom edge even after the margin-top fix above;
+     centering keeps both buttons visually level regardless. */
+  .postcard-read-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:16px; }
 
   /* Phase 53: same letterhead sheet, byte-for-byte, as timeline.php's
      letter composer -- this page only ever shows it read-only. */
@@ -464,7 +496,7 @@ function ourthology_pending_memory_preview_html(array $row): string
   .letter-body-read { min-height:120px; max-height:420px; overflow:auto; padding:10px 2px; font-family:'Caveat',cursive; font-size:21px; line-height:1.55; color:#2b2620; }
   .letter-body-read img { max-width:100%; border-radius:6px; margin:8px 0; display:block; }
   .letter-closing { font-family:'Caveat',cursive; font-size:22px; color:#2b2620; margin:10px 0 0; line-height:1.3; }
-  .letter-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
+  .letter-read-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
 
   /* Phase 54: "appear in the recipient's pending as an envelope, with
      their name on it and a from section written in the top left hand
@@ -500,7 +532,7 @@ function ourthology_pending_memory_preview_html(array $row): string
      inert (display:none, no transitions) until that JS opts in by
      adding .js-anim, so a page where JS fails just shows the letter
      immediately with no envelope in the way. */
-  .letter-envelope-scene { position:relative; perspective:1800px; }
+  .letter-envelope-scene { position:relative; -webkit-perspective:1800px; perspective:1800px; }
   .envelope-anim-flap, .envelope-anim-body { display:none; position:absolute; left:0; right:0; top:0; }
   .envelope-anim-body { height:170px; border-radius:12px; background:linear-gradient(135deg,#f3ead9,#e9dcc4); border:1px solid #c9b998; box-shadow:0 10px 24px -12px rgba(0,0,0,.4); z-index:2; }
   .envelope-anim-flap { height:110px; background:linear-gradient(135deg,#ede1c9,#ddcba3); clip-path:polygon(0 0,100% 0,50% 100%); transform-origin:top center; z-index:4; backface-visibility:hidden; -webkit-backface-visibility:hidden; box-shadow:0 2px 6px rgba(0,0,0,.15); }
@@ -537,11 +569,11 @@ function ourthology_pending_memory_preview_html(array $row): string
   .gcard-read-box { position:relative; width:min(92vw, 380px); max-height:94vh; overflow:auto; background:var(--paper); border:2px solid var(--accent); border-radius:16px; box-shadow:0 24px 60px -20px rgba(0,0,0,0.45); padding:22px 24px 26px; box-sizing:border-box; }
   .gcard-title { margin:0 0 12px; }
   .gcard-scene { position:relative; width:100%; aspect-ratio:5/7; margin:4px 0 0; }
-  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); transform-style:preserve-3d; perspective:1800px; }
-  .gcard-cover.is-open { transform:rotateY(-150deg); }
+  .gcard-cover { position:absolute; inset:0; z-index:3; transform-origin:left center; transition:transform 0.5s cubic-bezier(.4,.2,.2,1); -webkit-transform-style:preserve-3d; transform-style:preserve-3d; -webkit-perspective:1800px; perspective:1800px; }
+  .gcard-cover.is-open { -webkit-transform:rotateY(-150deg); transform:rotateY(-150deg); }
   .gcard-cover-face { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border:2px solid var(--accent); border-radius:12px; overflow:hidden; box-shadow:0 6px 18px -10px rgba(0,0,0,0.35); }
   .gcard-cover-front { background:#fff; }
-  .gcard-cover-back { transform:rotateY(180deg); background:#fdfaf6; }
+  .gcard-cover-back { -webkit-transform:rotateY(180deg); transform:rotateY(180deg); background:#fdfaf6; }
   .gcard-read-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
   .gcard-cover-message { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:34px 14px 16px; box-sizing:border-box; text-align:center; background:linear-gradient(to top, rgba(20,16,10,0.65), rgba(20,16,10,0) 90%); }
   .gcard-cover-message-text { display:inline-block; max-width:100%; font-family:"Fraunces", Georgia, serif; font-size:24px; font-weight:700; line-height:1.2; color:#fff; text-shadow:0 2px 10px rgba(0,0,0,0.55); }
@@ -562,7 +594,7 @@ function ourthology_pending_memory_preview_html(array $row): string
   .gcard-scene.is-card-open .gcard-open-cta { display:none; }
   .gcard-peek-toggle#cardCloseBtn { display:none; }
   .gcard-scene.is-card-open .gcard-peek-toggle#cardCloseBtn { display:block; }
-  .gcard-read-footer { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+  .gcard-read-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
 <body>

@@ -324,3 +324,25 @@ function update_calendar_event(
     ]);
     return $stmt->rowCount() > 0;
 }
+
+/**
+ * Phase 89: "1st"/"2nd"/"3rd"/"4th" ... -- just the suffix, so a caller
+ * can style the number and the letters differently (calendar.php wraps
+ * this in its own <sup>). The 11th/12th/13th special case is the one
+ * wrinkle in "day mod 10" -- English says "eleventh", not "eleventh" as
+ * in "one-th" -- so those three (and their 21/22/23-style repeats, which
+ * never actually occur for a day-of-month but are guarded anyway since
+ * this is generic on any int) are checked first.
+ */
+function ourthology_ordinal_suffix(int $day): string
+{
+    if ($day % 100 >= 11 && $day % 100 <= 13) {
+        return 'th';
+    }
+    return match ($day % 10) {
+        1 => 'st',
+        2 => 'nd',
+        3 => 'rd',
+        default => 'th',
+    };
+}

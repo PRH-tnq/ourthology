@@ -99,7 +99,13 @@ foreach ($graph['persons'] as $p) {
 }
 
 $layout = compute_tree_layout($graph, $myPersonId);
-$unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id']);
+// Phase 89: "remove them from the not yet claimed list" -- someone
+// recorded as deceased can never actually be claimed (see claim.php and
+// the get_link handler above), so this used to still list them with a
+// "can't be claimed" note instead of an invite link. Filtering them out
+// here entirely means the list is now just the people someone COULD
+// still invite -- nothing left to special-case in the foreach below.
+$unclaimed = array_filter($graph['persons'], fn($p) => !$p['claimed_by_user_id'] && !person_is_deceased($p));
 
 // Phase 35: anyone in the tree, not recorded as deceased, whose
 // birthday falls in the next week -- shown as a reminder banner next
@@ -788,22 +794,18 @@ $hasAnyStepTag = !empty($stepTagsByChild);
           <?php foreach ($unclaimed as $p): ?>
             <li>
               <?= htmlspecialchars(person_display_name($p), ENT_QUOTES) ?>
-              <?php if (person_is_deceased($p)): ?>
-                <?php
-                  // Phase 30: recorded as deceased — nobody can claim this
-                  // profile (see claim.php and the get_link handler above),
-                  // so there's no invite link to offer here either. Phase
-                  // 84: "deceased, year not yet known" counts too.
-                ?>
-                <span style="color:var(--ink-faint);font-size:12.5px;">— can't be claimed (recorded as deceased)</span>
-              <?php else: ?>
-                <form method="post" style="display:inline;">
-                  <?= csrf_field() ?>
-                  <input type="hidden" name="action" value="get_link">
-                  <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
-                  <button type="submit" class="linklet">Invite this person</button>
-                </form>
-              <?php endif; ?>
+              <?php
+                // Phase 89: $unclaimed itself now already excludes anyone
+                // deceased (see above), so every person reaching this loop
+                // is guaranteed inviteable -- no more "can't be claimed"
+                // branch needed here.
+              ?>
+              <form method="post" style="display:inline;">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="get_link">
+                <input type="hidden" name="person_id" value="<?= (int) $p['id'] ?>">
+                <button type="submit" class="linklet">Invite this person</button>
+              </form>
               · <a class="linklet" href="/edit_person.php?person_id=<?= (int) $p['id'] ?>" style="text-decoration:underline;">edit</a>
             </li>
           <?php endforeach; ?>

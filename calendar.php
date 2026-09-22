@@ -168,16 +168,14 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 <link rel="stylesheet" href="/styles.css?v=27">
 <style>
   body { align-items: flex-start; }
-  /* Phase 87: capped back down from Phase 86's shared 1700px -- "never
-     more than 4 months wide". .cal-year's own grid (below) is
-     repeat(auto-fill, minmax(260px,1fr)) with a 16px gap, so a 5th column
-     would only ever appear once the container reaches 5*(260+16)-16 =
-     1364px; capping the page at 1200px keeps every screen wide enough to
-     hit the cap at a stable, comfortable 4 columns (each getting a bit of
-     extra room to grow past the 260px minimum) with real margin below
-     that threshold, while narrower screens still fall back to 3/2/1
-     columns exactly as before -- this is a ceiling, not a fixed count. */
-  .wide { max-width: min(95vw, 1200px); }
+  /* Phase 89: back to the shared 1700px width (matching tree/timeline/
+     pending) -- "make the filled screen the same width as the other
+     pages". Phase 87 had instead capped the PAGE at 1200px to hold the
+     4-months-wide ceiling; that's now done the other way, by raising
+     .cal-year's own minmax() floor (below) instead of the page's own
+     max-width, so the page reads as wide as everywhere else while still
+     never growing a 5th column. */
+  .wide { max-width: min(95vw, 1700px); }
   .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin: 18px 0 4px; }
   .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .nav a { font-size:13px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); color:var(--ink-soft); text-decoration:none; background:#fff; }
@@ -221,7 +219,16 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-send-card-btn:hover { background:#A9670C; }
 
   /* ---------- month-by-month list ---------- */
-  .cal-year { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:16px; }
+  /* Phase 89: minmax() floor raised 260px -> 340px so "never more than 4
+     months wide" is enforced by the BOX size instead of the page's own
+     max-width (see .wide above). At the full 1700px page width the grid's
+     available inner width is 1700 - 2*32 (.card's own padding) = 1636px;
+     a 5th column would need 5*min + 4*16 <= 1636px, i.e. min <= 314.4px,
+     so anything from ~315px up to ~397px (where a 4th column itself would
+     stop fitting) keeps it at a stable 4 across -- 340px sits comfortably
+     in the middle of that range with room either side. Narrower screens
+     still fall back to 3/2/1 columns exactly as before. */
+  .cal-year { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px,1fr)); gap:16px; }
   .cal-month { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
   .cal-month.is-current { border-color:var(--accent); box-shadow:0 0 0 2px rgba(154,42,42,.12); }
   /* Phase 71: "differentiate between this year and next" -- the grid
@@ -244,7 +251,19 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
   .cal-entry { display:flex; align-items:center; gap:10px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
   .cal-entry:last-child { border-bottom:none; }
   .cal-entry.is-today { background:var(--error-bg); margin:0 -8px; padding:6px 8px; border-radius:8px; border-bottom-color:transparent; }
-  .cal-entry-day { flex:0 0 auto; font-weight:700; color:var(--ink-soft); min-width:22px; text-align:right; }
+  .cal-entry-day { flex:0 0 auto; font-weight:700; color:var(--ink-soft); min-width:22px; text-align:right; white-space:nowrap; }
+  /* Phase 89: the ordinal letters ("th"/"st"/"nd"/"rd") ride as a true
+     superscript on the day number -- <sup> already shrinks/raises text by
+     default, this just tightens the gap and keeps the weight lighter than
+     the number itself so "15th" doesn't read as "15 TH". */
+  .cal-entry-day-suffix { font-size:0.68em; font-weight:600; margin-left:1px; }
+  /* Divider between the day number and the rest of the entry -- a plain
+     vertical rule, stretched to the row's own height (align-self:stretch
+     overrides the row's align-items:center for just this one child) so it
+     reads as a column divider rather than a short centered tick, however
+     many lines the title next to it wraps onto. */
+  .cal-entry-divider { flex:0 0 auto; align-self:stretch; width:1px; background:var(--line); }
+  .cal-entry.is-today .cal-entry-divider { background:var(--accent); opacity:.35; }
   .cal-entry-body { flex:1 1 auto; min-width:0; display:block; }
   .cal-entry-title { color:var(--ink); }
   /* Phase 70: each .cal-month card is only ~260px wide (see .cal-year's
@@ -408,7 +427,8 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
             <?php foreach ($byMonth[$num] as $e): ?>
               <?php $isToday = $e['month'] === $todayMonth && $e['day'] === $todayDay; ?>
               <div class="cal-entry<?= $isToday ? ' is-today' : '' ?>">
-                <span class="cal-entry-day"><?= (int) $e['day'] ?></span>
+                <span class="cal-entry-day"><?= (int) $e['day'] ?><sup class="cal-entry-day-suffix"><?= ourthology_ordinal_suffix((int) $e['day']) ?></sup></span>
+                <span class="cal-entry-divider" aria-hidden="true"></span>
                 <span class="cal-entry-body">
                   <span class="cal-entry-title"><?= htmlspecialchars($e['title'], ENT_QUOTES) ?></span>
                   <span class="cal-entry-meta-row">
