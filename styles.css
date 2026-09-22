@@ -15,6 +15,12 @@
   --on-accent: #FBF8F1;
   --error: #9A2A2A;
   --error-bg: #F1DCDC;
+  /* Phase 85: was only ever defined locally inside tree.php's and
+     timeline.php's own :root overrides (identical value in both) --
+     centralized here now that .segmented (below) needs it on every
+     page that uses that format, including pages that never defined
+     it themselves (calendar.php, edit_person.php, pending.php). */
+  --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
 }
 
 * { box-sizing: border-box; }
@@ -278,3 +284,26 @@ a.btn-secondary:hover { background: var(--paper-2); }
   .post-tour-arrow-inner { animation: postTourArrowBounce .7s ease-in-out 4 both, postTourArrowFadeOut .5s ease-in 2.9s forwards; }
   @keyframes postTourArrowBounce { 0%, 100% { transform:translateY(0); } 50% { transform:translateY(10px); } }
   @keyframes postTourArrowFadeOut { to { opacity:0; } }
+
+/* ---------- segmented pill groups (Phase 85) ----------
+   Started life inline in timeline.php, styling only the River/Rings/
+   Spiral view toggle. Centralized here now that includes/nav.php's
+   shared primary nav (My tree / My timeline / Family calendar /
+   Pending) and every page's own secondary "other buttons" group both
+   use this same format too, across pages that didn't all define the
+   same CSS variables locally (--shadow in particular -- see :root
+   above). button/a/span all get the same pill treatment: a real toggle
+   button (River/Rings/Spiral), a real link (nav items, most of the
+   "other buttons"), and a plain non-interactive "you are here" label
+   (the current-page item in the primary nav) all render identically. */
+.segmented { display:inline-flex; flex-wrap:wrap; background:var(--paper-2); border:1px solid var(--line); border-radius:999px; padding:4px; gap:2px; box-shadow:var(--shadow); }
+.segmented button, .segmented a, .segmented span { border:none; background:transparent; color:var(--ink-soft); font-weight:700; font-size:13px; padding:7px 13px; border-radius:999px; cursor:pointer; transition:background .15s ease,color .15s ease,transform .1s ease; white-space:nowrap; text-decoration:none; display:inline-block; font-family:inherit; }
+.segmented button:hover, .segmented a:hover { color:var(--ink); }
+.segmented button.active, .segmented a.active, .segmented span.active { background:var(--accent); color:var(--on-accent); transform:scale(1.04); cursor:default; }
+/* The one item that's always brand-red regardless of active/current-page
+   state -- "Send a Message" in each page's secondary button group. */
+.segmented .accent-item, .segmented .accent-item:hover { background:var(--accent); color:var(--on-accent); }
+/* Pending, when there's something waiting on you, in a group where it
+   isn't the active/current-page item -- replaces the old .nav a.badge
+   treatment (a different pill shape that doesn't fit inside .segmented). */
+.segmented a.has-pending { color:var(--accent); font-weight:800; }

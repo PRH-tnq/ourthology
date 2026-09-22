@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/nav.php';
 require_once __DIR__ . '/includes/calendar.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
@@ -164,7 +165,7 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <style>
   body { align-items: flex-start; }
   .wide { max-width: min(95vw, 1100px); }
@@ -289,14 +290,14 @@ $pendingCount = $pendingCount; // keep parity with tree.php's nav badge naming
 
     <div class="nav">
       <div class="nav-links">
-        <a href="/timeline.php">My timeline</a>
-        <a href="/tree.php">My tree</a>
-        <a href="/pending.php" class="<?= $pendingCount ? 'badge' : '' ?>">Pending<?= $pendingCount ? " ($pendingCount)" : '' ?></a>
-        <!-- Phase 75: was ?send_card_anytime=1 / "Send a card" -- now opens
-             the unified postcard/letter/greetings-card pop-up on timeline.php
-             instead of jumping straight to a greetings card. -->
-        <a href="/timeline.php?send_message=1" class="linklet-btn" style="text-decoration:none;">Send a message</a>
-        <button type="button" id="printCalendarBtn" class="linklet-btn" onclick="window.print()">Print calendar</button>
+        <?= ourthology_render_primary_nav('calendar', $pendingCount) ?>
+        <div class="segmented">
+          <!-- Phase 75: was ?send_card_anytime=1 / "Send a card" -- now opens
+               the unified postcard/letter/greetings-card pop-up on timeline.php
+               instead of jumping straight to a greetings card. -->
+          <a href="/timeline.php?send_message=1" class="accent-item">Send a message</a>
+          <button type="button" id="printCalendarBtn" onclick="window.print()">Print calendar</button>
+        </div>
       </div>
       <div class="whoami">
         Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>

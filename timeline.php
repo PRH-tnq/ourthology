@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/nav.php';
 require_once __DIR__ . '/includes/entries.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/memory_tags.php';
@@ -25,6 +26,13 @@ $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
 $myPerson = person_row($pdo, $myPersonId);
 $myGroup = (int) $myPerson['family_group_id'];
+
+// Phase 85: for includes/nav.php's shared primary nav's Pending badge --
+// timeline.php never needed this count before (its old nav-links never
+// linked to Pending at all). Same narrower relationships+partnerships-only
+// count tree.php's and calendar.php's nav badges already used.
+$navPendingCounts = fetch_pending_for_user($pdo, (int) $me['user_id']);
+$navPendingCount = count($navPendingCounts['relationships']) + count($navPendingCounts['partnerships']);
 
 $targetId = filter_var($_GET['person_id'] ?? $myPersonId, FILTER_VALIDATE_INT);
 if ($targetId === false) {
@@ -557,7 +565,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -1031,10 +1039,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   /* ---------- controls ---------- */
   .controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin: 14px 0 18px; }
-  .segmented { display:inline-flex; background:var(--paper-2); border:1px solid var(--line); border-radius:999px; padding:4px; gap:2px; box-shadow:var(--shadow); }
-  .segmented button { border:none; background:transparent; color:var(--ink-soft); font-weight:700; font-size:13px; padding:7px 13px; border-radius:999px; cursor:pointer; transition:background .15s ease,color .15s ease,transform .1s ease; white-space:nowrap; }
-  .segmented button:hover { color:var(--ink); }
-  .segmented button.active { background:var(--accent); color:var(--on-accent); transform:scale(1.04); }
+  /* Phase 85: .segmented's own box/pill rules moved to the shared
+     styles.css (now used by includes/nav.php's primary nav and by every
+     page's secondary button group too, not just River/Rings/Spiral here) --
+     only this page's own font-family override for it stays local, below. */
   /* Phase 75: the postcard/letter/greetings-card switcher sits inside the
      narrow gcard-box (380px) as well as the wider postcard-box, and both
      boxes' own "x" close buttons are absolutely positioned in that same
@@ -1426,10 +1434,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
       <div class="nav">
         <div class="nav-links">
-          <a href="/tree.php" id="tourMyTree">My tree</a>
-          <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
-          <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn" class="linklet-btn">Memory planner</button><?php endif; ?>
-          <button type="button" id="sendMessageBtn" class="linklet-btn">Send a message</button>
+          <?= ourthology_render_primary_nav('timeline', $navPendingCount, ['tree' => 'tourMyTree']) ?>
+          <div class="segmented">
+            <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
+            <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn">Memory planner</button><?php endif; ?>
+            <button type="button" id="sendMessageBtn" class="accent-item">Send a message</button>
+          </div>
           <span class="whoami">
             Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
             <form method="post" action="/logout.php"><button type="submit" class="linklet">Log out</button></form>

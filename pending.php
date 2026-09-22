@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/nav.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php'; // fetch_entry_media() — the memory preview below (Phase 32)
 require_once __DIR__ . '/includes/postcards.php';
@@ -21,6 +22,15 @@ if ($me === null) {
 $pdo = ourthology_pdo();
 $myUserId = (int) $me['user_id'];
 $myPersonId = (int) $me['person_id'];
+
+// Phase 85: for includes/nav.php's shared primary nav's Pending badge --
+// deliberately NOT reusing $incomingCount below, which is this page's own
+// broader "everything waiting on you" total (memory tags, postcards,
+// letters, cards included). Same narrower relationships+partnerships-only
+// count tree.php's and calendar.php's nav badges always used, so the
+// number in the nav pill matches what it shows on every other page.
+$navPendingCounts = fetch_pending_for_user($pdo, $myUserId);
+$navPendingCount = count($navPendingCounts['relationships']) + count($navPendingCounts['partnerships']);
 
 $notice = null;
 $errors = [];
@@ -301,8 +311,15 @@ function ourthology_pending_memory_preview_html(array $row): string
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <style>
+  /* Phase 85: this page had no .nav/.nav-links of its own before -- it
+     only ever linked back to tree.php via the plain .foot-link at the
+     bottom. Same minimal rule as tree.php/timeline.php/calendar.php/
+     edit_person.php, just for the one row holding the new shared
+     primary nav (includes/nav.php). */
+  .nav { display:flex; gap:10px 16px; flex-wrap:wrap; align-items:center; margin: 4px 0 18px; }
+  .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
   .req-card { border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:14px; background:#fff; }
   .req-when { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-faint); margin-bottom:6px; }
   .btn-small { width:auto; margin:0 8px 0 0; padding:6px 14px; }
@@ -527,6 +544,12 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="brand-text" style="display:flex;flex-direction:column;">
         <p class="wordmark" style="margin:0;">ourthology<span class="tld">.com</span></p>
         <p class="subtitle" style="margin:3px 0 0;">an anthology of us.</p>
+      </div>
+    </div>
+
+    <div class="nav">
+      <div class="nav-links">
+        <?= ourthology_render_primary_nav('pending', $navPendingCount) ?>
       </div>
     </div>
 

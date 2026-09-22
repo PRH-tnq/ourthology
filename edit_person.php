@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/nav.php';
 require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/custom_audience.php';
@@ -22,6 +23,13 @@ $pdo = ourthology_pdo();
 $myPersonId = (int) $me['person_id'];
 $myUserId = (int) $me['user_id'];
 $myGroup = (int) person_row($pdo, $myPersonId)['family_group_id'];
+
+// Phase 85: for includes/nav.php's shared primary nav's Pending badge --
+// this page never linked to Pending (or Family calendar) at all before.
+// Same narrower relationships+partnerships-only count tree.php's and
+// calendar.php's nav badges already used.
+$navPendingCounts = fetch_pending_for_user($pdo, $myUserId);
+$navPendingCount = count($navPendingCounts['relationships']) + count($navPendingCounts['partnerships']);
 
 ourthology_start_session();
 
@@ -626,7 +634,7 @@ if ($postedProfile) {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Edit person — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion for the profile-photo upload below. Pinned to the one
      version this library has ever published. If this fails to load, the
@@ -748,8 +756,7 @@ if ($postedProfile) {
 
       <div class="nav">
         <div class="nav-links">
-          <a href="/timeline.php">My timeline</a>
-          <a href="/tree.php">My tree</a>
+          <?= ourthology_render_primary_nav('', $navPendingCount) ?>
         </div>
         <div class="whoami">
           Signed in as <strong><?= htmlspecialchars($me['email'], ENT_QUOTES) ?></strong>
