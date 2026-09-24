@@ -35,7 +35,25 @@ require_once __DIR__ . '/media.php';
  * etc.) — every row that references this person has to be removed or
  * repointed before the persons row itself can go.
  */
-function ourthology_erase_person(PDO $pdo, int $personId): void
+/**
+ * Phase 91: every file an erase_* function below wants gone is routed
+ * through here. With no $deferred list it's deleted straight away (the
+ * original Phase 59 behaviour); pass an array by reference and the path
+ * is collected instead, so the caller can delete the files only AFTER
+ * its transaction has actually committed -- a rolled-back delete then
+ * leaves both the rows and their files exactly as they were, rather than
+ * rows pointing at files that were already removed.
+ */
+function ourthology_erase_file(string $relativePath, ?array &$deferred): void
+{
+    if ($deferred === null) {
+        delete_media_file($relativePath);
+    } else {
+        $deferred[] = $relativePath;
+    }
+}
+
+function ourthology_erase_person(PDO $pdo, int $personId, ?array &$deferredFiles = null): void
 {
     $person = person_row($pdo, $personId);
     if ($person === null) {
@@ -45,7 +63,7 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
     // --- files on disk, collected/removed before their rows disappear ---
 
     if (!empty($person['avatar_path'])) {
-        delete_media_file($person['avatar_path']);
+        ourthology_erase_file($person['avatar_path'], $deferredFiles);
     }
 
     $mediaStmt = $pdo->prepare(
@@ -55,13 +73,25 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
     );
     $mediaStmt->execute(['pid' => $personId]);
     foreach ($mediaStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-        delete_media_file($path);
+        ourthology_erase_file($path, $deferredFiles);
     }
 
     $postcardImgStmt = $pdo->prepare('SELECT image_path FROM postcards WHERE sender_person_id = :pid');
     $postcardImgStmt->execute(['pid' => $personId]);
     foreach ($postcardImgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-        delete_media_file($path);
+        ourthology_erase_file($path, $deferredFiles);
+    }
+
+    // Phase 91: greeting cards (Phase 67) postdate this function and were
+    // never cleaned up here -- a card this person sent OR received kept a
+    // foreign key to their persons row (fk_card_sender/fk_card_recipient,
+    // no cascade), so deleting any account that had ever sent or been
+    // sent a card failed outright and rolled back. Every card either side
+    // of them is removed, like a letter (cards are single-recipient too).
+    $cardImgStmt = $pdo->prepare('SELECT image_path FROM greeting_cards WHERE sender_person_id = :pid OR recipient_person_id = :pid2');
+    $cardImgStmt->execute(['pid' => $personId, 'pid2' => $personId]);
+    foreach ($cardImgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
+        ourthology_erase_file($path, $deferredFiles);
     }
 
     $letterIdsStmt = $pdo->prepare('SELECT id FROM letters WHERE sender_person_id = :pid OR recipient_person_id = :pid2');
@@ -73,7 +103,7 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
         $imgStmt = $pdo->prepare("SELECT file_path FROM letter_images WHERE letter_id IN ($in)");
         $imgStmt->execute($ownLetterIds);
         foreach ($imgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-            delete_media_file($path);
+            ourthology_erase_file($path, $deferredFiles);
         }
     }
 
@@ -89,7 +119,7 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
         if ($lid !== null && in_array($lid, $ownLetterIds, true)) {
             continue; // file already removed above; row cascades when the letter row goes
         }
-        delete_media_file($img['file_path']);
+        ourthology_erase_file($img['file_path'], $deferredFiles);
     }
 
     // --- rows referencing this person, deleted/severed before the
@@ -108,6 +138,12 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
         $in = implode(',', array_fill(0, count($ownLetterIds), '?'));
         $pdo->prepare("DELETE FROM letters WHERE id IN ($in)")->execute($ownLetterIds);
     }
+
+    // greeting cards this person sent or received (see the file cleanup
+    // above) -- also clears fk_card_entry references into this person's
+    // own saved timeline_entries ahead of deleting those below.
+    $pdo->prepare('DELETE FROM greeting_cards WHERE sender_person_id = :pid OR recipient_person_id = :pid2')
+        ->execute(['pid' => $personId, 'pid2' => $personId]);
 
     // any remaining letter_images uploaded by this person (abandoned
     // draft, or into a letter that wasn't theirs to send/receive)
@@ -158,7 +194,7 @@ function ourthology_erase_person(PDO $pdo, int $personId): void
  * calendar_events each carry their own family_group_id column directly
  * rather than needing a join through persons for every row.
  */
-function ourthology_erase_family_group(PDO $pdo, int $familyGroupId): void
+function ourthology_erase_family_group(PDO $pdo, int $familyGroupId, ?array &$deferredFiles = null): void
 {
     $personsStmt = $pdo->prepare('SELECT id, avatar_path FROM persons WHERE family_group_id = :gid');
     $personsStmt->execute(['gid' => $familyGroupId]);
@@ -173,7 +209,7 @@ function ourthology_erase_family_group(PDO $pdo, int $familyGroupId): void
 
     foreach ($persons as $p) {
         if (!empty($p['avatar_path'])) {
-            delete_media_file($p['avatar_path']);
+            ourthology_erase_file($p['avatar_path'], $deferredFiles);
         }
     }
     $mediaStmt = $pdo->prepare(
@@ -183,20 +219,35 @@ function ourthology_erase_family_group(PDO $pdo, int $familyGroupId): void
     );
     $mediaStmt->execute($personIds);
     foreach ($mediaStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-        delete_media_file($path);
+        ourthology_erase_file($path, $deferredFiles);
     }
     $pcImgStmt = $pdo->prepare('SELECT image_path FROM postcards WHERE family_group_id = :gid');
     $pcImgStmt->execute(['gid' => $familyGroupId]);
     foreach ($pcImgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-        delete_media_file($path);
+        ourthology_erase_file($path, $deferredFiles);
     }
     $letterImgStmt = $pdo->prepare('SELECT file_path FROM letter_images WHERE family_group_id = :gid');
     $letterImgStmt->execute(['gid' => $familyGroupId]);
     foreach ($letterImgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
-        delete_media_file($path);
+        ourthology_erase_file($path, $deferredFiles);
+    }
+
+    // Phase 91: greeting cards -- see ourthology_erase_person() above.
+    // Scoped by family_group_id like postcards/letters, plus any card
+    // addressed to or from someone in this group from elsewhere.
+    $cardImgStmt = $pdo->prepare(
+        "SELECT image_path FROM greeting_cards
+         WHERE family_group_id = ? OR sender_person_id IN ($in) OR recipient_person_id IN ($in)"
+    );
+    $cardImgStmt->execute(array_merge([$familyGroupId], $personIds, $personIds));
+    foreach ($cardImgStmt->fetchAll(PDO::FETCH_COLUMN) as $path) {
+        ourthology_erase_file($path, $deferredFiles);
     }
 
     // --- rows, in FK-safe order ---
+
+    $pdo->prepare("DELETE FROM greeting_cards WHERE family_group_id = ? OR sender_person_id IN ($in) OR recipient_person_id IN ($in)")
+        ->execute(array_merge([$familyGroupId], $personIds, $personIds));
 
     // postcards cascade their postcard_recipients rows automatically
     $pdo->prepare('DELETE FROM postcards WHERE family_group_id = :gid')->execute(['gid' => $familyGroupId]);
@@ -263,6 +314,7 @@ function ourthology_account_deletion_preview(PDO $pdo, int $userId): array
             'partnerships'  => $q('SELECT COUNT(*) FROM partnerships WHERE person_a_id = :pid OR person_b_id = :pid2', ['pid' => $personId, 'pid2' => $personId]),
             'postcards'     => $q('SELECT COUNT(*) FROM postcards WHERE sender_person_id = :pid', ['pid' => $personId]),
             'letters'       => $q('SELECT COUNT(*) FROM letters WHERE sender_person_id = :pid OR recipient_person_id = :pid2', ['pid' => $personId, 'pid2' => $personId]),
+            'cards'         => $q('SELECT COUNT(*) FROM greeting_cards WHERE sender_person_id = :pid OR recipient_person_id = :pid2', ['pid' => $personId, 'pid2' => $personId]),
         ];
     };
 
@@ -336,7 +388,7 @@ function ourthology_account_deletion_preview(PDO $pdo, int $userId): array
  * a transaction boundary, the same pattern edit_person.php's
  * delete_person action already uses.
  */
-function ourthology_delete_own_account(PDO $pdo, int $userId): void
+function ourthology_delete_own_account(PDO $pdo, int $userId, ?array &$deferredFiles = null): void
 {
     $preview = ourthology_account_deletion_preview($pdo, $userId);
     if ($preview['home'] === null) {
@@ -355,11 +407,11 @@ function ourthology_delete_own_account(PDO $pdo, int $userId): void
 
     if ($preview['peripheral'] !== null) {
         if ($preview['peripheral_qualifies_for_group_wipe']) {
-            ourthology_erase_family_group($pdo, (int) $preview['peripheral']['family_group_id']);
+            ourthology_erase_family_group($pdo, (int) $preview['peripheral']['family_group_id'], $deferredFiles);
         } else {
-            ourthology_erase_person($pdo, (int) $preview['peripheral']['person_id']);
+            ourthology_erase_person($pdo, (int) $preview['peripheral']['person_id'], $deferredFiles);
         }
     }
 
-    ourthology_erase_person($pdo, (int) $preview['home']['person_id']);
+    ourthology_erase_person($pdo, (int) $preview['home']['person_id'], $deferredFiles);
 }

@@ -57,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string) ($_GET['action'] ?? '') ===
         'owner_person_id'        => (int) $trip['owner_person_id'],
         'visibility'             => $trip['visibility'],
         'owner_family_group_id'  => (int) $trip['owner_family_group_id'],
+        'owner_claimed_by'       => $trip['owner_claimed_by'],
     ], $myPersonId, $myGroup);
 
     if (!$viewable) {
@@ -376,6 +377,11 @@ foreach ($rawEvents as $idx => $ev) {
     $memoryFilesField = trip_flatten_event_files($rawEventFiles, $idx, 'memory_media');
     $newPlanFiles = normalize_multi_file_upload($planFilesField);
     $newMemoryFiles = normalize_multi_file_upload($memoryFilesField);
+    // Phase 91: photos the planner already uploaded one at a time, in
+    // resumable chunks (media_upload.php), arrive as tokens -- already
+    // validated and stored under this trip's owner.
+    $stagedPlan = media_staging_resolve((array) ($ev['staged_plan_media'] ?? []), $myUserId, $targetPersonId, 'entry');
+    $stagedMemory = media_staging_resolve((array) ($ev['staged_memory_media'] ?? []), $myUserId, $targetPersonId, 'entry');
 
     $existingPlanIds = [];
     $existingMemoryIds = [];
@@ -392,10 +398,10 @@ foreach ($rawEvents as $idx => $ev) {
         fn ($v) => filter_var($v, FILTER_VALIDATE_INT) !== false
     )), $existingMemoryIds));
 
-    if (count($keptPlanIds) + count($newPlanFiles) > TRIP_MAX_MEDIA_PER_ROLE) {
+    if (count($keptPlanIds) + count($newPlanFiles) + count($stagedPlan['files']) > TRIP_MAX_MEDIA_PER_ROLE) {
         $errors[] = 'Attach at most ' . TRIP_MAX_MEDIA_PER_ROLE . ' plan photos to one event.';
     }
-    if (count($keptMemoryIds) + count($newMemoryFiles) > TRIP_MAX_MEDIA_PER_ROLE) {
+    if (count($keptMemoryIds) + count($newMemoryFiles) + count($stagedMemory['files']) > TRIP_MAX_MEDIA_PER_ROLE) {
         $errors[] = 'Attach at most ' . TRIP_MAX_MEDIA_PER_ROLE . ' memory photos to one event.';
     }
 
@@ -405,7 +411,8 @@ foreach ($rawEvents as $idx => $ev) {
     // regardless of how empty it looks, since that's a deliberate clear-
     // out of that event's own text, not an unused blank row.
     $isBlankNewRow = !$belongsToTrip && $rawTitle === '' && $evDateResult['date'] === null
-        && $planNotes === '' && $memoryNotes === '' && !$newPlanFiles && !$newMemoryFiles;
+        && $planNotes === '' && $memoryNotes === '' && !$newPlanFiles && !$newMemoryFiles
+        && !$stagedPlan['files'] && !$stagedMemory['files'];
     if ($isBlankNewRow) {
         continue;
     }
@@ -423,6 +430,8 @@ foreach ($rawEvents as $idx => $ev) {
         'memoryFilesField' => $memoryFilesField,
         'newPlanCount'     => count($newPlanFiles),
         'newMemoryCount'   => count($newMemoryFiles),
+        'stagedPlan'       => $stagedPlan,
+        'stagedMemory'     => $stagedMemory,
     ];
 }
 
@@ -432,6 +441,13 @@ if ($errors) {
     exit;
 }
 
+$consumeTokens = [];
+// Phase 91: files are only deleted once the save commits, and files this
+// request itself wrote are removed again if it fails -- previously a
+// failed save could leave either kept rows pointing at deleted files, or
+// new files on disk with no row pointing at them.
+$deleteAfterCommit = [];
+$writtenThisRequest = [];
 try {
     $pdo->beginTransaction();
 
@@ -470,7 +486,7 @@ try {
                 $pathStmt = $pdo->prepare("SELECT file_path FROM media WHERE id IN ($ph)");
                 $pathStmt->execute($allRemovedMediaIds);
                 foreach ($pathStmt->fetchAll(PDO::FETCH_COLUMN) as $fp) {
-                    delete_media_file((string) $fp);
+                    $deleteAfterCommit[] = (string) $fp; // Phase 91: removed only once the save commits
                 }
                 $pdo->prepare("DELETE FROM media WHERE id IN ($ph)")->execute($allRemovedMediaIds);
             }
@@ -541,7 +557,7 @@ try {
                     $pathStmt = $pdo->prepare("SELECT file_path FROM media WHERE id IN ($ph)");
                     $pathStmt->execute(array_values($removedIds));
                     foreach ($pathStmt->fetchAll(PDO::FETCH_COLUMN) as $fp) {
-                        delete_media_file((string) $fp);
+                        $deleteAfterCommit[] = (string) $fp;
                     }
                     $pdo->prepare("DELETE FROM media WHERE id IN ($ph)")->execute(array_values($removedIds));
                 }
@@ -559,10 +575,17 @@ try {
         }
 
         foreach (['plan' => 'planFilesField', 'memory' => 'memoryFilesField'] as $role => $fieldKey) {
-            if (($role === 'plan' ? $pe['newPlanCount'] : $pe['newMemoryCount']) === 0) {
+            $stagedForRole = $role === 'plan' ? $pe['stagedPlan'] : $pe['stagedMemory'];
+            $directCount = $role === 'plan' ? $pe['newPlanCount'] : $pe['newMemoryCount'];
+            if ($directCount === 0 && !$stagedForRole['files']) {
                 continue;
             }
-            $stored = store_uploaded_media_files($pe[$fieldKey], $targetPersonId);
+            $direct = $directCount > 0 ? store_uploaded_media_files($pe[$fieldKey], $targetPersonId) : [];
+            foreach ($direct as $d) {
+                $writtenThisRequest[] = $d['file_path'];
+            }
+            $stored = array_merge($stagedForRole['files'], $direct);
+            $consumeTokens = array_merge($consumeTokens, $stagedForRole['tokens']);
             foreach ($stored as $sortIdx => $s) {
                 $mediaInsert->execute([
                     'eid' => $entryId, 'path' => $s['file_path'], 'mime' => $s['mime_type'],
@@ -575,6 +598,10 @@ try {
     }
 
     $pdo->commit();
+    media_staging_consume($consumeTokens, $myUserId);
+    foreach ($deleteAfterCommit as $fp) {
+        delete_media_file($fp);
+    }
 
     $_SESSION['flash_trip_sent'] = $isEditing ? 'Trip plan updated.' : 'Trip plan saved to the timeline.';
     header('Location: /timeline.php'
@@ -583,11 +610,17 @@ try {
     exit;
 } catch (RuntimeException $e) {
     $pdo->rollBack();
+    foreach ($writtenThisRequest as $fp) {
+        delete_media_file($fp);
+    }
     $_SESSION['flash_trip_error'] = $e->getMessage();
     header('Location: /timeline.php' . ($targetPersonId !== $myPersonId ? '?person_id=' . $targetPersonId : ''));
     exit;
 } catch (PDOException $e) {
     $pdo->rollBack();
+    foreach ($writtenThisRequest as $fp) {
+        delete_media_file($fp);
+    }
     error_log('ourthology trip_plan error: ' . $e->getMessage());
     $_SESSION['flash_trip_error'] = 'Something went wrong saving that trip. Please try again.';
     header('Location: /timeline.php' . ($targetPersonId !== $myPersonId ? '?person_id=' . $targetPersonId : ''));

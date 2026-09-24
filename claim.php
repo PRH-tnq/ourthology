@@ -156,7 +156,7 @@ if (!$errors && !$alreadyLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claim your record — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 </head>
 <body>
   <div class="card">

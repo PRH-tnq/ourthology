@@ -275,7 +275,7 @@ foreach ($VIA_NEEDED as $rel => $cfg) {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $existingPerson !== null ? 'Attach ' . htmlspecialchars(person_display_name($existingPerson), ENT_QUOTES) : 'Add a relative' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <style>
   select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
   .field-group { margin-top:0; }

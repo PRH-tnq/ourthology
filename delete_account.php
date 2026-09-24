@@ -57,9 +57,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$errors) {
         try {
+            // Phase 91: files are only removed once the transaction has
+            // actually committed, so a failure part-way through really
+            // does leave "nothing changed" -- rows AND files.
+            $filesToDelete = [];
             $pdo->beginTransaction();
-            ourthology_delete_own_account($pdo, $userId);
+            ourthology_delete_own_account($pdo, $userId, $filesToDelete);
             $pdo->commit();
+            foreach ($filesToDelete as $path) {
+                delete_media_file($path);
+            }
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -79,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $preview = ourthology_account_deletion_preview($pdo, $userId);
-$homeCounts = $preview['home_counts'] ?? ['memories' => 0, 'relationships' => 0, 'partnerships' => 0, 'postcards' => 0, 'letters' => 0];
+$homeCounts = $preview['home_counts'] ?? ['memories' => 0, 'relationships' => 0, 'partnerships' => 0, 'postcards' => 0, 'letters' => 0, 'cards' => 0];
 $hasPeripheral = $preview['peripheral'] !== null;
 $peripheralQualifies = $preview['peripheral_qualifies_for_group_wipe'];
 ?>
@@ -91,7 +98,7 @@ $peripheralQualifies = $preview['peripheral_qualifies_for_group_wipe'];
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Delete my account — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <style>
   .danger-box { background:var(--error-bg); border:1px solid var(--error); border-radius:10px; padding:14px 16px; margin:16px 0; }
   .danger-box h3 { margin:0 0 6px; color:var(--error); }
@@ -139,7 +146,7 @@ $peripheralQualifies = $preview['peripheral_qualifies_for_group_wipe'];
           <li>Your name, dates, and profile photo — <strong>deleted</strong></li>
           <li><?= $homeCounts['memories'] ?> memor<?= $homeCounts['memories'] === 1 ? 'y' : 'ies' ?> on your timeline — <strong>deleted</strong></li>
           <li><?= $homeCounts['relationships'] ?> relationship<?= $homeCounts['relationships'] === 1 ? '' : 's' ?> and <?= $homeCounts['partnerships'] ?> partnership<?= $homeCounts['partnerships'] === 1 ? '' : 's' ?> — <strong>removed</strong> (everyone else's own records stay exactly as they are)</li>
-          <li><?= $homeCounts['postcards'] ?> postcard<?= $homeCounts['postcards'] === 1 ? '' : 's' ?> and <?= $homeCounts['letters'] ?> letter<?= $homeCounts['letters'] === 1 ? '' : 's' ?> you sent or received — <strong>deleted</strong></li>
+          <li><?= $homeCounts['postcards'] ?> postcard<?= $homeCounts['postcards'] === 1 ? '' : 's' ?>, <?= $homeCounts['letters'] ?> letter<?= $homeCounts['letters'] === 1 ? '' : 's' ?> and <?= $homeCounts['cards'] ?> greeting card<?= $homeCounts['cards'] === 1 ? '' : 's' ?> you sent or received — <strong>deleted</strong></li>
         </ul>
       </div>
 

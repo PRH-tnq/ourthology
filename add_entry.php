@@ -226,7 +226,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         ? $_FILES['media']
         : ['name' => [], 'type' => [], 'tmp_name' => [], 'error' => [], 'size' => []];
     $selectedFiles = normalize_multi_file_upload($rawMediaField);
-    $hasNewFiles = count($selectedFiles) > 0;
+    // Phase 91: files the browser already uploaded one at a time, in
+    // chunks, via media_upload.php (see includes/media.php) arrive here as
+    // tokens rather than as file uploads -- already validated and stored
+    // under this same target person, so they just join $storedList below.
+    $staged = media_staging_resolve((array) ($_POST['staged_media'] ?? []), (int) $me['user_id'], $targetPersonId, 'entry');
+    $hasNewFiles = count($selectedFiles) > 0 || count($staged['files']) > 0;
 
     // Never trust the submitted "kept" id list blindly — only ids that are
     // actually this entry's own existing media rows can ever be "kept";
@@ -241,9 +246,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
         ));
         $keptExistingIds = array_values(array_intersect($submittedKeptIds, array_keys($existingMediaById)));
         $removedExistingIds = array_values(array_diff(array_keys($existingMediaById), $keptExistingIds));
-        if (count($keptExistingIds) + count($selectedFiles) > MEDIA_MAX_FILES_PER_ENTRY) {
+        if (count($keptExistingIds) + count($selectedFiles) + count($staged['files']) > MEDIA_MAX_FILES_PER_ENTRY) {
             $errors[] = 'Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files to one entry.';
         }
+    }
+    if (!$isEditing && count($selectedFiles) + count($staged['files']) > MEDIA_MAX_FILES_PER_ENTRY) {
+        $errors[] = 'Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files to one entry.';
     }
     $hasAnyMedia = $hasNewFiles || count($keptExistingIds) > 0;
 
@@ -267,6 +275,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     }
 
     if (!$errors) {
+        $directStored = [];
+        $removedFilesAfterCommit = [];
         try {
             $pdo->beginTransaction();
 
@@ -276,7 +286,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             // leaves nothing new written to disk) before any existing file
             // is actually deleted below, and before the entry itself is
             // inserted/updated.
-            $storedList = $hasNewFiles ? store_uploaded_media_files($rawMediaField, $targetPersonId) : [];
+            $directStored = $selectedFiles ? store_uploaded_media_files($rawMediaField, $targetPersonId) : [];
+            $storedList = array_merge($staged['files'], $directStored);
 
             if ($entryKind === 'diary') {
                 $dbEntryType = 'diary';
@@ -325,8 +336,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 sync_memory_tags($pdo, $entryId, $tagPersonIds, $familyPersonsById, (int) $me['user_id']);
 
                 if ($removedExistingIds) {
+                    // Phase 91: the files themselves are only deleted once the
+                    // transaction commits (below) -- deleting them here meant a
+                    // save that then failed rolled the rows back but left them
+                    // pointing at files that were already gone.
                     foreach ($removedExistingIds as $rid) {
-                        delete_media_file($existingMediaById[$rid]['file_path']);
+                        $removedFilesAfterCommit[] = $existingMediaById[$rid]['file_path'];
                     }
                     $placeholders = implode(',', array_fill(0, count($removedExistingIds), '?'));
                     $pdo->prepare("DELETE FROM media WHERE timeline_entry_id = ? AND id IN ($placeholders)")
@@ -371,6 +386,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             }
 
             $pdo->commit();
+            media_staging_consume($staged['tokens'], (int) $me['user_id']);
+            foreach ($removedFilesAfterCommit as $path) {
+                delete_media_file($path);
+            }
             if ($isEditing) {
                 header('Location: /timeline.php' . ($targetIsSelf ? '' : '?person_id=' . $targetPersonId));
             } else {
@@ -386,6 +405,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
             $errors[] = $e->getMessage();
         } catch (PDOException $e) {
             $pdo->rollBack();
+            // Phase 91: files written by THIS request would otherwise be
+            // left on disk with no media row pointing at them. (Chunk-
+            // uploaded ones are left alone -- still valid for a retry, and
+            // swept after a day if never used.)
+            foreach ($directStored as $done) {
+                delete_media_file($done['file_path']);
+            }
             error_log('ourthology add_entry error: ' . $e->getMessage());
             $errors[] = 'Something went wrong saving that entry. Please try again.';
         }
@@ -430,7 +456,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -442,6 +468,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
      (wiring the Paste button) rather than only from a later
      user-triggered handler, so it has to already exist by then. -->
 <script src="/clipboard_paste.js?v=1"></script>
+<script src="/chunked_upload.js?v=1"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root { --accent-bg: #F1DCDC; }
@@ -599,6 +626,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       <div class="saving-card" role="status" aria-live="polite">
         <div class="saving-spinner" aria-hidden="true"></div>
         <h3><?= $isEditing ? 'Saving your changes' : 'Saving your memory' ?>&hellip;</h3>
+        <p id="savingProgress" hidden></p>
         <p><span id="savingTimerCount">0</span>s elapsed</p>
       </div>
     </div>
@@ -611,6 +639,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
         <input type="hidden" name="target_person_id" value="<?= $targetPersonId ?>">
       <?php endif; ?>
       <div id="keptMediaInputs"></div>
+      <div id="stagedMediaInputs"></div>
 
       <label>Type</label>
       <div class="radio-row">
@@ -721,6 +750,9 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     var input = document.getElementById('photoInput');
     var errorEl = document.getElementById('mediaError');
     var keptInputsContainer = document.getElementById('keptMediaInputs');
+    // Phase 91: the "Memory saved" confirmation view renders this same
+    // script with no composer on the page -- bail out rather than throw.
+    if (!dropzone) return;
 
     // Two backing lists merge into one visual grid: "kept" existing
     // server-side files (each just an id + display info — no File object,
@@ -933,6 +965,114 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
       window.ourthologyClipboardPaste.wire(pasteBtn, { onFiles: addFiles, onMessage: showError });
     }
 
+    // Phase 91: upload attachments one at a time, in small resumable
+    // chunks, BEFORE the form itself is submitted (see chunked_upload.js
+    // for why -- a single huge request was what failed on the iPad with
+    // "no internet connection"). The form then submits only the returned
+    // tokens, so the request that actually saves the memory is tiny. A
+    // browser without the uploader just submits the files the old way.
+    var form = document.querySelector('.card > form[enctype="multipart/form-data"]');
+    var stagedInputs = document.getElementById('stagedMediaInputs');
+    var overlay = document.getElementById('savingOverlay');
+    var progressEl = document.getElementById('savingProgress');
+    var uploader = window.ourthologyChunkedUpload;
+    var TARGET_PERSON_ID = <?= (int) $targetPersonId ?>;
+    var uploading = false;
+
+    function waitForConversions() {
+      return new Promise(function (resolve) {
+        (function check() {
+          if (!pending.some(function (it) { return it.kind === 'converting'; })) { resolve(); return; }
+          setTimeout(check, 300);
+        })();
+      });
+    }
+    function setProgress(text) {
+      if (!progressEl) return;
+      progressEl.hidden = !text;
+      progressEl.textContent = text || '';
+    }
+    function quickValidationError() {
+      var kind = (form.querySelector('input[name="entry_type"]:checked') || {}).value;
+      var body = (form.querySelector('#body') || {}).value || '';
+      var dateVals = ['occurred_day', 'occurred_month', 'occurred_year'].map(function (n) {
+        var el = form.querySelector('input[name="' + n + '"]');
+        return el ? el.value.trim() : '';
+      });
+      var filled = dateVals.filter(function (v) { return v !== ''; }).length;
+      if (kind === 'diary' && body.trim() === '') return 'Write something for a diary entry.';
+      if (filled > 0 && filled < 3) return 'Fill in the day, month, and year, or leave all three blank.';
+      return null;
+    }
+
+    if (form && uploader && uploader.supported) {
+      form.addEventListener('submit', function (evt) {
+        if (uploading) { evt.preventDefault(); return; }
+        if (!pending.length) return; // nothing to upload -- a normal (small) submit
+        evt.preventDefault();
+        var early = quickValidationError();
+        if (early) {
+          if (overlay) overlay.hidden = true;
+          showError(early);
+          errorEl.scrollIntoView({ block: 'center' });
+          return;
+        }
+        uploading = true;
+        form.setAttribute('data-uploading', '1');
+        showError('');
+        var csrf = (form.querySelector('input[name="csrf_token"]') || {}).value || '';
+        var wakeLock = null;
+        if (navigator.wakeLock && navigator.wakeLock.request) {
+          navigator.wakeLock.request('screen').then(function (l) { wakeLock = l; }).catch(function () {});
+        }
+        function releaseWake() { if (wakeLock) { wakeLock.release().catch(function () {}); wakeLock = null; } }
+
+        setProgress('Getting your files ready…');
+        waitForConversions().then(function () {
+          var todo = pending.filter(function (it) { return it.file && !it.token; });
+          var grand = todo.reduce(function (sum, it) { return sum + it.file.size; }, 0) || 1;
+          var doneBytes = 0;
+          var chain = Promise.resolve();
+          todo.forEach(function (item, i) {
+            chain = chain.then(function () {
+              return uploader.upload(item.file, {
+                csrf: csrf,
+                fields: { purpose: 'entry', target_person_id: String(TARGET_PERSON_ID) },
+                onProgress: function (sent) {
+                  var pct = Math.min(100, Math.round(((doneBytes + sent) / grand) * 100));
+                  setProgress('Uploading file ' + (i + 1) + ' of ' + todo.length + ' — ' + pct + '%');
+                }
+              }).then(function (token) {
+                item.token = token;
+                doneBytes += item.file.size;
+              });
+            });
+          });
+          return chain;
+        }).then(function () {
+          stagedInputs.innerHTML = pending.map(function (it) {
+            return it.token ? '<input type="hidden" name="staged_media[]" value="' + escapeHtml(it.token) + '">' : '';
+          }).join('');
+          input.disabled = true; // the files have already been sent -- don't send them twice
+          setProgress('Saving…');
+          releaseWake();
+          form.submit(); // plain submit: no second 'submit' event, so no loop
+        }).catch(function (err) {
+          uploading = false;
+          form.removeAttribute('data-uploading');
+          releaseWake();
+          setProgress('');
+          if (overlay) overlay.hidden = true;
+          var msg = (err && err.message) ? err.message : 'The upload stopped.';
+          if (!(err && err.fatal)) {
+            msg += ' This usually means the connection dropped for a moment (for example the iPad went to sleep or Wi-Fi switched). Nothing is lost — press Save again and it will carry on from where it stopped.';
+          }
+          showError(msg);
+          errorEl.scrollIntoView({ block: 'center' });
+        });
+      });
+    }
+
     render();
   })();
 
@@ -996,18 +1136,24 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
     var form = document.querySelector('.card > form[enctype="multipart/form-data"]');
     var overlay = document.getElementById('savingOverlay');
     var timerEl = document.getElementById('savingTimerCount');
+    var savingTimer = null;
     if (!form || !overlay) return;
-    form.addEventListener('submit', function () {
+    form.addEventListener('submit', function (evt) {
+      // Phase 91: the chunked uploader cancels the native submit; show the
+      // overlay only if that's because it's now uploading, not because a
+      // quick check stopped the save outright.
+      if (evt.defaultPrevented && form.getAttribute('data-uploading') !== '1') return;
       overlay.hidden = false;
       var seconds = 0;
       if (timerEl) timerEl.textContent = String(seconds);
-      setInterval(function () {
+      // Phase 91: cleared on a re-submit -- with the chunked uploader a
+      // failed upload now leaves this page open for another try, and two
+      // intervals would make the counter run double-speed.
+      if (savingTimer) clearInterval(savingTimer);
+      savingTimer = setInterval(function () {
         seconds += 1;
         if (timerEl) timerEl.textContent = String(seconds);
       }, 1000);
-      // No clearInterval: the whole page unloads within a moment either
-      // way (success redirects to the confirmation, an error re-renders
-      // this same page), taking the interval and the overlay with it.
     });
   })();
   </script>

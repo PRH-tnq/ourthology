@@ -40,6 +40,12 @@ function trip_entry_is_viewable_by(PDO $pdo, array $entry, int $viewerPersonId, 
     if ($entry['visibility'] === 'public' && (int) $entry['owner_family_group_id'] === $viewerFamilyGroupId) {
         return true;
     }
+    // Phase 91: same unclaimed-owner rule as can_view_media() -- an
+    // unclaimed person's timeline is managed by the whole family group.
+    if (array_key_exists('owner_claimed_by', $entry) && $entry['owner_claimed_by'] === null
+        && (int) $entry['owner_family_group_id'] === $viewerFamilyGroupId) {
+        return true;
+    }
     if ($entry['visibility'] === 'custom' && (int) $entry['owner_family_group_id'] === $viewerFamilyGroupId
         && person_in_custom_audience($pdo, (int) $entry['owner_person_id'], $viewerPersonId)) {
         return true;

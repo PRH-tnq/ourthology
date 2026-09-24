@@ -29,9 +29,8 @@ require_once __DIR__ . '/graph.php';
  */
 
 /**
- * True iff $personId's own blood lineage — everyone reachable from them
- * via relationships edges only, in either direction, transitively, NEVER
- * via a partnership — never reaches this family_group_id's own founding
+ * True iff $personId shares no ancestor (counting themselves) with this
+ * family_group_id's own founding
  * member (the person whose id this family_group_id literally IS: see
  * signup.php and ourthology_create_peripheral_tree() below, which both
  * mint a fresh group as its founder's own id, and merge_family_groups(),
@@ -80,27 +79,40 @@ function ourthology_is_in_law_only(PDO $pdo, int $personId): bool
          WHERE status = 'confirmed' AND parent_id IN (SELECT id FROM persons WHERE family_group_id = :gid)"
     );
     $relStmt->execute(['gid' => $founderId]);
-    $adjacency = [];
+    $parentsOf = [];
     foreach ($relStmt->fetchAll() as $r) {
-        $p = (int) $r['parent_id'];
-        $c = (int) $r['child_id'];
-        $adjacency[$p][] = $c;
-        $adjacency[$c][] = $p;
+        $parentsOf[(int) $r['child_id']][] = (int) $r['parent_id'];
     }
 
-    $visited = [$personId => true];
-    $queue = [$personId];
-    while ($queue) {
-        $current = array_pop($queue);
-        if ($current === $founderId) {
-            return false; // blood-reaches the group's own founder -- not in-law-only
-        }
-        foreach ($adjacency[$current] ?? [] as $next) {
-            if (!isset($visited[$next])) {
-                $visited[$next] = true;
-                $queue[] = $next;
+    // Phase 91 fix: "blood family" means sharing an ancestor with the
+    // founder (the founder themselves, their ancestors, and anyone
+    // descended from any of those -- siblings, cousins, children,
+    // grandchildren...). The original Phase 58 version walked parent/child
+    // edges in BOTH directions, which quietly connected an in-law to the
+    // founder through their own shared child (in-law -> child -> blood
+    // spouse -> ... -> founder), so an in-law who had a child recorded
+    // with their blood-family partner -- the most common real case --
+    // never read as an in-law at all. Walking UP only, from each side, and
+    // looking for any overlap, gets both shapes the doc comment above
+    // describes right: an in-law's own children never make them blood
+    // family, while someone already recorded as a blood relative's parent
+    // (a grandparent, say) is an ancestor of the founder and so is.
+    $ancestorsOf = static function (int $start) use ($parentsOf): array {
+        $seen = [$start => true];
+        $stack = [$start];
+        while ($stack) {
+            $current = array_pop($stack);
+            foreach ($parentsOf[$current] ?? [] as $parent) {
+                if (!isset($seen[$parent])) {
+                    $seen[$parent] = true;
+                    $stack[] = $parent;
+                }
             }
         }
+        return $seen;
+    };
+    if (array_intersect_key($ancestorsOf($personId), $ancestorsOf($founderId))) {
+        return false; // shares an ancestor with the group's founder -- blood family, not in-law-only
     }
 
     // Never blood-reaches the founder -- only counts as in-law-only if
@@ -122,9 +134,11 @@ function ourthology_is_in_law_only(PDO $pdo, int $personId): bool
  * 'parent', 'step-parent' and 'parent-in-law' can ever produce an edge
  * shaped ['parent' => 'NEW', 'child' => <existing person>], which is
  * exactly "someone existing gains a new antecedent"; 'grandparent' also
- * has that shape but its child side is, by construction, always already
- * someone's recorded parent -- so it can never be an in-law-only node and
- * never needs to reach the query below).
+ * has that shape (NEW becomes the parent of the chosen "via" parent), and
+ * since Phase 91 that via parent CAN be an in-law -- e.g. adding Paris's
+ * grandparent through Pamela is really adding Pamela's own parent -- so
+ * it goes through the same in-law check as 'parent' does, via the
+ * generic loop below.
  *
  * Doesn't itself decide whether that person IS in-law-only -- call
  * ourthology_is_in_law_only() on the result to decide that (kept as two
@@ -429,6 +443,11 @@ function ourthology_create_peripheral_tree(
  * file, and this feature doesn't need to take that on to do its job.
  * Also never re-copies a COPY (only entries with copied_from_entry_id
  * NULL are eligible), so copying can't ping-pong back and forth.
+ *
+ * Phase 91: Memory Planner trips (origin='trip') are left out too -- a
+ * trip's events, notes and photos live in trip_plans/trip_events, not on
+ * the entry row, so a copied entry was a trip card with no trip behind
+ * it (it opened an empty, broken planner).
  */
 function ourthology_copy_facility_state(PDO $pdo, int $personId): ?array
 {
@@ -464,6 +483,7 @@ function ourthology_count_pending_copies(PDO $pdo, int $fromPersonId, int $toPer
     $stmt = $pdo->prepare(
         "SELECT COUNT(*) FROM timeline_entries src
          WHERE src.person_id = :from AND src.copied_from_entry_id IS NULL
+           AND (src.origin IS NULL OR src.origin <> 'trip')
            AND NOT EXISTS (
              SELECT 1 FROM timeline_entries dst
              WHERE dst.person_id = :to AND dst.copied_from_entry_id = src.id
@@ -485,6 +505,7 @@ function ourthology_copy_pending_entries(PDO $pdo, int $fromPersonId, int $toPer
         "SELECT src.id, src.entry_type, src.origin, src.title, src.body, src.occurred_on, src.visibility
          FROM timeline_entries src
          WHERE src.person_id = :from AND src.copied_from_entry_id IS NULL
+           AND (src.origin IS NULL OR src.origin <> 'trip')
            AND NOT EXISTS (
              SELECT 1 FROM timeline_entries dst
              WHERE dst.person_id = :to AND dst.copied_from_entry_id = src.id

@@ -253,23 +253,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $existingCountStmt->execute(['eid' => $entryId]);
             $existingCount = (int) $existingCountStmt->fetchColumn();
             $incoming = normalize_multi_file_upload($_FILES['media'] ?? []);
+            // Phase 91: files already uploaded in chunks via media_upload.php
+            // (see includes/media.php) arrive as tokens instead of files.
+            $staged = $ownerPersonId !== false
+                ? media_staging_resolve((array) ($_POST['staged_media'] ?? []), (int) $me['user_id'], (int) $ownerPersonId, 'tagged', (int) $entryId)
+                : ['files' => [], 'tokens' => []];
 
             if ($ownerPersonId === false) {
                 $errors[] = "That memory doesn't exist.";
-            } elseif (count($incoming) === 0) {
+            } elseif (count($incoming) + count($staged['files']) === 0) {
                 $errors[] = 'Choose at least one photo, video, or document to add.';
-            } elseif ($existingCount + count($incoming) > MEDIA_MAX_FILES_PER_ENTRY) {
+            } elseif ($existingCount + count($incoming) + count($staged['files']) > MEDIA_MAX_FILES_PER_ENTRY) {
                 $errors[] = 'Attach at most ' . MEDIA_MAX_FILES_PER_ENTRY . ' files total on one entry.';
             } else {
                 $stored = [];
                 try {
                     $pdo->beginTransaction();
-                    $stored = store_uploaded_media_files($_FILES['media'] ?? [], (int) $ownerPersonId);
+                    $stored = $incoming ? store_uploaded_media_files($_FILES['media'] ?? [], (int) $ownerPersonId) : [];
+                    $allNew = array_merge($staged['files'], $stored);
                     $mediaStmt = $pdo->prepare(
                         'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
                          VALUES (:eid, :path, :mime, :size, :w, :h)'
                     );
-                    foreach ($stored as $file) {
+                    foreach ($allNew as $file) {
                         $mediaStmt->execute([
                             'eid'  => $entryId,
                             'path' => $file['file_path'],
@@ -291,7 +297,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ];
                     }
                     $pdo->commit();
-                    $notice = count($stored) === 1 ? 'Photo added.' : count($stored) . ' files added.';
+                    media_staging_consume($staged['tokens'], (int) $me['user_id']);
+                    $notice = count($allNew) === 1 ? 'Photo added.' : count($allNew) . ' files added.';
                 } catch (RuntimeException $e) {
                     $pdo->rollBack();
                     $addedMedia = [];
@@ -574,6 +581,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      -- it has to already exist by then, not just by the time the user
      clicks something. -->
 <script src="/clipboard_paste.js?v=1"></script>
+<script src="/chunked_upload.js?v=1"></script>
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -2987,8 +2995,47 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       vamSubmitBtn.textContent = "Adding\u2026";
       vamShowError("");
       vamShowStatus("");
-      var fd = new FormData(viewerAddMediaForm);
-      fetch(window.location.href, { method: "POST", body: fd, credentials: "same-origin" })
+      // Phase 91: each file goes up on its own, in resumable chunks
+      // (chunked_upload.js), then this small request just attaches the
+      // tokens -- the same fix as add_entry.php for large uploads dropping
+      // out on an iPad. Falls back to sending the files in the request
+      // itself on a browser without the uploader.
+      var uploader = window.ourthologyChunkedUpload;
+      var csrfField = viewerAddMediaForm.querySelector('input[name="csrf_token"]');
+      var entryIdForUpload = viewerAddMediaEntryId.value;
+      var prep = Promise.resolve();
+      if (uploader && uploader.supported) {
+        prep = new Promise(function (resolve) {
+          (function check() {
+            if (!vamPending.some(function (it) { return it.kind === "converting"; })) { resolve(); return; }
+            setTimeout(check, 300);
+          })();
+        }).then(function () {
+          var todo = vamPending.filter(function (it) { return it.file && !it.token; });
+          var chain = Promise.resolve();
+          todo.forEach(function (item, i) {
+            chain = chain.then(function () {
+              return uploader.upload(item.file, {
+                csrf: csrfField ? csrfField.value : "",
+                fields: { purpose: "tagged", entry_id: String(entryIdForUpload) },
+                onProgress: function (sent, total) {
+                  vamSubmitBtn.textContent = "Uploading " + (i + 1) + " of " + todo.length + " \u2014 " + Math.round((sent / total) * 100) + "%";
+                }
+              }).then(function (token) { item.token = token; });
+            });
+          });
+          return chain;
+        });
+      }
+      prep.then(function () {
+        var fd = new FormData(viewerAddMediaForm);
+        if (uploader && uploader.supported) {
+          fd.delete("media[]");
+          vamPending.forEach(function (it) { if (it.token) fd.append("staged_media[]", it.token); });
+        }
+        vamSubmitBtn.textContent = "Adding\u2026";
+        return fetch(window.location.href, { method: "POST", body: fd, credentials: "same-origin" });
+      })
         .then(function (res) { return res.json(); })
         .then(function (data) {
           vamSubmitting = false;
@@ -3008,11 +3055,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           vamReset();
           vamShowStatus(data.notice || "Added.");
         })
-        .catch(function () {
+        .catch(function (err) {
           vamSubmitting = false;
           vamSubmitBtn.disabled = false;
           vamSubmitBtn.textContent = "Add media";
-          vamShowError("Something went wrong saving that. Please try again.");
+          if (err && err.message && typeof err.fatal === "boolean") {
+            vamShowError(err.message + (err.fatal ? "" : " The connection dropped for a moment \u2014 press Add media again and it will carry on from where it stopped."));
+          } else {
+            vamShowError("Something went wrong saving that. Please try again.");
+          }
         });
     });
 
@@ -3317,6 +3368,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       // stage/upload photos even though readOnlyMode stays true for
       // everything else about the trip.
       var pickerLocked = readOnlyMode && !tripMediaOnlyMode;
+      // Phase 91: lets the trip form's submit handler find each picker's
+      // still-to-upload files for the chunked uploader (read through a
+      // function because `pending` itself is reassigned after an upload).
+      root.__tripPickerState = function () { return { pending: pending, input: input }; };
 
       function extLabel(name) { var m = /\.([a-z0-9]+)$/i.exec(name || ''); return m ? m[1].toUpperCase() : 'FILE'; }
       function kindOfFile(file) { return file.type.indexOf('image/') === 0 ? 'image' : (file.type.indexOf('video/') === 0 ? 'video' : 'document'); }
@@ -3703,6 +3758,72 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         return;
       }
       tripError.hidden = true;
+
+      // Phase 91: upload every picker's new photos one at a time, in
+      // resumable chunks, before the form itself goes -- the same fix as
+      // add_entry.php (one huge request with every event's photos in it
+      // was liable to drop out on an iPad). The form then carries only
+      // the returned tokens.
+      var uploader = window.ourthologyChunkedUpload;
+      if (!uploader || !uploader.supported) return;
+      function collectJobs() {
+        var out = [];
+        Array.prototype.forEach.call(tripForm.querySelectorAll('.trip-picker'), function (pickerRoot) {
+          if (typeof pickerRoot.__tripPickerState !== 'function') return;
+          var st = pickerRoot.__tripPickerState();
+          st.pending.forEach(function (item) { if (item.file) out.push({ item: item, input: st.input, pending: st.pending }); });
+        });
+        return out;
+      }
+      var jobs = collectJobs();
+      if (!jobs.length) return;
+      e.preventDefault();
+      if (tripSaveBtn.disabled) return;
+      var saveLabel = tripSaveBtn.textContent;
+      tripSaveBtn.disabled = true;
+      var csrfField = tripForm.querySelector('input[name="csrf_token"]');
+      var targetField = document.getElementById('tripTargetPersonField');
+      new Promise(function (resolve) {
+        (function check() {
+          if (!collectJobs().some(function (j) { return j.item.kind === 'converting'; })) { resolve(); return; }
+          setTimeout(check, 300);
+        })();
+      }).then(function () {
+        jobs = collectJobs(); // re-read: a converted HEIC is a new pending item
+        var todo = jobs.filter(function (j) { return !j.item.token; });
+        var chain = Promise.resolve();
+        todo.forEach(function (job, i) {
+          chain = chain.then(function () {
+            return uploader.upload(job.item.file, {
+              csrf: csrfField ? csrfField.value : '',
+              fields: { purpose: 'entry', target_person_id: targetField ? targetField.value : '' },
+              onProgress: function (sent, total) {
+                tripSaveBtn.textContent = 'Uploading ' + (i + 1) + ' of ' + todo.length + ' \u2014 ' + Math.round((sent / total) * 100) + '%';
+              }
+            }).then(function (token) { job.item.token = token; });
+          });
+        });
+        return chain;
+      }).then(function () {
+        Array.prototype.forEach.call(tripForm.querySelectorAll('.trip-staged-input'), function (el) { el.remove(); });
+        jobs.forEach(function (job) {
+          var h = document.createElement('input');
+          h.type = 'hidden';
+          h.name = job.input.name.replace(/\[(plan|memory)_media\]\[\]$/, '[staged_$1_media][]');
+          h.value = job.item.token;
+          h.className = 'trip-staged-input';
+          tripForm.appendChild(h);
+          job.input.disabled = true; // already sent -- don't send the files twice
+        });
+        tripSaveBtn.textContent = 'Saving\u2026';
+        tripForm.submit();
+      }).catch(function (err) {
+        tripSaveBtn.disabled = false;
+        tripSaveBtn.textContent = saveLabel;
+        tripError.textContent = ((err && err.message) || 'The upload stopped.') +
+          ((err && err.fatal) ? '' : ' The connection dropped for a moment \u2014 press Save again and it will carry on from where it stopped.');
+        tripError.hidden = false;
+      });
     });
 
     <?php if ($directOpenTripPlanId !== null): ?>

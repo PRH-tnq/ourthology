@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 require_once __DIR__ . '/includes/graph.php';
+require_once __DIR__ . '/includes/account_deletion.php'; // Phase 91: ourthology_erase_person() for delete_person
 require_once __DIR__ . '/includes/nav.php';
 require_once __DIR__ . '/includes/peripheral.php';
 require_once __DIR__ . '/includes/media.php';
@@ -339,49 +340,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . " on their timeline, so they can't be deleted. Delete those memories first if this person really needs to go.";
         } else {
             try {
+                // Phase 91: this used to hand-roll its own delete list
+                // (entries, tags, claim tokens, relationships,
+                // partnerships), which fell behind the schema once an
+                // unclaimed person could also be sent postcards, letters
+                // and greeting cards (Phase 66) or be the master node of a
+                // peripheral tree (Phase 58) -- any of those left a foreign
+                // key pointing at them and the delete failed with a generic
+                // error. ourthology_erase_person() (includes/account_
+                // deletion.php) is the one maintained, schema-complete
+                // delete for a person row, so this now just calls it --
+                // the gates above (unclaimed only, no memories) are
+                // unchanged. Files are removed only after the commit.
+                $filesToDelete = [];
                 $pdo->beginTransaction();
-
-                // An unclaimed placeholder can perfectly normally have
-                // timeline entries of their own now (Phase 17: anyone in the
-                // family group may add a memory for them, not just an
-                // account holder acting for themselves) — same file-then-row
-                // deletion order timeline.php's own delete action uses, so
-                // no media file is ever left orphaned on disk.
-                $mediaStmt = $pdo->prepare(
-                    'SELECT m.file_path FROM media m
-                     JOIN timeline_entries t ON t.id = m.timeline_entry_id
-                     WHERE t.person_id = :pid'
-                );
-                $mediaStmt->execute(['pid' => $personId]);
-                foreach ($mediaStmt->fetchAll() as $m) {
-                    delete_media_file($m['file_path']);
-                }
-                if (!empty($person['avatar_path'])) {
-                    delete_media_file($person['avatar_path']);
-                }
-                // timeline_entries -> media AND timeline_entries ->
-                // memory_tags both have ON DELETE CASCADE, so deleting the
-                // entries also clears their media rows (the files
-                // themselves are already gone, just above) and any tags
-                // OTHER people had on this person's own memories. A tag
-                // THIS person holds on someone ELSE's memory isn't reached
-                // by that cascade (it hangs off the other entry, not one of
-                // this person's own) — deleted explicitly, next.
-                $pdo->prepare('DELETE FROM timeline_entries WHERE person_id = :pid')->execute(['pid' => $personId]);
-                $pdo->prepare('DELETE FROM memory_tags WHERE person_id = :pid')->execute(['pid' => $personId]);
-                $pdo->prepare('DELETE FROM claim_tokens WHERE person_id = :pid')->execute(['pid' => $personId]);
-                $pdo->prepare('DELETE FROM relationships WHERE parent_id = :pid OR child_id = :pid2')
-                    ->execute(['pid' => $personId, 'pid2' => $personId]);
-                $pdo->prepare('DELETE FROM partnerships WHERE person_a_id = :pid OR person_b_id = :pid2')
-                    ->execute(['pid' => $personId, 'pid2' => $personId]);
-                $pdo->prepare('DELETE FROM persons WHERE id = :id')->execute(['id' => $personId]);
-
+                ourthology_erase_person($pdo, $personId, $filesToDelete);
                 $pdo->commit();
+                foreach ($filesToDelete as $path) {
+                    delete_media_file($path);
+                }
                 $_SESSION['flash_edit_notice'] = person_display_name($person) . ' has been deleted, along with their relationships and partnerships.';
                 header('Location: /edit_person.php' . ($popup ? '?popup=1' : ''));
                 exit;
-            } catch (PDOException $e) {
-                $pdo->rollBack();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
                 error_log('ourthology delete_person error: ' . $e->getMessage());
                 $errors[] = 'Something went wrong deleting that person. Please try again.';
             }

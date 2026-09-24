@@ -210,7 +210,13 @@ function store_uploaded_media(array $file, int $personId): array
             default => 'Upload failed — please try again.',
         });
     }
-    if (!is_uploaded_file($file['tmp_name'])) {
+    // Phase 91: $file['staged'] marks a file reassembled on disk by the
+    // chunked uploader (media_upload.php) rather than a normal PHP upload
+    // -- it can never pass is_uploaded_file(), and is moved with rename()
+    // instead of move_uploaded_file(). Only ever set by server code, never
+    // from anything a client posts.
+    $isStaged = !empty($file['staged']);
+    if (!$isStaged && !is_uploaded_file($file['tmp_name'])) {
         throw new RuntimeException('Upload failed — please try again.');
     }
     if ($file['size'] > MEDIA_MAX_BYTES) {
@@ -239,6 +245,9 @@ function store_uploaded_media(array $file, int $personId): array
         }
         $filename = basename($destination);
         $detectedMime = 'image/jpeg';
+        if ($isStaged) {
+            @unlink($file['tmp_name']); // PHP only auto-cleans real upload temp files
+        }
     } else {
         $extension = null;
         foreach (MEDIA_ALLOWED as $ext => $mimes) {
@@ -265,7 +274,8 @@ function store_uploaded_media(array $file, int $personId): array
         $filename = bin2hex(random_bytes(16)) . '.' . $extension;
         $destination = $dir . '/' . $filename;
 
-        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+        $moved = $isStaged ? @rename($file['tmp_name'], $destination) : move_uploaded_file($file['tmp_name'], $destination);
+        if (!$moved) {
             throw new RuntimeException('Could not save the file — please try again.');
         }
     }
@@ -634,7 +644,7 @@ function fetch_media_for_view(PDO $pdo, int $mediaId): ?array
     $stmt = $pdo->prepare(
         'SELECT m.id, m.file_path, m.mime_type, m.byte_size,
                 te.id AS entry_id, te.visibility, te.person_id AS owner_person_id,
-                p.family_group_id AS owner_family_group_id
+                p.family_group_id AS owner_family_group_id, p.claimed_by_user_id AS owner_claimed_by
          FROM media m
          JOIN timeline_entries te ON te.id = m.timeline_entry_id
          JOIN persons p ON p.id = te.person_id
@@ -656,6 +666,19 @@ function can_view_media(array $media, int $viewerPersonId, int $viewerFamilyGrou
         return true;
     }
     if ($media['visibility'] === 'public' && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId) {
+        return true;
+    }
+    // Phase 91: an UNCLAIMED person's timeline is managed by the whole
+    // family group (timeline.php's $canManage / person_is_editable_by()),
+    // so every entry on it -- private and custom included -- is already
+    // shown in full to anyone in that group. Its media has to follow the
+    // same rule, or a private memory someone added for Grandma showed its
+    // text but 404'd every photo, even for the person who uploaded them.
+    // Only reached when the fetched row actually carries owner_claimed_by
+    // (fetch_media_for_view() does); a claimed owner's private media is
+    // unaffected.
+    if (array_key_exists('owner_claimed_by', $media) && $media['owner_claimed_by'] === null
+        && (int) $media['owner_family_group_id'] === $viewerFamilyGroupId) {
         return true;
     }
     // Phase 33: 'custom' is narrower than 'public' — same family group
@@ -944,4 +967,133 @@ function store_postcard_copy_as_media(string $sourceRelativePath, string $mimeTy
         'width'     => $width,
         'height'    => $height,
     ];
+}
+
+// --- Chunked, resumable uploads (Phase 91) -------------------------------
+//
+// Why this exists: a memory used to be saved as ONE multipart POST
+// carrying every attached file at once -- up to 25 files of up to 30MB,
+// i.e. potentially hundreds of MB in a single request. On an iPad (Wi-Fi
+// that drops for a second, the screen auto-locking, Safari suspending the
+// tab, or the host cutting a long-running request) one hiccup anywhere in
+// that request killed the whole thing, and Safari reports a connection
+// killed mid-upload as "not connected to the internet" / "the network
+// connection was lost" rather than as an app error. Any file beyond
+// max_file_uploads was also silently dropped by PHP before the app ever
+// saw it.
+//
+// Now the composer (add_entry.php, and the tagged-memory "Add media" form
+// on timeline.php) uploads each file on its own, in small chunks, via
+// media_upload.php, retrying any chunk that fails and resuming from the
+// last byte the server confirmed. Once a file is complete it's validated
+// and stored exactly like a normal upload (store_uploaded_media() with
+// 'staged' => true) and described by a small JSON manifest; the final
+// form submission then carries only the manifest tokens, so the request
+// that actually saves the memory is tiny and quick. Manifests (and their
+// files) nobody ever used -- an abandoned composer -- are swept after a
+// day by ourthology_sweep_stale_staged_media().
+
+const MEDIA_UPLOAD_CHUNK_MAX_BYTES = 8 * 1024 * 1024; // client sends 2MB; anything over this is refused
+const MEDIA_STAGED_TTL_SECONDS = 86400;
+
+function media_staging_dir(int $userId): string
+{
+    return ourthology_media_dir() . '/.staging/' . $userId;
+}
+
+/** A client-chosen upload id / server-issued token: 32 lowercase hex chars, nothing else ever touches a path. */
+function media_staging_id_is_valid(string $id): bool
+{
+    return (bool) preg_match('/^[a-f0-9]{32}$/', $id);
+}
+
+/** Write the manifest for a fully uploaded, validated, stored file and return its token. */
+function media_staging_write_manifest(int $userId, array $manifest): string
+{
+    $dir = media_staging_dir($userId);
+    if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not save the file — please try again.');
+    }
+    $token = bin2hex(random_bytes(16));
+    $manifest['user_id'] = $userId;
+    $manifest['created_at'] = time();
+    if (file_put_contents($dir . '/' . $token . '.json', json_encode($manifest)) === false) {
+        throw new RuntimeException('Could not save the file — please try again.');
+    }
+    return $token;
+}
+
+/**
+ * Resolve submitted staged-upload tokens back to stored-file arrays (the
+ * same shape store_uploaded_media() returns), keeping only ones that
+ * belong to $userId, were stored for $storagePersonId and $purpose (and,
+ * for a tagged-memory upload, that exact entry), and whose file is still
+ * on disk. Anything else is silently dropped -- it can only come from a
+ * tampered or very stale form. Returns ['files' => [...], 'tokens' => [...]].
+ */
+function media_staging_resolve(array $tokens, int $userId, int $storagePersonId, string $purpose, ?int $entryId = null): array
+{
+    $files = [];
+    $good = [];
+    foreach (array_values(array_unique(array_map('strval', $tokens))) as $token) {
+        if (!media_staging_id_is_valid($token)) {
+            continue;
+        }
+        $path = media_staging_dir($userId) . '/' . $token . '.json';
+        $m = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+        if (!is_array($m) || (int) ($m['user_id'] ?? 0) !== $userId
+            || (int) ($m['person_id'] ?? 0) !== $storagePersonId || ($m['purpose'] ?? '') !== $purpose
+            || ($entryId !== null && (int) ($m['entry_id'] ?? 0) !== $entryId)
+            || !is_file(ourthology_media_dir() . '/' . ($m['file_path'] ?? ''))) {
+            continue;
+        }
+        $files[] = [
+            'file_path' => (string) $m['file_path'],
+            'mime_type' => (string) $m['mime_type'],
+            'byte_size' => (int) $m['byte_size'],
+            'width'     => isset($m['width']) ? (int) $m['width'] : null,
+            'height'    => isset($m['height']) ? (int) $m['height'] : null,
+        ];
+        $good[] = $token;
+    }
+    return ['files' => $files, 'tokens' => $good];
+}
+
+/** Forget manifests once their files belong to a saved media row (call after commit). */
+function media_staging_consume(array $tokens, int $userId): void
+{
+    foreach ($tokens as $token) {
+        if (media_staging_id_is_valid((string) $token)) {
+            @unlink(media_staging_dir($userId) . '/' . $token . '.json');
+        }
+    }
+}
+
+/**
+ * Delete staged uploads nobody ever saved: half-finished .part files and
+ * completed manifests (plus the stored file each one points at) older
+ * than MEDIA_STAGED_TTL_SECONDS. Cheap -- run opportunistically from
+ * media_upload.php rather than needing a cron this host doesn't have.
+ */
+function ourthology_sweep_stale_staged_media(PDO $pdo): void
+{
+    $inUse = $pdo->prepare('SELECT 1 FROM media WHERE file_path = :p LIMIT 1');
+    $cutoff = time() - MEDIA_STAGED_TTL_SECONDS;
+    foreach ((array) glob(ourthology_media_dir() . '/.staging/*/*') as $f) {
+        if (!is_file($f) || (int) @filemtime($f) >= $cutoff) {
+            continue;
+        }
+        if (str_ends_with($f, '.json')) {
+            $m = json_decode((string) @file_get_contents($f), true);
+            if (is_array($m) && !empty($m['file_path']) && !str_contains((string) $m['file_path'], '..')) {
+                // Belt and braces: never remove a file a saved memory
+                // actually points at (e.g. if a manifest outlived its save).
+                $inUse->execute(['p' => (string) $m['file_path']]);
+                if (!$inUse->fetchColumn()) {
+                    delete_media_file((string) $m['file_path']);
+                }
+            }
+        }
+        @unlink($f);
+    }
 }

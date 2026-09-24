@@ -119,7 +119,7 @@ if ($expired === null && $_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A new family tree — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=27">
 <style>
   .household-list { list-style:none; margin:10px 0 0; padding:0; }
   .household-list li { padding:8px 0; border-bottom:1px solid var(--line); }

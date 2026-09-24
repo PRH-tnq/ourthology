@@ -59,6 +59,11 @@ CREATE TABLE users (
   -- tour (Phase 19) — NULL means "hasn't seen it yet," checked on
   -- timeline.php to decide whether to show it.
   tour_completed_at DATETIME NULL,
+  -- Phase 40: opt-in email notifications. The address itself is stored
+  -- only encrypted (libsodium secretbox, key held in the above-webroot
+  -- secrets file -- see includes/crypto.php); never a plaintext column.
+  notify_email_enc    VARBINARY(400) NULL,
+  notify_pending_tags TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY uniq_person (person_id),
   CONSTRAINT fk_users_person FOREIGN KEY (person_id) REFERENCES persons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
