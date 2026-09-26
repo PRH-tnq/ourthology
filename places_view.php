@@ -135,13 +135,24 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   .vis-row { display:flex; gap:14px; flex-wrap:wrap; font-size:14px; }
   .vis-row label { display:flex; gap:6px; align-items:center; text-transform:none; letter-spacing:normal; margin:0; font-weight:500; }
   .hint { font-size:12px; color:var(--ink-faint); margin:4px 0 0; }
-  .pk { display:grid; grid-template-columns:repeat(auto-fill,minmax(78px,1fr)); gap:8px; margin-top:6px; }
+  /* Phase 98: each photo box is a visible drop area with a Paste button. */
+  .pk { margin-top:6px; padding:8px; border:2px dashed var(--line); border-radius:12px; background:rgba(255,255,255,.55); transition:border-color .15s ease, background .15s ease; }
+  .pk.dragover { border-color:var(--accent); background:#F1DCDC; }
+  .pk-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(78px,1fr)); gap:8px; }
+  .pk-bar { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; margin-top:8px; font-size:12.5px; color:var(--ink-faint); }
+  .pk-paste { display:inline-flex; align-items:center; gap:5px; font-family:inherit; font-size:12.5px; font-weight:600; line-height:1; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; }
+  .pk-paste:hover { background:#F1DCDC; }
+  .pk-paste svg { width:14px; height:14px; }
+  .pk-paste[hidden] { display:none; }
+  .pk-msg { flex-basis:100%; color:var(--accent); }
+  .pk-msg:empty { display:none; }
   .pk-tile { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; border:1px solid var(--line); background:var(--paper-2); }
   .pk-tile img { width:100%; height:100%; object-fit:cover; display:block; }
   .pk-tile .pk-x { position:absolute; top:3px; right:3px; width:22px; height:22px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; cursor:pointer; line-height:22px; font-size:15px; padding:0; }
   .pk-add { aspect-ratio:1; border:2px dashed var(--line); border-radius:10px; background:#fff; color:var(--accent); font-size:26px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
   .pk-add small { display:block; font-size:10.5px; color:var(--ink-faint); }
-  .pk.dragover .pk-add { border-color:var(--accent); background:var(--paper-2); }
+  .pk.dragover .pk-add { border-color:var(--accent); }
+  @media (hover: none) { .pk-hint { display:none; } }
   .upd-row { border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; background:var(--paper); }
   .upd-top { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
   .upd-top .grow { flex:1 1 220px; }
@@ -295,8 +306,9 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
       'memories' => $jsMemories, 'openMemoryId' => $openMemoryId !== false ? (int) $openMemoryId : null,
   ], $jsonFlags) ?></script>
   <script src="/date_autotab.js?v=1"></script>
+  <script src="/clipboard_paste.js?v=1"></script>
   <script src="/geo.js?v=2"></script>
-  <script src="/places.js?v=4"></script>
+  <script src="/places.js?v=5"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>

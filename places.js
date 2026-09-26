@@ -277,30 +277,51 @@
 
   // A small photo picker: existing (kept) photos + newly chosen files,
   // drag/drop or click; each can be removed before saving.
+  // Phase 98: each photo box takes photos three ways, like the memory
+  // composer's: the Add tile (file picker), dragging photos onto the box,
+  // and pasting -- the Paste button (touch screens have no Ctrl+V; see
+  // clipboard_paste.js) or Ctrl+V anywhere in the editor, which goes to the
+  // box last used (the home's own photos until another box is touched).
+  var activePicker = null;
   function makePicker(el, existing) {
     var st = { el: el, kept: (existing || []).slice(), pending: [] };
+    el.innerHTML =
+      '<div class="pk-grid"></div>' +
+      '<div class="pk-bar"><span class="pk-hint">Drag photos here, or</span>' +
+      '<button type="button" class="pk-paste"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>' +
+      '<span class="pk-msg" role="status"></span></div>';
+    var grid = el.querySelector(".pk-grid");
+    var msg = el.querySelector(".pk-msg");
     var input = document.createElement("input");
     input.type = "file"; input.accept = "image/*,.heic,.heif"; input.multiple = true; input.hidden = true;
+    el.appendChild(input);
+    function say(t) { msg.textContent = t || ""; }
     function render() {
-      var html = st.kept.map(function (p, i) {
+      grid.innerHTML = st.kept.map(function (p, i) {
         return '<div class="pk-tile"><img src="' + p.url + '&thumb=1" alt=""><button type="button" class="pk-x" data-k="' + i + '" aria-label="Remove">×</button>' +
           '<input type="hidden" name="' + el.getAttribute("data-kept-name") + '" value="' + p.id + '"></div>';
       }).join("") + st.pending.map(function (p, i) {
         return '<div class="pk-tile"><img src="' + p.url + '" alt=""><button type="button" class="pk-x" data-p="' + i + '" aria-label="Remove">×</button></div>';
-      }).join("");
-      html += '<button type="button" class="pk-add" aria-label="Add photos">+<small>Add photos</small></button>';
-      el.innerHTML = html;
-      el.appendChild(input);
+      }).join("") + '<button type="button" class="pk-add" aria-label="Add photos">+<small>Add photos</small></button>';
     }
     function add(files) {
+      var added = 0, skipped = [];
       Array.prototype.forEach.call(files || [], function (f) {
-        if (f.type && f.type.indexOf("image/") !== 0 && !/\.(heic|heif)$/i.test(f.name)) return;
-        if (f.size > 30 * 1024 * 1024) { formError.textContent = '"' + f.name + '" is larger than 30MB and was skipped.'; return; }
+        if (f.type && f.type.indexOf("image/") !== 0 && !/\.(heic|heif)$/i.test(f.name)) { skipped.push(f.name || "that file"); return; }
+        if (f.size > 30 * 1024 * 1024) { skipped.push(f.name + " (over 30MB)"); return; }
+        if (st.kept.length + st.pending.length >= 25) { skipped.push(f.name + " (25 photos max)"); return; }
         st.pending.push({ file: f, url: URL.createObjectURL(f), token: null });
+        added++;
       });
+      say(skipped.length ? "Skipped: " + skipped.join(", ") + " — photos only, up to 30MB each." : "");
       render();
+      return added;
     }
+    st.add = add;
+    st.say = say;
+    function activate() { activePicker = st; }
     el.addEventListener("click", function (e) {
+      activate();
       var x = e.target.closest(".pk-x");
       if (x) {
         if (x.hasAttribute("data-k")) st.kept.splice(parseInt(x.getAttribute("data-k"), 10), 1);
@@ -309,14 +330,57 @@
       }
       if (e.target.closest(".pk-add")) input.click();
     });
+    el.addEventListener("focusin", activate);
     input.addEventListener("change", function () { add(input.files); input.value = ""; });
-    ["dragenter", "dragover"].forEach(function (ev) { el.addEventListener(ev, function (e) { e.preventDefault(); el.classList.add("dragover"); }); });
-    ["dragleave", "drop"].forEach(function (ev) { el.addEventListener(ev, function (e) { e.preventDefault(); el.classList.remove("dragover"); }); });
-    el.addEventListener("drop", function (e) { if (e.dataTransfer) add(e.dataTransfer.files); });
+    var depth = 0; // dragenter/leave fire for every child tile -- count them
+    el.addEventListener("dragenter", function (e) { e.preventDefault(); depth++; el.classList.add("dragover"); });
+    el.addEventListener("dragover", function (e) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; });
+    el.addEventListener("dragleave", function () { depth = Math.max(0, depth - 1); if (!depth) el.classList.remove("dragover"); });
+    el.addEventListener("drop", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      depth = 0; el.classList.remove("dragover");
+      activate();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) add(e.dataTransfer.files);
+      else say("That didn't include a photo file — try saving the picture first, then drag it in.");
+    });
+    if (window.ourthologyClipboardPaste) {
+      window.ourthologyClipboardPaste.wire(el.querySelector(".pk-paste"), {
+        onFiles: function (files) { activate(); add(files); },
+        onMessage: say
+      });
+    } else {
+      el.querySelector(".pk-paste").hidden = true;
+    }
     render();
     pickers.push(st);
+    if (!activePicker) activePicker = st;
     return st;
   }
+
+  // Ctrl+V anywhere in the open editor (except while typing in a text box)
+  // adds the pasted picture(s) to the photo box last used.
+  document.addEventListener("paste", function (e) {
+    if (!overlay.classList.contains("open") || !e.clipboardData) return;
+    var files = [];
+    Array.prototype.forEach.call(e.clipboardData.items || [], function (it) {
+      if (it.kind === "file") { var f = it.getAsFile(); if (f) files.push(f); }
+    });
+    if (!files.length) return; // plain text: let it paste into the field as normal
+    e.preventDefault();
+    var target = (activePicker && pickers.indexOf(activePicker) >= 0) ? activePicker : pickers[0];
+    if (target) {
+      target.add(files);
+      target.el.scrollIntoView({ block: "nearest" });
+    }
+  });
+  // A photo dropped on the editor but just outside a box shouldn't make the
+  // browser open the picture (and throw away everything typed so far) --
+  // it goes into the home's own photos instead.
+  overlay.addEventListener("dragover", function (e) { e.preventDefault(); });
+  overlay.addEventListener("drop", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length && pickers[0]) pickers[0].add(e.dataTransfer.files);
+  });
 
   function addUpdateRow(u) {
     u = u || {};
@@ -440,7 +504,7 @@
 
   function openEditor(h) {
     form.reset();
-    pickers = []; updCounter = 0; updRows.innerHTML = "";
+    pickers = []; activePicker = null; updCounter = 0; updRows.innerHTML = "";
     formError.textContent = ""; formProgress.textContent = "";
     document.getElementById("editTitle").textContent = h ? "Edit " + homeLabel(h) : "Add a home";
     document.getElementById("fHomeId").value = h ? h.id : "";
