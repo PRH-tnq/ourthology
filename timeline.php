@@ -647,7 +647,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=27">
+<link rel="stylesheet" href="/styles.css?v=28">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -1339,6 +1339,34 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .viewer-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .viewer-date { color:var(--ink-faint); font-weight:700; font-size:13px; }
   .viewer-thought-view { font-size:14.5px; line-height:1.65; color:var(--ink-soft); white-space:pre-wrap; margin:0; }
+  /* Phase 96: the phone layout for this page (the shared header/tab bar/
+     Menu lives in styles.css). The big profile photo and its two tour
+     buttons became a small photo beside the page title (the tour buttons
+     are in the Menu now), and River/Rings/Spiral + the zooms + the two
+     maps -- three wrapped rows of pills -- became two dropdowns. */
+  .m-view-controls { display:none; }
+  @media (max-width: 700px) {
+    html.m-ui .page-head { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"brand brand" "nav nav" "avatar heading"; align-items:center; }
+    html.m-ui .page-head .brand { grid-area:brand; }
+    html.m-ui .page-head .nav { grid-area:nav; }
+    html.m-ui .page-head .header-avatar-row { grid-area:avatar; float:none; width:auto; margin:0 12px 0 0; display:block; }
+    html.m-ui .page-head .page-head-heading { grid-area:heading; min-width:0; }
+    html.m-ui .page-head .page-head-heading h3 { margin:0; font-size:21px; line-height:1.2; }
+    html.m-ui .header-avatar, html.m-ui .header-avatar-placeholder { width:52px; height:52px; font-size:22px; }
+    html.m-ui .header-avatar-actions-mobile { display:none; }
+    html.m-ui .controls { margin:12px 0 12px; gap:10px; }
+    html.m-ui .controls > #layoutToggle, html.m-ui .controls > #zoomToggle, html.m-ui .controls > #mapToggle { display:none; }
+    html.m-ui .controls-right { width:100%; margin-left:0; }
+    html.m-ui .m-view-controls { display:grid; grid-template-columns:1.35fr 1fr; gap:10px; width:100%; }
+    html.m-ui .m-view-controls label { display:flex; flex-direction:column; gap:4px; margin:0; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); }
+    html.m-ui .m-view-controls select { width:100%; height:44px; padding:0 34px 0 12px; border:1px solid var(--line); border-radius:12px; background-color:#fff; color:var(--ink);
+      font:600 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing:0; text-transform:none; -webkit-appearance:none; appearance:none;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%239A2A2A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat; background-position:right 12px center; }
+    html.m-ui .m-view-controls select:disabled { opacity:.5; }
+    html.m-ui #lifeMap { height:60vh; min-height:320px; }
+    html.m-ui .life-map-wrap, html.m-ui .arc-wrap { border-radius:18px; }
+  }
   /* Phase 94: "Where we've lived" / "Where we've visited" maps, swapped in for the timeline diagram. */
   .map-toggle button { display:inline-flex; align-items:center; gap:6px; }
   .map-toggle svg { width:15px; height:15px; flex:none; }
@@ -1568,7 +1596,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <div class="nav-links">
           <?= ourthology_render_primary_nav('timeline', $navPendingCount, ['tree' => 'tourMyTree']) ?>
           <div class="segmented">
-            <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory">+ Add a memory</a><?php endif; ?>
+            <?php if ($canManage): ?><a href="/add_entry.php<?= $isOwner ? '' : '?person_id=' . (int) $target['id'] ?>" id="tourAddMemory" data-m-fab>+ Add a memory</a><?php endif; ?>
             <?php if ($canManage): ?><button type="button" id="tripPlannerOpenBtn">Memory planner</button><?php endif; ?>
             <button type="button" id="sendMessageBtn" class="accent-item">Send a message</button>
           </div>
@@ -1635,6 +1663,30 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     <?php endif; ?>
 
     <div class="controls">
+      <?php // Phase 96: on a phone the three pill groups below give way to
+            // these two dropdowns (styles in the "Phase 96" block above;
+            // life_map.js keeps them in step with the pills, which still do
+            // the actual work). ?>
+      <div class="m-view-controls">
+        <label><span>View</span>
+          <select id="mViewSelect" data-tour-for="#mapToggle" aria-label="View">
+            <option value="river">River</option>
+            <option value="rings">Rings</option>
+            <option value="spiral">Spiral</option>
+            <optgroup label="Maps">
+              <option value="map:lived">Where we've lived</option>
+              <option value="map:visited">Where we've visited</option>
+            </optgroup>
+          </select>
+        </label>
+        <label><span>Zoom</span>
+          <select id="mZoomSelect" data-tour-for="#zoomToggle" aria-label="Zoom">
+            <option value="life">All life</option>
+            <option value="decade">Decade</option>
+            <option value="year">This year</option>
+          </select>
+        </label>
+      </div>
       <div class="segmented" id="layoutToggle" role="group" aria-label="Visual style">
         <button data-layout="river" class="active">River</button>
         <button data-layout="rings">Rings</button>
@@ -1658,8 +1710,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               // next to each other. ?>
         <?php if ($isOwner): ?>
           <div class="tour-controls-group">
-            <button type="button" id="tourReplayBtn" class="linklet-btn tour-replay-btn">Take the tour</button>
-            <button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost tour-whatsnew-btn">What's new</button>
+            <button type="button" id="tourReplayBtn" class="linklet-btn tour-replay-btn" data-m-menu="Take the tour">Take the tour</button>
+            <button type="button" id="tourWhatsNewBtn" class="linklet-btn ghost tour-whatsnew-btn" data-m-menu="What's new">What's new</button>
           </div>
         <?php endif; ?>
         <?php if ($reminderCardRows): ?>
@@ -5137,6 +5189,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
-  <script src="/life_map.js?v=2"></script>
+  <script src="/life_map.js?v=3"></script>
 </body>
 </html>

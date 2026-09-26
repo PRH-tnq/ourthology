@@ -66,6 +66,6 @@ function ourthology_render_tour(string $page, int $myPersonId, bool $autostart =
     window.OURTHOLOGY_MY_PERSON_ID = <?= $myPersonId ?>;
     window.OURTHOLOGY_TOUR_RECENT_INDEXES = <?= json_encode($tourRecentIndices) ?>;
     </script>
-    <script src="/tour.js?v=4"></script>
+    <script src="/tour.js?v=5"></script>
     <?php
 }

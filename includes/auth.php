@@ -3,9 +3,22 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
+/**
+ * Phase 95: the session cookie has its own name, not PHP's default
+ * PHPSESSID. Pamela's iPad logged in correctly and was then bounced straight
+ * back to an empty login page: the classic sign of a second, stale cookie
+ * of the same name (left by something else that once ran on this domain,
+ * or set with a different domain/path) being sent ahead of ours, so PHP
+ * read a session that wasn't logged in. A name only this app uses can't
+ * collide with anything, and any old PHPSESSID is expired on sight.
+ * (Renaming it logs everyone out once, when this first goes live.)
+ */
+const OURTHOLOGY_SESSION_COOKIE = 'ourthology_sid';
+
 function ourthology_start_session(): void
 {
     if (session_status() === PHP_SESSION_NONE) {
+        session_name(OURTHOLOGY_SESSION_COOKIE);
         session_set_cookie_params([
             'lifetime' => 0,
             'path'     => '/',
@@ -13,8 +26,59 @@ function ourthology_start_session(): void
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
+        if (isset($_COOKIE['PHPSESSID']) && !headers_sent()) {
+            ourthology_expire_legacy_session_cookie();
+        }
         session_start();
     }
+}
+
+/**
+ * Expire any leftover PHPSESSID cookie, in each form it could have been
+ * set in: host-only, and for the bare and www. domains (a browser only
+ * accepts the ones matching the host it came from and ignores the rest).
+ */
+function ourthology_expire_legacy_session_cookie(): void
+{
+    $host = strtolower((string) preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? '')));
+    $domains = [''];
+    if ($host !== '' && filter_var($host, FILTER_VALIDATE_IP) === false && str_contains($host, '.')) {
+        $bare = preg_replace('/^www\./', '', $host);
+        $domains[] = $bare;
+        $domains[] = '.' . $bare;
+        $domains[] = 'www.' . $bare;
+    }
+    foreach (array_unique($domains) as $domain) {
+        foreach (['/', '/login.php'] as $path) {
+            // (a non-Secure deletion over HTTPS still clears a Secure cookie)
+            setcookie('PHPSESSID', '', ['expires' => 1, 'path' => $path, 'domain' => $domain, 'httponly' => true, 'samesite' => 'Lax']);
+        }
+    }
+}
+
+/**
+ * Phase 95: the cookie NAMES this browser sent (never their values), with
+ * a count wherever the same name arrived more than once -- written to the
+ * PHP error log when a correct login fails to stick, so the next time it
+ * happens the log says exactly why.
+ */
+function ourthology_cookie_names_summary(): string
+{
+    $counts = [];
+    foreach (explode(';', (string) ($_SERVER['HTTP_COOKIE'] ?? '')) as $pair) {
+        $name = trim(explode('=', $pair, 2)[0]);
+        if ($name !== '') {
+            $counts[$name] = ($counts[$name] ?? 0) + 1;
+        }
+    }
+    if (!$counts) {
+        return '(no cookies sent)';
+    }
+    $out = [];
+    foreach ($counts as $name => $n) {
+        $out[] = $n > 1 ? "{$name} x{$n}" : $name;
+    }
+    return implode(', ', $out);
 }
 
 function current_user_id(): ?int

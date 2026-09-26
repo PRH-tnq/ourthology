@@ -244,7 +244,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=27">
+<link rel="stylesheet" href="/styles.css?v=28">
 <style>
   :root {
     --shadow: 0 1px 2px rgba(26,23,20,0.08), 0 10px 26px -14px rgba(26,23,20,0.28);
@@ -419,7 +419,7 @@ $hasAnyStepTag = !empty($stepTagsByChild);
       <div class="nav-links">
         <?= ourthology_render_primary_nav('tree', $pendingCount, ['calendar' => 'tourCalendarLink', 'pending' => 'tourPendingLink']) ?>
         <div class="segmented">
-          <a href="/add_relative.php" id="tourAddRelative">+ Add a relative</a>
+          <a href="/add_relative.php" id="tourAddRelative" data-m-fab>+ Add a relative</a>
           <a href="/edit_person.php">Edit a person</a>
           <a href="/edit_person.php?person_id=<?= $myPersonId ?>" id="tourEditMe">Edit me</a>
           <a href="/link_existing.php">Link to existing account</a>

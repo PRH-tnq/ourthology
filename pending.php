@@ -322,7 +322,7 @@ function ourthology_pending_memory_preview_html(array $row): string
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=27">
+<link rel="stylesheet" href="/styles.css?v=28">
 <style>
   /* Phase 85: this page had no .nav/.nav-links of its own before -- it
      only ever linked back to tree.php via the plain .foot-link at the
@@ -396,6 +396,9 @@ function ourthology_pending_memory_preview_html(array $row): string
   @media (max-width: 820px) {
     .pending-card { max-width:480px; }
     .pending-layout { flex-direction:column; gap:0; }
+    /* Phase 96: in column mode each column's flex-basis (480/260px) became
+       its HEIGHT, leaving big blank gaps between the sections on a phone. */
+    .pending-layout > div { flex:0 0 auto; width:100%; max-width:none; }
     .pending-col-mid, .pending-col-cards { max-width:none; border-left:none; padding-left:0; border-top:1px solid var(--line); margin-top:20px; padding-top:16px; }
   }
 

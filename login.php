@@ -16,6 +16,20 @@ if (current_user_id() !== null) {
     exit;
 }
 
+// Phase 95: a correct login now comes back here once (?check=1) before
+// going on, to confirm the browser actually kept the session cookie. Still
+// logged out at this point means it didn't -- say so plainly, rather than
+// the silent "straight back to an empty login page" Pamela's iPad was
+// giving -- and log which cookies arrived (names only) to pin down why.
+$cookieDropped = ($_GET['check'] ?? '') === '1';
+if ($cookieDropped) {
+    error_log(sprintf(
+        'ourthology login did not stick: cookies sent [%s]; user agent: %s',
+        ourthology_cookie_names_summary(),
+        substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? '-'), 0, 300)
+    ));
+}
+
 // Phase 59: delete_account.php lands here (already logged out) once an
 // account deletion completes — a plain query flag rather than a session
 // flash, since logout_user() clears the whole session right before this
@@ -30,6 +44,17 @@ $email  = '';
 // for a v1 with no infra for it yet.
 ourthology_start_session();
 $_SESSION['login_fail_count'] = $_SESSION['login_fail_count'] ?? 0;
+// Phase 96: the lock now actually lifts after a while. It used to last as
+// long as the browser session did, which on an iPad (where Safari tabs stay
+// open for weeks) could mean locked out for weeks despite the "wait a few
+// minutes" message. Counted from the most recent failed attempt.
+const LOGIN_MAX_FAILS = 8;
+const LOGIN_LOCK_SECONDS = 15 * 60;
+$lastFail = (int) ($_SESSION['login_fail_last'] ?? 0);
+if ($lastFail > 0 && time() - $lastFail >= LOGIN_LOCK_SECONDS) {
+    $_SESSION['login_fail_count'] = 0;
+    unset($_SESSION['login_fail_last']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -37,8 +62,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim((string) ($_POST['email'] ?? ''));
     $password = (string) ($_POST['password'] ?? '');
 
-    if ($_SESSION['login_fail_count'] >= 8) {
-        $errors[] = 'Too many failed attempts — please wait a few minutes and try again.';
+    if ($_SESSION['login_fail_count'] >= LOGIN_MAX_FAILS) {
+        $minutes = max(1, (int) ceil(($lastFail + LOGIN_LOCK_SECONDS - time()) / 60));
+        $errors[] = 'Too many failed attempts — please wait ' . $minutes . ' minute' . ($minutes === 1 ? '' : 's') . ' and try again.';
     } else {
         $stmt = ourthology_pdo()->prepare('SELECT id, password_hash, status FROM users WHERE email = :email');
         $stmt->execute(['email' => $email]);
@@ -46,14 +72,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($user && $user['status'] === 'active' && password_verify($password, $user['password_hash'])) {
             $_SESSION['login_fail_count'] = 0;
+            unset($_SESSION['login_fail_last']);
             login_user((int) $user['id']);
             ourthology_pdo()->prepare('UPDATE users SET last_login_at = NOW() WHERE id = :id')
                 ->execute(['id' => $user['id']]);
-            header('Location: ' . ($next ?? '/timeline.php'));
+            // Phase 95: via ?check=1 (see the top of this file), which
+            // forwards straight on to $next once it sees the session.
+            header('Location: /login.php?check=1' . ($next !== null ? '&next=' . rawurlencode($next) : ''));
             exit;
         }
 
         $_SESSION['login_fail_count']++;
+        $_SESSION['login_fail_last'] = time();
         // Deliberately generic — never reveal whether the email exists.
         $errors[] = 'Incorrect email or password.';
     }
@@ -67,7 +97,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Log in — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=27">
+<link rel="stylesheet" href="/styles.css?v=28">
+<style>
+  .cookie-help { text-align:left; line-height:1.45; }
+  .cookie-help p { margin:6px 0 4px; }
+  .cookie-help ul { margin:4px 0 0; padding-left:18px; }
+  .cookie-help li { margin:4px 0; }
+</style>
 </head>
 <body>
   <div class="card">
@@ -89,6 +125,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <?php if ($accountDeleted): ?>
       <p class="foot-link" style="margin-top:0;">Your account has been deleted. Take care.</p>
+    <?php endif; ?>
+
+    <?php if ($cookieDropped && !$errors): ?>
+      <div class="error cookie-help" role="alert">
+        <b>Your password was right, but this browser didn't keep you signed in.</b>
+        <p>That's usually old saved data for this website on this device. To clear it:</p>
+        <ul>
+          <li><b>iPad or iPhone:</b> open <i>Settings</i> &rarr; <i>Apps</i> &rarr; <i>Safari</i> &rarr; <i>Advanced</i> &rarr; <i>Website Data</i> (on older devices: <i>Settings</i> &rarr; <i>Safari</i> &rarr; <i>Advanced</i> &rarr; <i>Website Data</i>), search for &ldquo;ourthology&rdquo;, swipe it away, then come back and log in again. While you're in <i>Settings</i> &rarr; <i>Safari</i>, check <i>Block All Cookies</i> is switched off.</li>
+          <li><b>Computer:</b> clear this site's cookies in your browser's settings, or try a private window.</li>
+          <li>If you opened this page from a link in an email or a social app, open <b>ourthology.com</b> in Safari or Chrome itself instead.</li>
+        </ul>
+      </div>
     <?php endif; ?>
 
     <?php if ($errors): ?>

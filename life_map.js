@@ -250,3 +250,50 @@
   window.addEventListener("hashchange", fromHash);
   fromHash();
 })();
+
+/*
+ * Phase 96: the phone-only View / Zoom dropdowns (timeline.php
+ * .m-view-controls). They don't do anything themselves -- choosing an
+ * option clicks the matching pill (River/Rings/Spiral, a map, a zoom),
+ * which is hidden on a phone but still does the real work, and they follow
+ * the pills' state back so they always show what's on screen.
+ */
+(function () {
+  "use strict";
+  var viewSel = document.getElementById("mViewSelect");
+  var zoomSel = document.getElementById("mZoomSelect");
+  if (!viewSel || !zoomSel) return;
+  function q(sel) { return document.querySelector(sel); }
+  function sync() {
+    var map = q("#mapToggle button.active");
+    var layout = q("#layoutToggle button.active");
+    var zoom = q("#zoomToggle button.active");
+    viewSel.value = map ? "map:" + map.getAttribute("data-map") : (layout ? layout.getAttribute("data-layout") : "river");
+    if (zoom) zoomSel.value = zoom.getAttribute("data-zoom");
+    zoomSel.disabled = !!map;
+  }
+  viewSel.addEventListener("change", function () {
+    var v = viewSel.value, b;
+    if (v.indexOf("map:") === 0) {
+      b = q('#mapToggle button[data-map="' + v.slice(4) + '"]');
+      if (b && !b.classList.contains("active")) b.click();
+    } else {
+      b = q('#layoutToggle button[data-layout="' + v + '"]');
+      if (b) b.click();
+    }
+    sync();
+  });
+  zoomSel.addEventListener("change", function () {
+    var b = q('#zoomToggle button[data-zoom="' + zoomSel.value + '"]');
+    if (b) b.click();
+    sync();
+  });
+  if (window.MutationObserver) {
+    var mo = new MutationObserver(sync);
+    ["#layoutToggle", "#zoomToggle", "#mapToggle"].forEach(function (id) {
+      var el = q(id);
+      if (el) mo.observe(el, { attributes: true, subtree: true, attributeFilter: ["class"] });
+    });
+  }
+  sync();
+})();

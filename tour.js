@@ -472,8 +472,32 @@
     }
   }
 
+  // Phase 96: on a phone several tour targets (the pill nav, the page's
+  // action pills, the zoom buttons...) are hidden and have a visible
+  // stand-in instead -- a tab-bar item, the floating "+" button, a dropdown
+  // -- marked data-tour-for="<the original selector>". Failing that, a
+  // hidden target up in the page header is pointed at via the Menu button
+  // (data-tour-fallback), where it now lives. Anything else still hidden
+  // gets the centred tooltip, as before, rather than a highlight stuck in
+  // the top-left corner.
+  function isShown(el) { return !!(el && el.getClientRects && el.getClientRects().length); }
+  function resolveTarget(sel) {
+    var el = null;
+    try { el = document.querySelector(sel); } catch (e) { el = null; }
+    if (isShown(el)) return el;
+    var alts = document.querySelectorAll("[data-tour-for]");
+    for (var i = 0; i < alts.length; i++) {
+      if (alts[i].getAttribute("data-tour-for") === sel && isShown(alts[i])) return alts[i];
+    }
+    if (el && el.closest && el.closest(".nav")) {
+      var fb = document.querySelector("[data-tour-fallback]");
+      if (isShown(fb)) return fb;
+    }
+    return isShown(el) ? el : null;
+  }
+
   function positionForStep(s) {
-    var target = s.target ? document.querySelector(s.target) : null;
+    var target = s.target ? resolveTarget(s.target) : null;
     if (!target) {
       highlight.hidden = true;
       tooltip.classList.add("tour-centered");
@@ -542,7 +566,7 @@
   function showPostTourNudge() {
     try { sessionStorage.removeItem("ourthologyShowPostTourNudge"); } catch (e) {}
     if (postTourNudge) { postTourNudge.hidden = false; }
-    var addMemoryLink = document.getElementById("tourAddMemory");
+    var addMemoryLink = resolveTarget("#tourAddMemory"); // Phase 96: the floating "+" on a phone
     if (addMemoryLink) { flashArrowAt(addMemoryLink); }
   }
 
