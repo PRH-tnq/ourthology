@@ -782,3 +782,85 @@ CREATE INDEX idx_tripmedia_event_role ON trip_event_media(trip_event_id, role, s
 -- ---------------------------------------------------------------------
 ALTER TABLE letters
   ADD COLUMN closing_line VARCHAR(80) NULL AFTER from_line;
+
+-- ---------------------------------------------------------------------
+-- Phase 92: Places we lived -- see db/migrations/2026_phase92_places_we_lived.sql
+-- and includes/places.php for the full model.
+-- ---------------------------------------------------------------------
+
+CREATE TABLE homes (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  family_group_id       INT UNSIGNED NOT NULL,
+  created_by_person_id  INT UNSIGNED NULL,
+  created_by_user_id    INT UNSIGNED NOT NULL,
+  name                  VARCHAR(120) NULL,
+  address               TEXT NULL,
+  postcode              VARCHAR(20) NULL,
+  country               VARCHAR(80) NULL,
+  lat                   DECIMAL(9,6) NULL,
+  lng                   DECIMAL(9,6) NULL,
+  visibility            ENUM('private','public','custom') NOT NULL DEFAULT 'public',
+  notes                 TEXT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_home_created_person FOREIGN KEY (created_by_person_id) REFERENCES persons(id) ON DELETE SET NULL,
+  CONSTRAINT fk_home_created_user FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE home_residents (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  home_id               INT UNSIGNED NOT NULL,
+  person_id             INT UNSIGNED NOT NULL,
+  moved_in              DATE NULL,
+  moved_in_precision    ENUM('day','month','year') NULL,
+  moved_out             DATE NULL,
+  moved_out_precision   ENUM('day','month','year') NULL,
+  created_by_user_id    INT UNSIGNED NOT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_home_resident (home_id, person_id),
+  CONSTRAINT fk_resident_home FOREIGN KEY (home_id) REFERENCES homes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_resident_person FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE,
+  CONSTRAINT fk_resident_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE home_updates (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  home_id               INT UNSIGNED NOT NULL,
+  sort_order            INT UNSIGNED NOT NULL DEFAULT 0,
+  title                 VARCHAR(160) NOT NULL,
+  update_date           DATE NULL,
+  update_date_precision ENUM('day','month','year') NULL,
+  notes                 TEXT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_update_home FOREIGN KEY (home_id) REFERENCES homes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE home_media (
+  id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  home_id               INT UNSIGNED NOT NULL,
+  update_id             INT UNSIGNED NULL,
+  file_path             VARCHAR(255) NOT NULL,
+  mime_type             VARCHAR(100) NOT NULL,
+  byte_size             INT UNSIGNED NOT NULL,
+  width                 INT UNSIGNED NULL,
+  height                INT UNSIGNED NULL,
+  sort_order            INT UNSIGNED NOT NULL DEFAULT 0,
+  uploaded_by_user_id   INT UNSIGNED NOT NULL,
+  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_homemedia_home FOREIGN KEY (home_id) REFERENCES homes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_homemedia_update FOREIGN KEY (update_id) REFERENCES home_updates(id) ON DELETE CASCADE,
+  CONSTRAINT fk_homemedia_user FOREIGN KEY (uploaded_by_user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_home_group ON homes(family_group_id);
+CREATE INDEX idx_resident_person ON home_residents(person_id);
+CREATE INDEX idx_update_home_sort ON home_updates(home_id, sort_order);
+CREATE INDEX idx_homemedia_home ON home_media(home_id, update_id, sort_order);
+
+-- ---------------------------------------------------------------------
+-- Phase 93: optional location on a memory (see db/migrations/2026_phase93_memory_locations.sql)
+-- ---------------------------------------------------------------------
+ALTER TABLE timeline_entries
+  ADD COLUMN location_label VARCHAR(255) NULL AFTER occurred_on,
+  ADD COLUMN location_lat DECIMAL(9,6) NULL AFTER location_label,
+  ADD COLUMN location_lng DECIMAL(9,6) NULL AFTER location_lat;

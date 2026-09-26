@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/cards.php';
 require_once __DIR__ . '/includes/calendar.php'; // Phase 68: ourthology_calendar_reminder_rows(), fetch_calendar_event_for_group() -- the reminder banner now covers key dates too, not just birthdays
 require_once __DIR__ . '/includes/trips.php'; // Phase 69: Memory Planner -- fetch_trip_plan_detail(), reused below for the "open_trip=" auto-open flow
 require_once __DIR__ . '/includes/tour_engine.php';
+require_once __DIR__ . '/includes/places.php'; // Phase 92: "Places we lived" homes shown as cards on the timeline
 
 require_login();
 $me = current_user_with_person();
@@ -513,6 +514,12 @@ foreach ($entries as $entry) {
         'tags'       => $tags,
         'iAmTagged'  => $iAmTagged,
         'myNote'     => $myNote,
+        // Phase 93: optional "where it happened" -- a label, with or without a map pin.
+        'place'      => ($entry['location_label'] ?? null) !== null || $entry['location_lat'] !== null ? [
+            'label' => (string) ($entry['location_label'] ?? ''),
+            'lat'   => $entry['location_lat'] !== null ? (float) $entry['location_lat'] : null,
+            'lng'   => $entry['location_lng'] !== null ? (float) $entry['location_lng'] : null,
+        ] : null,
         // Phase 54: "show it on their timeline as a little mini
         // postcard/envelope symbol" -- set only on the copy a save
         // creates (save_postcard_to_timeline()/save_letter_copy_to_
@@ -535,6 +542,74 @@ foreach ($entries as $entry) {
             'finishDate' => $entry['trip']['finish_date'],
             'eventCount' => (int) $entry['trip']['event_count'],
         ] : null,
+    ];
+}
+
+// Phase 92: every home this person lived in (that the viewer may see)
+// appears on their timeline at its move-in date as a house card -- the
+// home itself lives on places.php, so clicking the card goes there. Not a
+// timeline_entries row: nothing to keep in sync, nothing to tag or edit
+// from here. Homes with no move-in date yet can't be placed on the river,
+// so they're skipped.
+// Phase 94: every home with a map pin also goes to the "Where we've lived"
+// map (the map toggle beside River/Rings/Spiral), in the order lived in --
+// including homes with no move-in date yet, which can't go on the river.
+$lifeHomes = [];
+foreach (fetch_homes_for_person($pdo, (int) $target['id'], (int) $me['user_id'], $myPersonId, $myGroup) as $h) {
+    $label = places_home_label($h, 'a new home');
+    $firstPhoto = $h['media']['general'][0] ?? null;
+    if ($firstPhoto === null) {
+        foreach ($h['media'] as $group) {
+            $firstPhoto = $group[0] ?? null;
+            if ($firstPhoto) {
+                break;
+            }
+        }
+    }
+    $inL = places_date_label($h['my_in'], $h['my_in_p']);
+    $outL = places_date_label($h['my_out'], $h['my_out_p']);
+    $homeUrl = '/places.php?person_id=' . (int) $target['id'] . '&home=' . (int) $h['id'] . '#home-' . (int) $h['id'];
+    if ($h['lat'] !== null && $h['lng'] !== null) {
+        $others = [];
+        foreach ($h['residents'] as $r) {
+            if ((int) $r['person_id'] !== (int) $target['id']) {
+                $others[] = trim($r['first_name'] . ' ' . $r['surname']);
+            }
+        }
+        $lifeHomes[] = [
+            'id'      => (int) $h['id'],
+            'label'   => places_home_label($h),
+            'place'   => trim(implode(', ', array_filter([
+                preg_replace('/\s*\n\s*/', ', ', trim((string) ($h['address'] ?? ''))),
+                (string) ($h['country'] ?? ''),
+            ]))),
+            'lat'     => (float) $h['lat'],
+            'lng'     => (float) $h['lng'],
+            'dates'   => $inL !== '' && $outL !== '' ? "{$inL} – {$outL}" : ($inL !== '' ? "From {$inL}" : ($outL !== '' ? "Until {$outL}" : '')),
+            'with'    => $others,
+            'changes' => count($h['updates']),
+            'photo'   => $firstPhoto ? '/home_media.php?id=' . (int) $firstPhoto['id'] . '&thumb=1' : null,
+            'url'     => $homeUrl,
+        ];
+    }
+    if (empty($h['my_in'])) {
+        continue;
+    }
+    $jsEntries[] = [
+        'id'         => 'home-' . (int) $h['id'],
+        'date'       => substr((string) $h['my_in'], 0, 10),
+        'title'      => 'Moved to ' . $label,
+        'thought'    => $outL !== '' ? "Lived here {$inL} – {$outL}" : "Moved in {$inL}",
+        'visibility' => $h['visibility'],
+        'type'       => 'memory',
+        'media'      => $firstPhoto ? [['kind' => 'image', 'url' => '/home_media.php?id=' . (int) $firstPhoto['id']]] : [],
+        'canEdit'    => false,
+        'tags'       => [],
+        'iAmTagged'  => false,
+        'myNote'     => null,
+        'origin'     => 'home',
+        'trip'       => null,
+        'home'       => ['url' => $homeUrl],
     ];
 }
 
@@ -582,6 +657,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      clicks something. -->
 <script src="/clipboard_paste.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
+<script src="/geo.js?v=2"></script>
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -1263,6 +1339,42 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .viewer-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .viewer-date { color:var(--ink-faint); font-weight:700; font-size:13px; }
   .viewer-thought-view { font-size:14.5px; line-height:1.65; color:var(--ink-soft); white-space:pre-wrap; margin:0; }
+  /* Phase 94: "Where we've lived" / "Where we've visited" maps, swapped in for the timeline diagram. */
+  .map-toggle button { display:inline-flex; align-items:center; gap:6px; }
+  .map-toggle svg { width:15px; height:15px; flex:none; }
+  body.map-mode #arcWrap { display:none; }
+  body.map-mode #layoutToggle button.active, body.map-mode #zoomToggle button.active { background:transparent; color:var(--ink-soft); transform:none; cursor:pointer; }
+  .life-map-wrap { position:relative; background:var(--paper-2); border:2px solid var(--accent); border-radius:24px; box-shadow:var(--shadow); overflow:hidden; margin-bottom:26px; }
+  .life-map-wrap[hidden] { display:none; }
+  #lifeMap { height:480px; }
+  @media (max-width: 700px) { #lifeMap { height:380px; } }
+  .life-map-bar { display:flex; align-items:center; gap:10px 16px; flex-wrap:wrap; justify-content:space-between; padding:10px 16px; border-top:1px solid var(--line); font-size:13px; color:var(--ink-soft); }
+  .life-map-link { font-weight:700; color:var(--accent); white-space:nowrap; }
+  .life-map-empty { position:absolute; left:50%; top:calc(50% - 22px); transform:translate(-50%,-50%); z-index:500; background:rgba(251,248,241,.96); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:18px 22px; max-width:340px; width:calc(100% - 40px); text-align:center; font-size:14px; color:var(--ink-soft); }
+  .life-map-empty[hidden] { display:none; }
+  .life-map-empty b { display:block; color:var(--ink); font-size:15.5px; margin-bottom:4px; }
+  .life-map-empty a { display:inline-block; margin-top:10px; font-weight:700; color:var(--accent); }
+  .lm-pin { width:30px; height:30px; border-radius:50% 50% 50% 0; background:var(--accent); transform:rotate(-45deg); border:2px solid #fff; box-shadow:0 3px 8px rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; }
+  .lm-pin span { transform:rotate(45deg); color:#fff; font-weight:800; font-size:12.5px; font-family:system-ui,sans-serif; }
+  .lm-dot { width:16px; height:16px; border-radius:50%; background:#C98A1B; border:2px solid #fff; box-shadow:0 1px 5px rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; color:#fff; font:800 10px/1 system-ui,sans-serif; }
+  .lm-dot.many { width:24px; height:24px; font-size:11px; }
+  .lm-pop { display:flex; gap:10px; align-items:flex-start; max-width:260px; font-family:inherit; }
+  .lm-pop img { width:64px; height:64px; object-fit:cover; border-radius:8px; flex:none; }
+  .lm-pop b { display:block; font-size:14px; color:var(--ink); }
+  .lm-pop small { display:block; color:var(--ink-soft); margin:2px 0 3px; font-size:12px; line-height:1.35; }
+  .lm-pop .lm-with { font-size:12px; color:var(--ink-soft); margin:0 0 4px; }
+  .lm-pop a, .lm-list button { font-weight:700; color:var(--accent); }
+  .lm-list { max-height:220px; overflow-y:auto; min-width:210px; max-width:260px; }
+  .lm-list h4 { margin:0 0 6px; font-size:13px; color:var(--ink-soft); font-weight:600; }
+  .lm-list button { display:flex; gap:8px; align-items:center; width:100%; text-align:left; background:none; border:none; border-top:1px solid var(--line); padding:6px 0; font:inherit; font-size:13px; cursor:pointer; }
+  .lm-list button img { width:34px; height:34px; object-fit:cover; border-radius:6px; flex:none; }
+  .lm-list button span small { display:block; font-weight:400; color:var(--ink-faint); font-size:11.5px; }
+  .viewer-place { margin-top:14px; }
+  .viewer-place-row { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:13.5px; color:var(--ink-soft); }
+  .viewer-place-row svg { color:var(--accent); flex:none; }
+  .viewer-place-row a { font-size:12.5px; color:var(--accent); }
+  #viewerPlaceMap { height:150px; border-radius:10px; border:1px solid var(--line); margin-top:8px; }
+  #viewerPlaceMap[hidden] { display:none; }
   .viewer-thought-view:empty::before { content:"No thoughts written yet."; color:var(--ink-faint); font-style:italic; }
   .viewer-actions { display:flex; justify-content:space-between; align-items:center; padding:14px 24px; border-top:1px solid var(--line); }
   /* Pre-existing bug, found incidentally while testing Phase 41: this link
@@ -1533,6 +1645,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         <button data-zoom="decade">Decade</button>
         <button data-zoom="year">This year</button>
       </div>
+      <?php // Phase 94: the two maps replace the timeline diagram in place
+            // (life_map.js). Choosing River/Rings/Spiral or a zoom again, or
+            // the active map button, brings the timeline back. ?>
+      <div class="segmented map-toggle" id="mapToggle" role="group" aria-label="Maps">
+        <button type="button" data-map="lived" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 8.2V16h10V8.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Where we've lived</button>
+        <button type="button" data-map="visited" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 18s6-5.6 6-10.2A6 6 0 0 0 4 7.8C4 12.4 10 18 10 18Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="7.8" r="2.1" fill="currentColor"/></svg>Where we've visited</button>
+      </div>
       <div class="controls-right">
         <?php // Phase 71: "Take the tour" / "What's new", moved here from
               // the nav row above -- same River/Rings/Spiral row, right
@@ -1608,6 +1727,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       </div>
     </div>
 
+    <?php // Phase 94: shown instead of #arcWrap while a map is chosen above. ?>
+    <div class="life-map-wrap" id="lifeMapWrap" hidden>
+      <div id="lifeMap" role="region" aria-label="Map"></div>
+      <div class="life-map-bar" id="lifeMapBar">
+        <span class="life-map-note" id="lifeMapNote"></span>
+        <a class="life-map-link" id="lifeMapManage" href="/places.php?person_id=<?= (int) $target['id'] ?>">Add or edit homes</a>
+      </div>
+      <div class="life-map-empty" id="lifeMapEmpty" hidden></div>
+    </div>
+
     <div class="rail-heading">
       <h2>Memories in view</h2>
       <span class="count mono" id="railCount"></span>
@@ -1630,6 +1759,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <span id="viewerPillView"></span>
           </div>
           <p class="viewer-thought-view" id="viewerThoughtView"></p>
+
+          <div class="viewer-place" id="viewerPlace" hidden>
+            <div class="viewer-place-row">
+              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 18s6-5.6 6-10.2A6 6 0 0 0 4 7.8C4 12.4 10 18 10 18Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="7.8" r="2.2" fill="currentColor"/></svg>
+              <span id="viewerPlaceLabel"></span>
+              <a id="viewerPlaceLink" href="#" hidden>See it on the map</a>
+            </div>
+            <div id="viewerPlaceMap" hidden></div>
+          </div>
 
           <div class="viewer-tag-notes" id="viewerTagNotes" hidden></div>
 
@@ -1801,6 +1939,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   </div>
 
   <script id="entriesData" type="application/json"><?= $entriesJsonSafe ?></script>
+  <script id="lifeHomesData" type="application/json"><?= json_encode($lifeHomes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
   <?php
     // Phase 69: the tag-and-approve picker for a BRAND-NEW trip is bounded
     // to $target the same way add_entry.php bounds a new memory's picker
@@ -1860,6 +1999,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       postcard: '<span class="card-origin-badge" title="Saved from a postcard"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4.5" width="15" height="11" rx="1.2"/><path d="M2.5 7.5h15M6 4.5v3" stroke-linecap="round"/></svg></span>',
       letter: '<span class="card-origin-badge" title="Saved from a letter"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.2" y="4.5" width="15.6" height="11.5" rx="1.2"/><path d="M2.6 5.3l7.4 6 7.4-6" stroke-linejoin="round"/></svg></span>',
       card: '<span class="card-origin-badge" title="Saved from a greeting card"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v14M3.5 5.5h13a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke-linejoin="round"/></svg></span>',
+      home: '<span class="card-origin-badge" title="A home — opens Places we lived"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9.5 10 3.5l7 6M5 8v8.5h10V8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 16.5v-4h3v4" stroke-linejoin="round"/></svg></span>',
       trip: '<span class="card-origin-badge" title="A planned trip"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16.5 7.5 6h5l4.5 10.5M6 13h8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
     };
     // Phase 33: shared by the memory-card rail and the viewer's detail
@@ -2345,7 +2485,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             '</div>' +
           '</div>';
         card.addEventListener("click", function () {
-          if (e.trip) { openTripPlanner(e.trip.tripPlanId); } else { openViewer(e.id); }
+          if (e.home) { window.location.href = e.home.url; }
+          else if (e.trip) { openTripPlanner(e.trip.tripPlanId); } else { openViewer(e.id); }
         });
         rail.appendChild(card);
       });
@@ -3158,6 +3299,34 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     memLightboxNext.addEventListener("click", function () { memLightboxStep(1); });
     memLightbox.addEventListener("click", function (e) { if (e.target === memLightbox) closeMemLightbox(); });
 
+    // Phase 93: the memory's place, with a small map when it has a pin.
+    var viewerPlace = document.getElementById("viewerPlace");
+    var viewerPlaceMapEl = document.getElementById("viewerPlaceMap");
+    var viewerPlaceMap = null, viewerPlaceMarker = null;
+    function showViewerPlace(e) {
+      var pl = e.place;
+      viewerPlace.hidden = !pl;
+      viewerPlaceMapEl.hidden = true;
+      if (!pl) return;
+      var hasPin = pl.lat !== null && pl.lng !== null;
+      document.getElementById("viewerPlaceLabel").textContent = pl.label || "Pinned on the map";
+      var link = document.getElementById("viewerPlaceLink");
+      link.hidden = !hasPin;
+      link.href = "/places.php?person_id=<?= (int) $target['id'] ?>&memory=" + encodeURIComponent(e.id);
+      if (!hasPin || !window.ourthologyGeo) return;
+      window.ourthologyGeo.loadLeaflet().then(function (L) {
+        viewerPlaceMapEl.hidden = false;
+        if (!viewerPlaceMap) {
+          viewerPlaceMap = L.map(viewerPlaceMapEl, { scrollWheelZoom: false, attributionControl: true });
+          L.tileLayer(window.ourthologyGeo.TILE_URL, { maxZoom: 19, attribution: window.ourthologyGeo.TILE_ATTR }).addTo(viewerPlaceMap);
+          viewerPlaceMarker = L.marker([pl.lat, pl.lng]).addTo(viewerPlaceMap);
+        }
+        viewerPlaceMarker.setLatLng([pl.lat, pl.lng]);
+        // the modal has only just been shown, so let it lay out first
+        setTimeout(function () { viewerPlaceMap.invalidateSize(); viewerPlaceMap.setView([pl.lat, pl.lng], 13); }, 60);
+      }).catch(function () { viewerPlaceMapEl.hidden = true; });
+    }
+
     function openViewer(id) {
       var e = findEntry(id);
       if (!e) return;
@@ -3170,6 +3339,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         (e.type === "diary" ? DIARY_PILL_HTML : "") +
         visibilityPillHtml(e.visibility);
       viewerThoughtView.textContent = e.thought || "";
+      showViewerPlace(e);
 
       // Notes family members tagged on this memory have written, read-only
       // — shown regardless of whose timeline it's being viewed from, since
@@ -3232,6 +3402,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     }
     document.getElementById("viewerClose").addEventListener("click", closeViewer);
     document.getElementById("viewerCloseBtn").addEventListener("click", closeViewer);
+    // Phase 94: the "Where we've visited" map (life_map.js) opens memories in this same viewer.
+    window.ourthologyOpenMemory = function (id) { if (findEntry(String(id))) openViewer(String(id)); };
+    // Phase 93: ?entry=ID opens that memory straight away (linked from the
+    // memory dots on the Places map).
+    (function () {
+      var m = /[?&]entry=(\d+)/.exec(window.location.search);
+      if (m && findEntry(m[1])) setTimeout(function () { openViewer(m[1]); }, 250);
+    })();
     viewerScrim.addEventListener("click", function (e) { if (e.target === viewerScrim) closeViewer(); });
     document.addEventListener("keydown", function (e) {
       // Phase 81: #memLightbox sits on top of #viewerScrim, so its Escape
@@ -4959,5 +5137,6 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
+  <script src="/life_map.js?v=2"></script>
 </body>
 </html>

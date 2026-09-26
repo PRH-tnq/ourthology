@@ -351,6 +351,14 @@ function ourthology_tour_steps(): array
         [
             'page' => 'timeline',
             'action' => 'close_trip_planner',
+            'target' => '#mapToggle',
+            'title' => 'Your life on a map',
+            'body' => "Swap the timeline for a map. “Where we've lived” shows every home you've lived in, joined up in the order you lived in them — click one for the dates, photos and how it changed over the years. “Where we've visited” puts every memory that has a place on it (“Where it happened”) on the map. Pick River, Rings or Spiral to get the timeline back.",
+            'group' => 'places',
+        ],
+        [
+            'page' => 'timeline',
+            'action' => 'close_trip_planner',
             'target' => null,
             'title' => 'On to your family tree',
             'body' => "Everyone in your family has their own timeline, just like this one. You can open any of them from your family tree — let's take a look at that now.",
@@ -558,6 +566,7 @@ function ourthology_tour_group_since(): array
         'greeting_cards'     => 67,
         'calendar_send_card' => 68,
         'memory_planner'     => 69,
+        'places'             => 94,
     ];
 }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/graph.php';
 require_once __DIR__ . '/media.php';
+require_once __DIR__ . '/places.php'; // Phase 92: homes left with nobody living in them
 // ourthology_my_identities() lives in auth.php — every caller of this
 // file is a page that has already required auth.php for require_login()
 // / current_user_with_person(), so it's assumed loaded rather than
@@ -181,6 +182,12 @@ function ourthology_erase_person(PDO $pdo, int $personId, ?array &$deferredFiles
     // member_person_id -- nothing to do explicitly.
 
     $pdo->prepare('DELETE FROM persons WHERE id = :id')->execute(['id' => $personId]);
+
+    // Phase 92: home_residents rows cascade with the persons row; any home
+    // that now has nobody left living in it goes too, with its photos.
+    foreach (places_delete_empty_homes($pdo) as $path) {
+        ourthology_erase_file($path, $deferredFiles);
+    }
 }
 
 /**
@@ -279,6 +286,11 @@ function ourthology_erase_family_group(PDO $pdo, int $familyGroupId, ?array &$de
     // to do explicitly.
 
     $pdo->prepare('DELETE FROM persons WHERE family_group_id = :gid')->execute(['gid' => $familyGroupId]);
+
+    // Phase 92: see ourthology_erase_person() -- empty homes go too.
+    foreach (places_delete_empty_homes($pdo) as $path) {
+        ourthology_erase_file($path, $deferredFiles);
+    }
 }
 
 /**

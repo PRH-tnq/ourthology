@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/media.php';
 require_once __DIR__ . '/includes/graph.php';
 require_once __DIR__ . '/includes/memory_tags.php';
 require_once __DIR__ . '/includes/entries.php';
+require_once __DIR__ . '/includes/places.php';
 require_once __DIR__ . '/includes/custom_audience.php';
 require_once __DIR__ . '/includes/tour_engine.php';
 
@@ -142,6 +143,8 @@ $occurredYear = '';
 $visibility = 'public'; // Phase 33 follow-up: default visibility is now Public
 $tagPersonIds = [];
 $displayMediaIds = [];
+// Phase 93: optional "where it happened".
+$location = ['label' => null, 'lat' => null, 'lng' => null];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if ($isEditing) {
@@ -156,6 +159,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $occurredYear = (string) $oy;
         }
         $visibility = $entry['visibility'];
+        $location = [
+            'label' => $entry['location_label'],
+            'lat'   => $entry['location_lat'] !== null ? (float) $entry['location_lat'] : null,
+            'lng'   => $entry['location_lng'] !== null ? (float) $entry['location_lng'] : null,
+        ];
         $tagPersonIds = $currentTagIds;
         $displayMediaIds = array_keys($existingMediaById);
     } elseif (isset($_GET['date'])) {
@@ -195,6 +203,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     $occurredMonth = trim((string) ($_POST['occurred_month'] ?? ''));
     $occurredYear  = trim((string) ($_POST['occurred_year'] ?? ''));
     $visibility    = (string) ($_POST['visibility'] ?? 'public');
+    $location      = memory_location_from_post($_POST);
 
     if (!in_array($entryKind, ['memory', 'diary'], true)) {
         $errors[] = 'Choose a valid entry type.';
@@ -321,13 +330,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 $pdo->prepare(
                     'UPDATE timeline_entries
                      SET entry_type = :type, title = :title, body = :body,
-                         occurred_on = :occurred, visibility = :vis
+                         occurred_on = :occurred, visibility = :vis,
+                         location_label = :loc, location_lat = :lat, location_lng = :lng
                      WHERE id = :id AND person_id = :pid'
                 )->execute([
                     'type'     => $dbEntryType,
                     'title'    => $title !== '' ? $title : null,
                     'body'     => $body !== '' ? $body : null,
                     'occurred' => $occurredOnValue,
+                    'loc'      => $location['label'],
+                    'lat'      => $location['lat'],
+                    'lng'      => $location['lng'],
                     'vis'      => $visibility,
                     'id'       => $entryId,
                     'pid'      => $targetPersonId,
@@ -349,8 +362,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 }
             } else {
                 $stmt = $pdo->prepare(
-                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, visibility, created_by_user_id)
-                     VALUES (:pid, :type, :title, :body, :occurred, :vis, :uid)'
+                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, location_label, location_lat, location_lng, visibility, created_by_user_id)
+                     VALUES (:pid, :type, :title, :body, :occurred, :loc, :lat, :lng, :vis, :uid)'
                 );
                 $stmt->execute([
                     'pid'      => $targetPersonId,
@@ -358,6 +371,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'title'    => $title !== '' ? $title : null,
                     'body'     => $body !== '' ? $body : null,
                     'occurred' => $occurredOnValue,
+                    'loc'      => $location['label'],
+                    'lat'      => $location['lat'],
+                    'lng'      => $location['lng'],
                     'vis'      => $visibility,
                     'uid'      => $me['user_id'],
                 ]);
@@ -447,6 +463,15 @@ foreach ($displayMediaIds as $id) {
     ];
 }
 $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHES);
+
+// Phase 93: the homes on this person's Places map that have a pin, offered
+// as one-tap picks for "Where it happened" (most memories happen at home).
+$locationHomes = [];
+foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $myPersonId, $myGroup) as $h) {
+    if ($h['lat'] !== null && $h['lng'] !== null) {
+        $locationHomes[] = ['label' => places_home_label($h), 'lat' => (float) $h['lat'], 'lng' => (float) $h['lng']];
+    }
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -579,6 +604,28 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
      list happens to be empty). */
   .custom-hint-popup { position:absolute; top:100%; right:0; margin-top:8px; max-width:230px; background:rgba(30,26,22,0.88); color:#fff; font-size:12px; font-weight:400; line-height:1.4; padding:9px 12px; border-radius:9px; box-shadow:0 4px 14px rgba(0,0,0,0.22); z-index:5; pointer-events:none; }
   .custom-hint-popup a { color:#fff; text-decoration:underline; }
+
+  /* Phase 93: "Where it happened" -- an optional place on the memory. */
+  .loc-row { display:flex; gap:8px; }
+  .loc-row input { flex:1 1 auto; min-width:0; }
+  .loc-btn { flex:none; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; font-size:14px; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+  .loc-btn:hover { border-color:var(--accent); color:var(--ink); }
+  .loc-btn:disabled { opacity:.6; cursor:default; }
+  .loc-homes { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; font-size:12.5px; color:var(--ink-faint); }
+  .loc-homes button { font:inherit; font-size:12.5px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--ink-soft); cursor:pointer; }
+  .loc-homes button:hover, .loc-homes button.on { border-color:var(--accent); background:var(--accent-bg); color:var(--ink); }
+  .loc-status { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--ink-soft); }
+  .loc-status #locMsg:empty { display:none; }
+  .loc-link { font:inherit; font-size:12.5px; background:none; border:none; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; }
+  .loc-link[hidden] { display:none; }
+  .loc-choices { display:flex; flex-direction:column; gap:4px; margin-top:6px; }
+  .loc-choices[hidden] { display:none; }
+  .loc-choices span { font-size:12px; color:var(--ink-faint); }
+  .loc-choices button { text-align:left; font:inherit; font-size:12.5px; line-height:1.35; padding:6px 9px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink-soft); cursor:pointer; }
+  .loc-choices button:hover { border-color:var(--accent); }
+  .loc-choices button.on { border-color:var(--accent); background:var(--accent-bg); color:var(--ink); }
+  #locMap { height:220px; border-radius:10px; border:1px solid var(--line); margin-top:8px; }
+  #locMap[hidden] { display:none; }
 </style>
 </head>
 <body>
@@ -688,6 +735,30 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
               <span>Year</span>
             </div>
           </div>
+
+          <label for="locLabel" style="margin-top:14px;">Where it happened <span style="text-transform:none;font-weight:400;">(optional — anywhere in the world)</span></label>
+          <div class="loc-row">
+            <input type="text" id="locLabel" name="location_label" maxlength="255" autocomplete="off"
+              placeholder="e.g. Brighton Pier, or 5 Rue Cler, Paris" value="<?= htmlspecialchars((string) ($location['label'] ?? ''), ENT_QUOTES) ?>">
+            <button type="button" class="loc-btn" id="locFindBtn">Find</button>
+          </div>
+          <input type="hidden" name="location_lat" id="locLat" value="<?= $location['lat'] !== null ? htmlspecialchars(sprintf('%.6F', $location['lat']), ENT_QUOTES) : '' ?>">
+          <input type="hidden" name="location_lng" id="locLng" value="<?= $location['lng'] !== null ? htmlspecialchars(sprintf('%.6F', $location['lng']), ENT_QUOTES) : '' ?>">
+          <?php if ($locationHomes): ?>
+            <div class="loc-homes" id="locHomes">
+              <span>At home:</span>
+              <?php foreach ($locationHomes as $lh): ?>
+                <button type="button" data-label="<?= htmlspecialchars($lh['label'], ENT_QUOTES) ?>" data-lat="<?= sprintf('%.6F', $lh['lat']) ?>" data-lng="<?= sprintf('%.6F', $lh['lng']) ?>"><?= htmlspecialchars($lh['label'], ENT_QUOTES) ?></button>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+          <div class="loc-status">
+            <span id="locMsg"></span>
+            <button type="button" class="loc-link" id="locMapBtn">Pick on a map</button>
+            <button type="button" class="loc-link" id="locClearBtn" hidden>Remove pin</button>
+          </div>
+          <div class="loc-choices" id="locChoices" hidden></div>
+          <div id="locMap" hidden></div>
         </div>
 
         <div class="entry-col">
@@ -1158,6 +1229,8 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
   })();
   </script>
   <script src="/date_autotab.js?v=1"></script>
+  <script src="/geo.js?v=2"></script>
+  <script src="/memory_location.js?v=1"></script>
   <?php ourthology_render_tour('add_entry', $myPersonId); ?>
 </body>
 </html>

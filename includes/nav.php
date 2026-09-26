@@ -12,6 +12,11 @@ declare(strict_types=1);
  * pages). Here every page always renders all four, with the current page
  * shown as the active red pill instead of being left out.
  *
+ * Phase 92: a fifth destination, 'places' (places.php, "Places we lived").
+ * Phase 94: removed again -- the homes map now lives on the timeline itself
+ * ("Where we've lived" beside River/Rings/Spiral), and places.php is reached
+ * from there ("Add or edit homes") or from a home's card, not the nav.
+ *
  * $current is one of: 'tree', 'timeline', 'calendar', 'pending' -- or ''
  * (no match) for a page that isn't itself one of the four destinations
  * (edit_person.php), which just renders all four as plain links.
