@@ -351,18 +351,75 @@
         '<div class="res-dates">' + trio("residents[" + p.id + "][in_%]", c ? c.in : null, "Moved in") + trio("residents[" + p.id + "][out_%]", c ? c.out : null, "Moved out") + "</div></div>";
     }).join("");
   }
+  // Phase 97: tagging someone else onto a home fills in the dates of
+  // whoever is making the record -- you, if you're ticked and have dates;
+  // otherwise the first ticked person with dates -- since people who lived
+  // somewhere together usually moved in and out together. A row filled in
+  // that way keeps following those dates while you're still typing them
+  // (so the order you fill things in doesn't matter), until you change that
+  // person's own dates, which makes them theirs. places.php applies the
+  // same default on save for anyone newly ticked with no dates at all.
+  function dateInputs(row) { return row ? row.querySelectorAll(".res-dates input") : []; }
+  function hasDates(row) { return Array.prototype.some.call(dateInputs(row), function (i) { return i.value.trim() !== ""; }); }
+  function rowFor(pid) {
+    var cb = resList.querySelector('input[name="residents[' + pid + '][on]"]');
+    return cb ? cb.closest(".res-row") : null;
+  }
+  function sourceRow(except) {
+    var me = rowFor(DATA.myPersonId);
+    if (me && me !== except && me.classList.contains("on") && hasDates(me)) return me;
+    var rows = resList.querySelectorAll(".res-row.on");
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] !== except && !rows[i].hasAttribute("data-follow") && hasDates(rows[i])) return rows[i];
+    }
+    return null;
+  }
+  function copyInto(dst, src) {
+    var s = dateInputs(src), d = dateInputs(dst);
+    Array.prototype.forEach.call(d, function (inp, k) { inp.value = s[k] ? s[k].value : ""; });
+  }
+  function setFollow(row, on) {
+    if (on) row.setAttribute("data-follow", "1"); else row.removeAttribute("data-follow");
+    var note = row.querySelector(".res-follow-note");
+    if (on && !note) {
+      note = document.createElement("div");
+      note.className = "res-follow-note";
+      row.querySelector(".res-dates").appendChild(note);
+    }
+    if (note) {
+      note.hidden = !on;
+      var src = on ? sourceRow(row) : null;
+      var who = src ? src.querySelector("label").textContent.replace(/\s*\(you\)\s*$/, "").trim() : "";
+      note.textContent = on ? "Same dates as " + (src && src === rowFor(DATA.myPersonId) ? "you" : (who || "above")) + " — change them if theirs were different." : "";
+    }
+  }
   resList.addEventListener("change", function (e) {
     if (e.target.type !== "checkbox") return;
     var row = e.target.closest(".res-row");
     row.classList.toggle("on", e.target.checked);
-    // Copy the first ticked person's dates into a newly ticked, still-blank row.
     if (e.target.checked) {
-      var first = resList.querySelector(".res-row.on");
-      if (first && first !== row) {
-        var src = first.querySelectorAll(".res-dates input"), dst = row.querySelectorAll(".res-dates input");
-        var blank = Array.prototype.every.call(dst, function (i) { return !i.value; });
-        if (blank) Array.prototype.forEach.call(dst, function (d, k) { d.value = src[k].value; });
+      if (!hasDates(row)) {
+        var src = sourceRow(row);
+        if (src) copyInto(row, src);
+        setFollow(row, true); // keeps following even if the source dates are typed after ticking
       }
+    } else if (row.hasAttribute("data-follow")) {
+      setFollow(row, false);
+    }
+  });
+  resList.addEventListener("input", function (e) {
+    var row = e.target.closest(".res-row");
+    if (!row || !e.target.closest(".res-dates")) return;
+    if (row.hasAttribute("data-follow")) {
+      setFollow(row, false); // their own dates now
+      return;
+    }
+    // typing the record-maker's dates: rows still following them update too
+    if (row === sourceRow(null)) {
+      Array.prototype.forEach.call(resList.querySelectorAll('.res-row.on[data-follow]'), function (f) {
+        copyInto(f, row);
+        setFollow(f, true);
+      });
     }
   });
 

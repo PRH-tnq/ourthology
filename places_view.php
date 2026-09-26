@@ -129,6 +129,8 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   .res-row > label { display:flex; gap:8px; align-items:center; text-transform:none; letter-spacing:normal; font-size:14px; font-weight:600; margin:0; color:var(--ink); }
   .res-dates { display:none; gap:14px; flex-wrap:wrap; margin:6px 0 2px 24px; }
   .res-row.on .res-dates { display:flex; }
+  .res-follow-note { flex-basis:100%; font-size:12px; color:var(--ink-faint); margin-top:-4px; }
+  .res-follow-note[hidden] { display:none; }
   .res-dates small { display:block; font-size:11px; color:var(--ink-faint); margin-bottom:3px; text-transform:uppercase; letter-spacing:.05em; }
   .vis-row { display:flex; gap:14px; flex-wrap:wrap; font-size:14px; }
   .vis-row label { display:flex; gap:6px; align-items:center; text-transform:none; letter-spacing:normal; margin:0; font-weight:500; }
@@ -294,7 +296,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   ], $jsonFlags) ?></script>
   <script src="/date_autotab.js?v=1"></script>
   <script src="/geo.js?v=2"></script>
-  <script src="/places.js?v=3"></script>
+  <script src="/places.js?v=4"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>

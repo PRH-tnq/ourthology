@@ -118,7 +118,7 @@ function fetch_home_residents(PDO $pdo, array $homeIds): array
         "SELECT hr.*, p.first_name, p.surname, p.claimed_by_user_id, p.family_group_id
          FROM home_residents hr JOIN persons p ON p.id = hr.person_id
          WHERE hr.home_id IN ($in)
-         ORDER BY (hr.moved_in IS NULL), hr.moved_in, p.first_name"
+         ORDER BY (COALESCE(hr.moved_in, hr.moved_out) IS NULL), COALESCE(hr.moved_in, hr.moved_out), p.first_name"
     );
     $stmt->execute(array_values($homeIds));
     $out = [];
@@ -205,7 +205,10 @@ function fetch_home_updates_and_media(PDO $pdo, array $homeIds): array
 /**
  * Every home $personId lived in that the viewer is allowed to see, each
  * carrying its residents, updates and photos, in the order that person
- * lived in them (their own move-in date; homes with no date go last).
+ * lived in them: their own move-in date, or their move-out date when only
+ * that is known (Phase 97 -- "lived there until 1990" used to sink to the
+ * bottom); homes with neither go last. Re-sorted on every load, so editing
+ * a date moves the home to its new place straight away.
  */
 function fetch_homes_for_person(PDO $pdo, int $personId, int $userId, int $viewerPersonId, int $viewerGroup): array
 {
@@ -214,7 +217,7 @@ function fetch_homes_for_person(PDO $pdo, int $personId, int $userId, int $viewe
                 hr.moved_out AS my_out, hr.moved_out_precision AS my_out_p
          FROM homes h JOIN home_residents hr ON hr.home_id = h.id
          WHERE hr.person_id = :pid AND h.family_group_id = :gid
-         ORDER BY (hr.moved_in IS NULL), hr.moved_in, h.id'
+         ORDER BY (COALESCE(hr.moved_in, hr.moved_out) IS NULL), COALESCE(hr.moved_in, hr.moved_out), (hr.moved_out IS NULL), hr.moved_out, h.id'
     );
     $stmt->execute(['pid' => $personId, 'gid' => $viewerGroup]);
     $homes = $stmt->fetchAll();

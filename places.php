@@ -148,6 +148,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Tick at least one person who lived there.';
     }
 
+    // Phase 97: someone newly ticked with no dates of their own takes the
+    // dates of whoever is making the record (or, if they aren't on this
+    // home themselves, the first person ticked who has dates) -- the same
+    // default the editor fills in as you tick them (places.js), kept here
+    // too so it holds even if the page's script didn't run. People who were
+    // already on the home keep exactly what they have, blanks included.
+    $alreadyOn = [];
+    if ($home !== null) {
+        $a = $pdo->prepare('SELECT person_id FROM home_residents WHERE home_id = :h');
+        $a->execute(['h' => (int) $home['id']]);
+        $alreadyOn = array_map('intval', $a->fetchAll(PDO::FETCH_COLUMN));
+    }
+    $hasDates = fn (array $r) => $r['in']['date'] !== null || $r['out']['date'] !== null;
+    $maker = (isset($residentsIn[$myPersonId]) && $hasDates($residentsIn[$myPersonId])) ? $residentsIn[$myPersonId] : null;
+    if ($maker === null) {
+        foreach ($residentsIn as $r) {
+            if ($hasDates($r)) {
+                $maker = $r;
+                break;
+            }
+        }
+    }
+    if ($maker !== null) {
+        foreach ($residentsIn as $pid => $r) {
+            if (!$hasDates($r) && !in_array($pid, $alreadyOn, true)) {
+                $residentsIn[$pid] = $maker;
+            }
+        }
+    }
+
     // Existing media/updates on this home (edit mode), for reconciling.
     $existingMedia = [];     // id => row
     $existingUpdates = [];   // id => row
