@@ -432,6 +432,9 @@ foreach ($rawEvents as $idx => $ev) {
         'newMemoryCount'   => count($newMemoryFiles),
         'stagedPlan'       => $stagedPlan,
         'stagedMemory'     => $stagedMemory,
+        // Phase 99: the order each box's photos were arranged in
+        'planOrder'        => (array) ($ev['plan_order'] ?? []),
+        'memoryOrder'      => (array) ($ev['memory_order'] ?? []),
     ];
 }
 
@@ -577,6 +580,16 @@ try {
         foreach (['plan' => 'planFilesField', 'memory' => 'memoryFilesField'] as $role => $fieldKey) {
             $stagedForRole = $role === 'plan' ? $pe['stagedPlan'] : $pe['stagedMemory'];
             $directCount = $role === 'plan' ? $pe['newPlanCount'] : $pe['newMemoryCount'];
+            // Phase 99: kept photos take their new places; new ones slot in
+            // where they were dropped (media_order_positions()).
+            $keptForRole = $role === 'plan' ? $pe['keptPlanIds'] : $pe['keptMemoryIds'];
+            $positions = media_order_positions($role === 'plan' ? $pe['planOrder'] : $pe['memoryOrder'], $keptForRole, $directCount + count($stagedForRole['files']));
+            if ($pe['existingId'] !== null) {
+                $sortKept = $pdo->prepare('UPDATE trip_event_media SET sort_order = :s WHERE trip_event_id = :tev AND media_id = :mid AND role = :role');
+                foreach ($positions['kept'] as $mid => $sortPos) {
+                    $sortKept->execute(['s' => $sortPos, 'tev' => $thisEventId, 'mid' => $mid, 'role' => $role]);
+                }
+            }
             if ($directCount === 0 && !$stagedForRole['files']) {
                 continue;
             }
@@ -592,7 +605,7 @@ try {
                     'size' => $s['byte_size'], 'w' => $s['width'], 'h' => $s['height'],
                 ]);
                 $mediaId = (int) $pdo->lastInsertId();
-                $tripMediaInsert->execute(['tev' => $thisEventId, 'mid' => $mediaId, 'role' => $role, 'sort' => $sortIdx]);
+                $tripMediaInsert->execute(['tev' => $thisEventId, 'mid' => $mediaId, 'role' => $role, 'sort' => $positions['new'][$sortIdx] ?? $sortIdx]);
             }
         }
     }

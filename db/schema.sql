@@ -864,3 +864,10 @@ ALTER TABLE timeline_entries
   ADD COLUMN location_label VARCHAR(255) NULL AFTER occurred_on,
   ADD COLUMN location_lat DECIMAL(9,6) NULL AFTER location_label,
   ADD COLUMN location_lng DECIMAL(9,6) NULL AFTER location_lat;
+
+-- ---------------------------------------------------------------------
+-- Phase 99: display order of a memory's attachments (db/migrations/2026_phase99_media_sort_order.sql)
+-- ---------------------------------------------------------------------
+ALTER TABLE media
+  ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER height;
+CREATE INDEX idx_media_entry_sort ON media (timeline_entry_id, sort_order, id);

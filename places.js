@@ -285,11 +285,22 @@
   var activePicker = null;
   function makePicker(el, existing) {
     var st = { el: el, kept: (existing || []).slice(), pending: [] };
+    // Phase 99: display order across kept + new photos, changed by dragging
+    // (sortable_tiles.js) and sent as …media_order[] so it's saved.
+    st.order = st.kept.slice();
+    var orderName = (el.getAttribute("data-kept-name") || "").replace("kept_media_ids", "media_order");
+    function isNew(it) { return !!it.file; }
+    function syncLists() {
+      st.kept.length = 0; st.pending.length = 0;
+      st.order.forEach(function (it) { (isNew(it) ? st.pending : st.kept).push(it); });
+    }
     el.innerHTML =
       '<div class="pk-grid"></div>' +
       '<div class="pk-bar"><span class="pk-hint">Drag photos here, or</span>' +
       '<button type="button" class="pk-paste"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="5" y="3.5" width="10" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 3.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v.5" stroke="currentColor" stroke-width="1.4"/></svg>Paste</button>' +
-      '<span class="pk-msg" role="status"></span></div>';
+      '<span class="pk-msg" role="status"></span></div>' +
+      '<p class="sort-hint" hidden>Drag the photos to change their order — on a phone or iPad, press and hold one first.</p>' +
+      '<div class="pk-order" hidden></div>';
     var grid = el.querySelector(".pk-grid");
     var msg = el.querySelector(".pk-msg");
     var input = document.createElement("input");
@@ -297,12 +308,17 @@
     el.appendChild(input);
     function say(t) { msg.textContent = t || ""; }
     function render() {
-      grid.innerHTML = st.kept.map(function (p, i) {
-        return '<div class="pk-tile"><img src="' + p.url + '&thumb=1" alt=""><button type="button" class="pk-x" data-k="' + i + '" aria-label="Remove">×</button>' +
-          '<input type="hidden" name="' + el.getAttribute("data-kept-name") + '" value="' + p.id + '"></div>';
-      }).join("") + st.pending.map(function (p, i) {
-        return '<div class="pk-tile"><img src="' + p.url + '" alt=""><button type="button" class="pk-x" data-p="' + i + '" aria-label="Remove">×</button></div>';
+      grid.innerHTML = st.order.map(function (p) {
+        if (!isNew(p)) {
+          return '<div class="pk-tile"><img src="' + p.url + '&thumb=1" alt=""><button type="button" class="pk-x" data-k="' + st.kept.indexOf(p) + '" aria-label="Remove">×</button>' +
+            '<input type="hidden" name="' + el.getAttribute("data-kept-name") + '" value="' + p.id + '"></div>';
+        }
+        return '<div class="pk-tile"><img src="' + p.url + '" alt=""><button type="button" class="pk-x" data-p="' + st.pending.indexOf(p) + '" aria-label="Remove">×</button></div>';
       }).join("") + '<button type="button" class="pk-add" aria-label="Add photos">+<small>Add photos</small></button>';
+      el.querySelector(".pk-order").innerHTML = st.order.map(function (p) {
+        return '<input type="hidden" name="' + orderName + '" value="' + (isNew(p) ? "n" : "k:" + p.id) + '">';
+      }).join("");
+      el.querySelector(".sort-hint").hidden = st.order.length < 2;
     }
     function add(files) {
       var added = 0, skipped = [];
@@ -310,7 +326,8 @@
         if (f.type && f.type.indexOf("image/") !== 0 && !/\.(heic|heif)$/i.test(f.name)) { skipped.push(f.name || "that file"); return; }
         if (f.size > 30 * 1024 * 1024) { skipped.push(f.name + " (over 30MB)"); return; }
         if (st.kept.length + st.pending.length >= 25) { skipped.push(f.name + " (25 photos max)"); return; }
-        st.pending.push({ file: f, url: URL.createObjectURL(f), token: null });
+        var it = { file: f, url: URL.createObjectURL(f), token: null };
+        st.pending.push(it); st.order.push(it);
         added++;
       });
       say(skipped.length ? "Skipped: " + skipped.join(", ") + " — photos only, up to 30MB each." : "");
@@ -324,8 +341,9 @@
       activate();
       var x = e.target.closest(".pk-x");
       if (x) {
-        if (x.hasAttribute("data-k")) st.kept.splice(parseInt(x.getAttribute("data-k"), 10), 1);
-        else st.pending.splice(parseInt(x.getAttribute("data-p"), 10), 1);
+        var gone = x.hasAttribute("data-k") ? st.kept[parseInt(x.getAttribute("data-k"), 10)] : st.pending[parseInt(x.getAttribute("data-p"), 10)];
+        st.order.splice(st.order.indexOf(gone), 1);
+        syncLists();
         render(); return;
       }
       if (e.target.closest(".pk-add")) input.click();
@@ -350,6 +368,13 @@
       });
     } else {
       el.querySelector(".pk-paste").hidden = true;
+    }
+    if (window.ourthologySortable) {
+      window.ourthologySortable.attach(grid, {
+        items: ".pk-tile",
+        onMove: function (from, to) { window.ourthologySortable.move(st.order, from, to); syncLists(); render(); activate(); },
+        onCancel: render
+      });
     }
     render();
     pickers.push(st);

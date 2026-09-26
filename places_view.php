@@ -18,7 +18,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=28">
+<link rel="stylesheet" href="/styles.css?v=29">
 <!-- Leaflet (map library) is served from this site rather than a CDN, so
      the map never depends on a third-party script host. Map tiles come
      from OpenStreetMap. -->
@@ -307,8 +307,9 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   ], $jsonFlags) ?></script>
   <script src="/date_autotab.js?v=1"></script>
   <script src="/clipboard_paste.js?v=1"></script>
+  <script src="/sortable_tiles.js?v=1"></script>
   <script src="/geo.js?v=2"></script>
-  <script src="/places.js?v=5"></script>
+  <script src="/places.js?v=6"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>

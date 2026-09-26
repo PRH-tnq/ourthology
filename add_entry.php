@@ -384,13 +384,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 }
             }
 
+            // Phase 99: the order the files were arranged in (dragged
+            // within the upload box) -- kept files are re-numbered, new ones
+            // slot in wherever they were placed. See media_order_positions().
+            $keptInCurrentOrder = array_values(array_filter(array_keys($existingMediaById), fn ($id) => in_array($id, $keptExistingIds, true)));
+            $positions = media_order_positions((array) ($_POST['media_order'] ?? []), $keptInCurrentOrder, count($storedList));
+            if ($isEditing && $keptInCurrentOrder) {
+                $sortStmt = $pdo->prepare('UPDATE media SET sort_order = :s WHERE id = :id AND timeline_entry_id = :eid');
+                foreach ($positions['kept'] as $mid => $sortPos) {
+                    $sortStmt->execute(['s' => $sortPos, 'id' => $mid, 'eid' => $entryId]);
+                }
+            }
             if ($storedList) {
                 $mediaStmt = $pdo->prepare(
-                    'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
-                     VALUES (:eid, :path, :mime, :size, :w, :h)'
+                    'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height, sort_order)
+                     VALUES (:eid, :path, :mime, :size, :w, :h, :sort)'
                 );
-                foreach ($storedList as $stored) {
+                foreach ($storedList as $newIdx => $stored) {
                     $mediaStmt->execute([
+                        'sort' => $positions['new'][$newIdx],
                         'eid'  => $entryId,
                         'path' => $stored['file_path'],
                         'mime' => $stored['mime_type'],
@@ -481,7 +493,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=27">
+<link rel="stylesheet" href="/styles.css?v=29">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -493,6 +505,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
      (wiring the Paste button) rather than only from a later
      user-triggered handler, so it has to already exist by then. -->
 <script src="/clipboard_paste.js?v=1"></script>
+<script src="/sortable_tiles.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
@@ -711,6 +724,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
           </div>
           <span class="media-picker-note">JPEG, PNG, GIF, WEBP, HEIC/HEIF (converted to JPEG automatically), MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
           <p class="media-picker-error" id="mediaError"></p>
+          <p class="sort-hint" id="sortHint" hidden>Drag the thumbnails to change their order — on a phone or iPad, press and hold one first.</p>
         </div>
 
         <div class="entry-col" id="entryDetailsCol">
@@ -833,6 +847,19 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     // truly excluded on submit).
     var kept = <?= $existingForDisplayJson ?>;
     var pending = []; // { file, kind, url }
+    // Phase 99: the display order across both lists (kept files have an
+    // id, new ones a file) -- what the tiles show, what gets uploaded in,
+    // and what's sent as media_order[] so the server saves it.
+    var order = kept.slice();
+    function isNew(item) { return !!item.file; }
+    function syncLists() {
+      kept = order.filter(function (it) { return !isNew(it); });
+      pending = order.filter(isNew);
+    }
+    function replaceItem(oldItem, newItem) {
+      var i = order.indexOf(oldItem); if (i >= 0) order[i] = newItem;
+      var j = pending.indexOf(oldItem); if (j >= 0) pending[j] = newItem;
+    }
 
     var VIDEO_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M8.3 7.6v4.8l4.4-2.4-4.4-2.4Z" fill="currentColor" stroke="none"/></svg>';
     var DOC_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 2.5h6.5L15 6v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" stroke-linejoin="round"/><path d="M11 2.5V6h4" stroke-linejoin="round"/></svg>';
@@ -875,11 +902,15 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     function syncKeptInputs() {
       keptInputsContainer.innerHTML = kept.map(function (item) {
         return '<input type="hidden" name="existing_media_ids[]" value="' + item.id + '">';
+      }).join('') + order.map(function (item) {
+        return '<input type="hidden" name="media_order[]" value="' + (isNew(item) ? 'n' : 'k:' + item.id) + '">';
       }).join('');
     }
     function totalCount() { return kept.length + pending.length; }
     function render() {
       syncKeptInputs();
+      var sortHint = document.getElementById('sortHint');
+      if (sortHint) sortHint.hidden = order.length < 2;
       if (!totalCount()) {
         emptyState.hidden = false;
         grid.hidden = true;
@@ -888,15 +919,17 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
       }
       emptyState.hidden = true;
       grid.hidden = false;
-      var tiles = kept.map(function (item, i) {
-        var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
-        return '<div class="pick-tile' + cls + '" data-existing-idx="' + i + '">' + existingTileHtml(item) +
-          '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button></div>';
-      }).join('');
-      tiles += pending.map(function (item, i) {
-        var cls = item.kind === 'video' ? ' has-video' : (item.kind === 'converting' ? ' has-doc' : (item.kind !== 'image' ? ' has-doc' : ''));
-        return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + pendingTileHtml(item) +
-          '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">×</button></div>';
+      var tiles = order.map(function (item) {
+        if (!isNew(item)) {
+          var i = kept.indexOf(item);
+          var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
+          return '<div class="pick-tile' + cls + '" data-existing-idx="' + i + '">' + existingTileHtml(item) +
+            '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button></div>';
+        }
+        var p = pending.indexOf(item);
+        var pcls = item.kind === 'video' ? ' has-video' : (item.kind === 'converting' ? ' has-doc' : (item.kind !== 'image' ? ' has-doc' : ''));
+        return '<div class="pick-tile' + pcls + '" data-pending-idx="' + p + '">' + pendingTileHtml(item) +
+          '<button type="button" class="pick-remove" data-pending-idx="' + p + '" aria-label="Remove">×</button></div>';
       }).join('');
       if (totalCount() < MAX_FILES) {
         tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + ADD_ICON + '</div>';
@@ -927,7 +960,8 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     }
     function addOrdinaryFile(f) {
       var kind = kindOfFile(f);
-      pending.push({ file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null });
+      var it = { file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null };
+      pending.push(it); order.push(it);
     }
     // A HEIC file is pushed into `pending` immediately, carrying the
     // ORIGINAL file, so it's already part of the real hidden <input> (and
@@ -937,13 +971,13 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     // while a conversion is still in flight.
     function addHeicFile(f) {
       var placeholder = { file: f, kind: 'converting', url: null };
-      pending.push(placeholder);
+      pending.push(placeholder); order.push(placeholder);
       syncInput();
       render();
       heicToJpegFile(f).then(function (jpegFile) {
         var idx = pending.indexOf(placeholder);
         if (idx === -1) return; // removed by the user while converting
-        pending[idx] = { file: jpegFile, kind: 'image', url: URL.createObjectURL(jpegFile) };
+        replaceItem(placeholder, { file: jpegFile, kind: 'image', url: URL.createObjectURL(jpegFile) });
         syncInput();
         render();
       }).catch(function () {
@@ -952,7 +986,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
         // Couldn't convert in the browser -- keep the original HEIC file
         // attached (already in the real <input> above) and let the server
         // convert it on save instead of blocking the upload entirely.
-        pending[idx] = { file: f, kind: 'document', url: null };
+        replaceItem(placeholder, { file: f, kind: 'document', url: null });
         render();
       });
     }
@@ -971,15 +1005,30 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
       render();
     }
     function removeExistingAt(idx) {
-      kept.splice(idx, 1);
+      order.splice(order.indexOf(kept[idx]), 1);
+      syncLists();
       render();
     }
     function removePendingAt(idx) {
       var item = pending[idx];
       if (item && item.url) URL.revokeObjectURL(item.url);
-      pending.splice(idx, 1);
+      order.splice(order.indexOf(item), 1);
+      syncLists();
       syncInput();
       render();
+    }
+    // Phase 99: drag a tile to change the order (sortable_tiles.js)
+    if (window.ourthologySortable) {
+      window.ourthologySortable.attach(grid, {
+        items: '.pick-tile:not(.pick-tile--add)',
+        onMove: function (from, to) {
+          window.ourthologySortable.move(order, from, to);
+          syncLists();
+          syncInput();
+          render();
+        },
+        onCancel: render
+      });
     }
 
     dropzone.addEventListener('click', function (e) {

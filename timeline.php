@@ -272,12 +272,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->beginTransaction();
                     $stored = $incoming ? store_uploaded_media_files($_FILES['media'] ?? [], (int) $ownerPersonId) : [];
                     $allNew = array_merge($staged['files'], $stored);
+                    // Phase 99: added after whatever's already there, in the
+                    // order they were arranged in the box.
+                    $nextSortStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 FROM media WHERE timeline_entry_id = :eid');
+                    $nextSortStmt->execute(['eid' => $entryId]);
+                    $nextSort = (int) $nextSortStmt->fetchColumn();
                     $mediaStmt = $pdo->prepare(
-                        'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
-                         VALUES (:eid, :path, :mime, :size, :w, :h)'
+                        'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height, sort_order)
+                         VALUES (:eid, :path, :mime, :size, :w, :h, :sort)'
                     );
                     foreach ($allNew as $file) {
                         $mediaStmt->execute([
+                            'sort' => $nextSort++,
                             'eid'  => $entryId,
                             'path' => $file['file_path'],
                             'mime' => $file['mime_type'],
@@ -647,7 +653,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=28">
+<link rel="stylesheet" href="/styles.css?v=29">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -656,6 +662,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      -- it has to already exist by then, not just by the time the user
      clicks something. -->
 <script src="/clipboard_paste.js?v=1"></script>
+<script src="/sortable_tiles.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
 <script src="/geo.js?v=2"></script>
 <style>
@@ -3037,6 +3044,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         vamStatusTimer = setTimeout(function () { vamStatusEl.style.display = "none"; }, 4000);
       }
     }
+    // Phase 99: drag to change the order before adding them
+    if (window.ourthologySortable && vamGrid) {
+      window.ourthologySortable.attach(vamGrid, {
+        items: ".pick-tile:not(.pick-tile--add)",
+        onMove: function (from, to) { window.ourthologySortable.move(vamPending, from, to); vamSyncInput(); vamRender(); },
+        onCancel: function () { vamRender(); }
+      });
+    }
     function vamSyncInput() {
       var dt = new DataTransfer();
       vamPending.forEach(function (item) { if (item.file) dt.items.add(item.file); });
@@ -3591,6 +3606,19 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
       var kept = (existingItems || []).slice();
       var pending = [];
+      // Phase 99: display order across kept + new, changed by dragging
+      // (owner only) and sent as events[i][plan_order][] / [memory_order][].
+      var order = kept.slice();
+      var orderFieldName = keptFieldName.replace(/existing_(plan|memory)_media_ids/, '$1_order');
+      function isNew(it) { return !!it.file; }
+      function syncLists() {
+        kept = order.filter(function (it) { return !isNew(it); });
+        pending = order.filter(isNew);
+      }
+      function replaceItem(oldItem, newItem) {
+        var i = order.indexOf(oldItem); if (i >= 0) order[i] = newItem;
+        var j = pending.indexOf(oldItem); if (j >= 0) pending[j] = newItem;
+      }
       // Phase 82: true for a viewer with NO add rights at all on this
       // picker (readOnlyMode with no approved tag) -- false for the
       // owner (readOnlyMode is already false for them) AND for an
@@ -3623,7 +3651,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       function syncKeptInputs() {
         keptContainer.innerHTML = kept.map(function (item) {
           return '<input type="hidden" name="' + keptFieldName + '" value="' + item.id + '">';
-        }).join('');
+        }).join('') + (readOnlyMode ? '' : order.map(function (item) {
+          return '<input type="hidden" name="' + orderFieldName + '" value="' + (isNew(item) ? 'n' : 'k:' + item.id) + '">';
+        }).join(''));
       }
       function totalCount() { return kept.length + pending.length; }
       function render() {
@@ -3633,15 +3663,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           return;
         }
         empty.hidden = true; grid.hidden = false;
-        var tiles = kept.map(function (item, i) {
-          var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
-          return '<div class="pick-tile' + cls + '" data-existing-idx="' + i + '">' + existingTileHtml(item) +
-            (readOnlyMode ? '' : '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button>') + '</div>';
-        }).join('');
-        tiles += pending.map(function (item, i) {
-          var cls = item.kind === 'video' ? ' has-video' : (item.kind === 'converting' ? ' has-doc' : (item.kind !== 'image' ? ' has-doc' : ''));
-          return '<div class="pick-tile' + cls + '" data-pending-idx="' + i + '">' + pendingTileHtml(item) +
-            '<button type="button" class="pick-remove" data-pending-idx="' + i + '" aria-label="Remove">×</button></div>';
+        var tiles = order.map(function (item) {
+          if (!isNew(item)) {
+            var i = kept.indexOf(item);
+            var cls = item.kind === 'video' ? ' has-video' : (item.kind !== 'image' ? ' has-doc' : '');
+            return '<div class="pick-tile' + cls + '" data-existing-idx="' + i + '">' + existingTileHtml(item) +
+              (readOnlyMode ? '' : '<button type="button" class="pick-remove" data-existing-idx="' + i + '" aria-label="Remove">×</button>') + '</div>';
+          }
+          var pi = pending.indexOf(item);
+          var pcls = item.kind === 'video' ? ' has-video' : (item.kind === 'converting' ? ' has-doc' : (item.kind !== 'image' ? ' has-doc' : ''));
+          return '<div class="pick-tile' + pcls + '" data-pending-idx="' + pi + '">' + pendingTileHtml(item) +
+            '<button type="button" class="pick-remove" data-pending-idx="' + pi + '" aria-label="Remove">×</button></div>';
         }).join('');
         if (!pickerLocked && totalCount() < TRIP_MAX_FILES) {
           tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + TRIP_ADD_ICON + '</div>';
@@ -3662,21 +3694,22 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       }
       function addOrdinaryFile(f) {
         var kind = kindOfFile(f);
-        pending.push({ file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null });
+        var it = { file: f, kind: kind, url: kind === 'image' ? URL.createObjectURL(f) : null };
+        pending.push(it); order.push(it);
       }
       function addHeicFile(f) {
         var placeholder = { file: f, kind: 'converting', url: null };
-        pending.push(placeholder);
+        pending.push(placeholder); order.push(placeholder);
         syncInput(); render();
         heicToJpegFile(f).then(function (jpegFile) {
           var idx = pending.indexOf(placeholder);
           if (idx === -1) return;
-          pending[idx] = { file: jpegFile, kind: 'image', url: URL.createObjectURL(jpegFile) };
+          replaceItem(placeholder, { file: jpegFile, kind: 'image', url: URL.createObjectURL(jpegFile) });
           syncInput(); render();
         }).catch(function () {
           var idx = pending.indexOf(placeholder);
           if (idx === -1) return;
-          pending[idx] = { file: f, kind: 'document', url: null };
+          replaceItem(placeholder, { file: f, kind: 'document', url: null });
           render();
         });
       }
@@ -3699,12 +3732,15 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         var removeBtn = e.target.closest('.pick-remove');
         if (removeBtn) {
           e.stopPropagation();
-          if (removeBtn.hasAttribute('data-existing-idx')) { kept.splice(parseInt(removeBtn.getAttribute('data-existing-idx'), 10), 1); }
-          else {
+          if (removeBtn.hasAttribute('data-existing-idx')) {
+            order.splice(order.indexOf(kept[parseInt(removeBtn.getAttribute('data-existing-idx'), 10)]), 1);
+            syncLists();
+          } else {
             var pidx = parseInt(removeBtn.getAttribute('data-pending-idx'), 10);
             var item = pending[pidx];
             if (item && item.url) URL.revokeObjectURL(item.url);
-            pending.splice(pidx, 1);
+            order.splice(order.indexOf(item), 1);
+            syncLists();
             syncInput();
           }
           render();
@@ -3715,6 +3751,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         input.click();
       });
       root.addEventListener('focus', function () { activeTripPicker = addFiles; }, true);
+      // Phase 99: the trip's owner can drag photos to reorder them
+      if (!readOnlyMode && window.ourthologySortable) {
+        window.ourthologySortable.attach(grid, {
+          items: '.pick-tile:not(.pick-tile--add)',
+          onMove: function (from, to) { window.ourthologySortable.move(order, from, to); syncLists(); syncInput(); render(); },
+          onCancel: render
+        });
+      }
       root.addEventListener('mouseenter', function () { activeTripPicker = addFiles; });
       if (!pickerLocked) {
         input.addEventListener('change', function () { addFiles(input.files); });

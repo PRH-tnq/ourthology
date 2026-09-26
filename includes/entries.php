@@ -72,7 +72,7 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
 
     $ids = array_column($entries, 'id');
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
-    $mediaStmt = $pdo->prepare("SELECT id, timeline_entry_id, mime_type FROM media WHERE timeline_entry_id IN ($placeholders)");
+    $mediaStmt = $pdo->prepare("SELECT id, timeline_entry_id, mime_type FROM media WHERE timeline_entry_id IN ($placeholders) ORDER BY timeline_entry_id, sort_order, id");
     $mediaStmt->execute($ids);
     $mediaByEntry = [];
     foreach ($mediaStmt->fetchAll() as $m) {
@@ -136,12 +136,12 @@ function fetch_owned_entry(PDO $pdo, int $entryId, int $myUserId, int $myFamilyG
     return $row;
 }
 
-/** All media rows for an entry, in the order they were attached. */
+/** All media rows for an entry, in their display order (Phase 99: set by dragging them in the upload box; upload order until then). */
 function fetch_entry_media(PDO $pdo, int $entryId): array
 {
     $stmt = $pdo->prepare(
         'SELECT id, file_path, mime_type, byte_size, width, height
-         FROM media WHERE timeline_entry_id = :eid ORDER BY id'
+         FROM media WHERE timeline_entry_id = :eid ORDER BY sort_order, id'
     );
     $stmt->execute(['eid' => $entryId]);
     return $stmt->fetchAll();

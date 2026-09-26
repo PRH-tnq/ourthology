@@ -385,3 +385,16 @@ a.btn-secondary:hover { background: var(--paper-2); }
   html.m-ui .leaflet-container { isolation:isolate; z-index:0; }
 }
 @media print { .m-menu-btn, .m-tabbar, .m-sheet, .m-sheet-scrim, .m-fab { display:none !important; } }
+
+/* ---------- Phase 99: drag to reorder photos/documents in an upload box ----------
+   (sortable_tiles.js). The dragged tile's slot stays as a faded placeholder
+   while a lifted copy follows the pointer. Long-pressing a photo on iOS
+   would otherwise pop up "Save Image" and select text instead. */
+.pick-tile:not(.pick-tile--add), .pk-tile { cursor:grab; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+.pick-tile img, .pk-tile img { -webkit-user-drag:none; }
+.pick-tile:focus-visible, .pk-tile:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.sorting, .sorting * { cursor:grabbing !important; }
+.sort-placeholder { opacity:.3; outline:2px dashed var(--accent); outline-offset:-2px; }
+.sort-drag-ghost { box-shadow:0 14px 30px -8px rgba(26,23,20,.55); transform:scale(1.06) rotate(-2deg); border-radius:10px; overflow:hidden; opacity:.95; }
+.sort-hint { font-size:12px; color:var(--ink-faint); margin:6px 0 0; }
+.sort-hint[hidden] { display:none; }

@@ -1097,3 +1097,49 @@ function ourthology_sweep_stale_staged_media(PDO $pdo): void
         @unlink($f);
     }
 }
+
+/**
+ * Phase 99: turn a picker's submitted display order into positions.
+ *
+ * $order is the picker's `…_order[]` field: one entry per tile, in the
+ * order the person arranged them -- "k:<id>" for a file that was already
+ * saved (kept), "n" for each newly added one (new files arrive, uploaded
+ * or staged, in that same relative order). Anything unrecognised, repeated,
+ * or not actually among $keptIds is ignored, and whatever the order didn't
+ * mention (no JavaScript, an older page, a tampered form) is appended in
+ * its existing order, so a bad or missing order can never lose a file.
+ *
+ * @param list<int> $keptIds  files being kept, in their current order
+ * @return array{kept: array<int,int>, new: list<int>}  kept id => position;
+ *         position for the 1st, 2nd... new file
+ */
+function media_order_positions(array $order, array $keptIds, int $newCount): array
+{
+    $keptSet = array_flip(array_map('intval', $keptIds));
+    $keptPos = [];
+    $newPos = [];
+    $pos = 0;
+    foreach ($order as $tok) {
+        $tok = (string) $tok;
+        if ($tok === 'n') {
+            if (count($newPos) < $newCount) {
+                $newPos[] = $pos++;
+            }
+        } elseif (preg_match('/^k:(\d+)$/', $tok, $m)) {
+            $id = (int) $m[1];
+            if (isset($keptSet[$id]) && !isset($keptPos[$id])) {
+                $keptPos[$id] = $pos++;
+            }
+        }
+    }
+    foreach ($keptIds as $id) {
+        $id = (int) $id;
+        if (!isset($keptPos[$id])) {
+            $keptPos[$id] = $pos++;
+        }
+    }
+    while (count($newPos) < $newCount) {
+        $newPos[] = $pos++;
+    }
+    return ['kept' => $keptPos, 'new' => $newPos];
+}

@@ -221,6 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $generalKept = $keptIds((array) ($_POST['kept_media_ids'] ?? []), null);
     $generalNew = $resolvePhotos((array) ($_POST['staged_media'] ?? []));
+    $generalOrder = (array) ($_POST['media_order'] ?? []); // Phase 99
     if (count($generalKept) + count($generalNew['files']) > HOME_MAX_PHOTOS_PER_SECTION) {
         $errors[] = 'Add at most ' . HOME_MAX_PHOTOS_PER_SECTION . ' photos of the home itself (use updates for more).';
     }
@@ -252,6 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $updatesIn[] = [
             'id' => $uid, 'title' => $title !== '' ? $title : 'Update', 'notes' => $unotes,
             'date' => $d['date'], 'precision' => $d['precision'], 'kept' => $kept, 'new' => $new,
+            'order' => (array) ($ru['media_order'] ?? []),
         ];
     }
 
@@ -326,15 +328,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'INSERT INTO home_media (home_id, update_id, file_path, mime_type, byte_size, width, height, sort_order, uploaded_by_user_id)
              VALUES (:h, :u, :path, :mime, :size, :w, :hh, :sort, :by)'
         );
-        $addPhotos = function (array $files, ?int $updateId) use ($mediaInsert, $hid, $myUserId): void {
-            foreach ($files as $i => $f) {
+        // Phase 99: photos go in the order they were arranged in the box
+        // (dragged), kept and new alike -- see media_order_positions().
+        $sortKept = $pdo->prepare('UPDATE home_media SET sort_order = :s WHERE id = :id AND home_id = :h');
+        $addPhotos = function (array $files, ?int $updateId, array $kept = [], array $order = []) use ($mediaInsert, $sortKept, $hid, $myUserId): void {
+            $pos = media_order_positions($order, $kept, count($files));
+            foreach ($pos['kept'] as $mid => $sortPos) {
+                $sortKept->execute(['s' => $sortPos, 'id' => $mid, 'h' => $hid]);
+            }
+            foreach (array_values($files) as $i => $f) {
                 $mediaInsert->execute([
                     'h' => $hid, 'u' => $updateId, 'path' => $f['file_path'], 'mime' => $f['mime_type'],
-                    'size' => $f['byte_size'], 'w' => $f['width'], 'hh' => $f['height'], 'sort' => 1000 + $i, 'by' => $myUserId,
+                    'size' => $f['byte_size'], 'w' => $f['width'], 'hh' => $f['height'], 'sort' => $pos['new'][$i], 'by' => $myUserId,
                 ]);
             }
         };
-        $addPhotos($generalNew['files'], null);
+        $addPhotos($generalNew['files'], null, $generalKept, $generalOrder);
 
         foreach ($updatesIn as $sort => $u) {
             if ($u['id'] !== null) {
@@ -351,7 +360,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'n' => $u['notes'] !== '' ? $u['notes'] : null]);
                 $updateId = (int) $pdo->lastInsertId();
             }
-            $addPhotos($u['new']['files'], $updateId);
+            $addPhotos($u['new']['files'], $updateId, $u['kept'], $u['order']);
         }
 
         $pdo->commit();
