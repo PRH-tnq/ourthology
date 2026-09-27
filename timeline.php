@@ -1157,6 +1157,26 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .gcard-envelope-stamp { position:absolute; top:10px; right:12px; width:52px; z-index:2; }
   .gcard-envelope-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
 
+  /* Phase 108: the send animation's own layer (gcardSendAnimation()) --
+     fixed over everything, so the pop-up's layout can't move it. The
+     envelope is built back-to-front: back, the slot the card drops into
+     (clipped at the envelope's top edge... and hidden below it by the
+     pocket), the front pocket, the flap, and the stamp. */
+  .gcard-fly-layer { position:fixed; inset:0; z-index:1100; pointer-events:none; overflow:hidden; }
+  .gcard-fly-card { position:fixed; transform-origin:center center; border:2px solid var(--accent); border-radius:12px; overflow:hidden; box-shadow:0 10px 30px -12px rgba(0,0,0,.45); background:#fff; }
+  .gcard-fly-card > .gcard-cover-face { position:absolute; inset:0; border:none; border-radius:0; box-shadow:none; }
+  .gcard-fly-card .gcard-front-preview { display:block; }
+  .gcard-fly-card .gcard-drop-zone { display:none; }
+  .gcard-fly-env { position:fixed; perspective:900px; opacity:0; }
+  .gcard-fly-back { position:absolute; inset:0; z-index:0; border-radius:8px; background:linear-gradient(160deg,#f4f1ea,#e9e4d8); box-shadow:0 18px 40px -16px rgba(0,0,0,.55); }
+  .gcard-fly-slot { position:absolute; z-index:2; left:0; right:0; top:0; bottom:0; clip-path:inset(-400% -20% 0 -20%); } /* nothing shows below the envelope */
+  .gcard-fly-slot .gcard-fly-card { position:absolute; }
+  .gcard-fly-pocket { position:absolute; z-index:3; inset:0; border-radius:8px; background:linear-gradient(135deg,#ffffff,#f5f3ee); clip-path:polygon(0 18%, 50% 58%, 100% 18%, 100% 100%, 0 100%); box-shadow:inset 0 -1px 0 #e4e0d5; }
+  .gcard-fly-pocket::after { content:""; position:absolute; inset:0; background:linear-gradient(to top right, transparent 49.6%, rgba(0,0,0,.06) 50%, transparent 50.4%), linear-gradient(to top left, transparent 49.6%, rgba(0,0,0,.06) 50%, transparent 50.4%); }
+  .gcard-fly-flap { position:absolute; z-index:1; left:0; right:0; top:0; /* behind the card while open; raised over it to close (JS) */ height:60%; transform-origin:top center; transform:rotateX(180deg); background:linear-gradient(180deg,#ffffff,#efece5); clip-path:polygon(0 0, 100% 0, 50% 100%); backface-visibility:visible; filter:drop-shadow(0 2px 2px rgba(0,0,0,.12)); }
+  .gcard-fly-stamp { position:absolute; top:10px; right:12px; width:22%; opacity:0; z-index:5; }
+  .gcard-fly-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
+
   /* Phase 107: "allow the image to be bigger, using a double column if
      necessary ... remove the vertical scroll bar." The card is now sized
      from the space the window actually has, so the whole pop-up always
@@ -5351,24 +5371,123 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           var sendBtn = form.querySelector(".gcard-send-btn");
           if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
 
-          var cover = root.querySelector("#gcardCover");
-          var scene = root.querySelector("#gcardScene");
-          if (cover) cover.classList.remove("is-open");
-          window.setTimeout(function () {
-            if (scene) scene.classList.add("is-folding");
-            window.setTimeout(function () {
-              if (scene) scene.style.display = "none";
-              root.querySelectorAll("#gcardFrontFooter, #gcardInsideFooter").forEach(function (f) { f.style.display = "none"; });
-              var wrap = root.querySelector("#gcardEnvelopeWrap");
-              var env = root.querySelector("#gcardEnvelope");
-              if (wrap) wrap.style.display = "flex";
-              if (env) env.classList.add("is-popping");
-              window.setTimeout(function () {
-                if (env) env.classList.add("is-flying");
-                window.setTimeout(function () { form.submit(); }, 850);
-              }, 320);
-            }, 450);
-          }, 520);
+          gcardSendAnimation(root, function () { form.submit(); });
+        });
+      }
+
+      // Phase 108: the send animation, rebuilt -- "close the card, put it
+      // in an envelope, do a jaunty wiggle and then move it off screen to
+      // the right". It runs on its own fixed layer over the page (a copy
+      // of the card's cover plus an envelope), so the pop-up's two-column
+      // layout (Phase 107) can't pull it about: the old version hid the
+      // card inside the pop-up, which then collapsed around it.
+      //   1. the cover swings shut (the card's own transition);
+      //   2. the pop-up fades away, leaving the closed card, which shrinks
+      //      down onto an open envelope and slides into it;
+      //   3. the flap folds shut;
+      //   4. a jaunty wiggle;
+      //   5. off it goes, out to the right, as the backdrop clears.
+      // Web Animations throughout; without them (or with reduced motion
+      // asked for) it just sends.
+      function gcardSendAnimation(root, done) {
+        var finished = false;
+        function finish() { if (finished) return; finished = true; done(); }
+        window.setTimeout(finish, 6000); // never leave a card unsent
+        var cover = root.querySelector("#gcardCover");
+        var front = root.querySelector("#gcardCoverFront");
+        var scene = root.querySelector("#gcardScene");
+        var box = root.querySelector(".gcard-box");
+        var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (!scene || !front || !document.body.animate || reduce) { finish(); return; }
+        if (cover) cover.classList.remove("is-open");
+        function wait(ms) { return new Promise(function (r) { window.setTimeout(r, ms); }); }
+        function run(el, frames, opts) {
+          var a = el.animate(frames, Object.assign({ fill: "forwards" }, opts));
+          return a.finished ? a.finished : wait(opts.duration || 0);
+        }
+        wait(cover && cover.classList.contains("is-open") === false ? 560 : 0).then(function () {
+          var r = scene.getBoundingClientRect();
+          var vw = window.innerWidth, vh = window.innerHeight;
+          // the envelope: centred where the card is, a little lower down
+          var ew = Math.min(320, Math.max(200, r.width * 0.72)), eh = Math.round(ew * 0.64);
+          var cx = r.left + r.width / 2, cy = Math.min(vh - eh / 2 - 24, r.top + r.height * 0.58);
+
+          var layer = document.createElement("div");
+          layer.className = "gcard-fly-layer";
+          layer.innerHTML =
+            '<div class="gcard-fly-env" style="width:' + ew + 'px;height:' + eh + 'px;left:' + (cx - ew / 2) + 'px;top:' + (cy - eh / 2) + 'px;">' +
+              '<div class="gcard-fly-back"></div>' +
+              '<div class="gcard-fly-slot"></div>' +
+              '<div class="gcard-fly-pocket"></div>' +
+              '<div class="gcard-fly-flap"></div>' +
+              '<div class="gcard-fly-stamp">' + ((root.querySelector(".gcard-envelope-stamp") || {}).innerHTML || "") + '</div>' +
+            '</div>';
+          document.body.appendChild(layer);
+          var env = layer.querySelector(".gcard-fly-env");
+          var slot = layer.querySelector(".gcard-fly-slot");
+          var flap = layer.querySelector(".gcard-fly-flap");
+          var stamp = layer.querySelector(".gcard-fly-stamp");
+
+          // the closed card, copied exactly where it is now
+          var card = document.createElement("div");
+          card.className = "gcard-fly-card";
+          card.style.cssText = "left:" + r.left + "px;top:" + r.top + "px;width:" + r.width + "px;height:" + r.height + "px;";
+          var face = front.cloneNode(true);
+          face.removeAttribute("id");
+          face.querySelectorAll("[id]").forEach(function (n) { n.removeAttribute("id"); });
+          face.querySelectorAll("button, input, .card-paste-status").forEach(function (n) { n.remove(); });
+          card.appendChild(face);
+          layer.appendChild(card);
+          scene.style.visibility = "hidden";
+
+          // how big the card is once it's in the envelope, and where
+          var s = Math.min((ew * 0.84) / r.width, (eh * 1.25) / r.height);
+          // it hovers just above the envelope's mouth first (bottom edge a
+          // little way inside), then drops in
+          var hs = r.height * s, envTop = cy - eh / 2;
+          var tx = cx - (r.left + r.width / 2), ty = (envTop + eh * 0.2 - hs / 2) - (r.top + r.height / 2);
+
+          return Promise.all([
+            box ? run(box, [{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: "ease-out" }) : null,
+            run(env, [{ opacity: 0, transform: "translateY(24px) scale(.92)" }, { opacity: 1, transform: "none" }], { duration: 420, delay: 120, easing: "cubic-bezier(.3,1.4,.6,1)" }),
+            run(card, [{ transform: "none" }, { transform: "translate(" + tx + "px," + ty + "px) scale(" + s + ")" }], { duration: 620, easing: "cubic-bezier(.5,0,.3,1)" })
+          ]).then(function () {
+            // into the envelope: the card drops behind the front pocket
+            slot.appendChild(card);
+            var cardTop = eh * 0.2 - hs;
+            card.style.cssText = "left:50%;top:" + cardTop + "px;width:" + r.width + "px;height:" + r.height + "px;margin-left:" + (-r.width / 2) + "px;transform-origin:center top;";
+            card.getAnimations().forEach(function (a) { a.cancel(); });
+            card.style.transform = "scale(" + s + ")";
+            return run(card, [{ transform: "scale(" + s + ") translateY(0)" }, { transform: "scale(" + s + ") translateY(" + ((eh * 0.55 + hs) / s) + "px)" }], { duration: 480, easing: "cubic-bezier(.45,0,.7,.2)" });
+          }).then(function () {
+            // the flap folds down over it, then the stamp lands
+            flap.style.zIndex = "4";
+            return run(flap, [{ transform: "rotateX(180deg)" }, { transform: "rotateX(0deg)" }], { duration: 340, easing: "cubic-bezier(.4,0,.2,1)" });
+          }).then(function () {
+            return run(stamp, [{ opacity: 0, transform: "scale(1.8) rotate(-12deg)" }, { opacity: 1, transform: "scale(1) rotate(6deg)" }], { duration: 220, easing: "cubic-bezier(.3,1.6,.6,1)" });
+          }).then(function () {
+            // a jaunty wiggle
+            return run(env, [
+              { transform: "rotate(0deg) translateY(0)" },
+              { transform: "rotate(-9deg) translateY(-10px)", offset: 0.18 },
+              { transform: "rotate(8deg) translateY(-4px)", offset: 0.38 },
+              { transform: "rotate(-6deg) translateY(-12px)", offset: 0.56 },
+              { transform: "rotate(4deg) translateY(-3px)", offset: 0.74 },
+              { transform: "rotate(-2deg) translateY(-6px)", offset: 0.88 },
+              { transform: "rotate(0deg) translateY(0)" }
+            ], { duration: 820, easing: "ease-in-out" });
+          }).then(function () {
+            // and off to the right, as the backdrop clears
+            var dist = vw - (cx - ew / 2) + 60;
+            run(root, [{ opacity: 1 }, { opacity: 0 }], { duration: 650, delay: 150, easing: "ease-in" });
+            return run(env, [
+              { transform: "translateX(0) rotate(0deg)" },
+              { transform: "translateX(-26px) rotate(-5deg)", offset: 0.15 },
+              { transform: "translateX(" + dist + "px) rotate(14deg)" }
+            ], { duration: 760, easing: "cubic-bezier(.55,0,.8,.4)" });
+          }).then(function () {
+            finish();
+          }).catch(finish);
         });
       }
 
