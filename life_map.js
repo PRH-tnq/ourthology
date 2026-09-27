@@ -305,6 +305,7 @@
     var a = evt.target.closest("[data-open]");
     if (!a) return;
     evt.preventDefault();
+    if (map) map.closePopup(); // done with it -- the memory opens on top
     if (window.ourthologyOpenMemory) window.ourthologyOpenMemory(a.getAttribute("data-open"));
   });
 

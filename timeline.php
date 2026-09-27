@@ -685,7 +685,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=31">
+<link rel="stylesheet" href="/styles.css?v=32">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -5306,7 +5306,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
-  <script src="/life_map.js?v=5"></script>
+  <script src="/life_map.js?v=6"></script>
   <script src="/memory_location.js?v=6"></script>
 </body>
 </html>

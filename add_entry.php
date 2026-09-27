@@ -496,7 +496,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=31">
+<link rel="stylesheet" href="/styles.css?v=32">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this

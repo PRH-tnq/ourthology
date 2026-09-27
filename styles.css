@@ -462,3 +462,12 @@ a.btn-secondary:hover { background: var(--paper-2); }
 #locMap[hidden] { display:none; }
 .viewer-place-form .loc-row input { font-size:15px; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
 .viewer-place-form .btn-ghost { margin-top:10px; }
+
+/* ---------- Phase 102: maps never draw over pop-ups ----------
+   Leaflet gives its panes and controls z-indexes up to 1000 (popups 700,
+   zoom buttons/the country counter 800-1000), which competed with the
+   whole page -- so a memory opened from the map's popup (z-index 50) came
+   up UNDER the map's popup and buttons. Each map now keeps its layers to
+   itself (its own stacking context at the page's level 0), on every
+   screen size -- this used to apply on phones only (Phase 96). */
+.leaflet-container { isolation:isolate; z-index:0; }
