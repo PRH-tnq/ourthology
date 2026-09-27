@@ -110,6 +110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $address = mb_substr(trim((string) ($_POST['address'] ?? '')), 0, 1000);
     $postcode = mb_substr(strtoupper(trim((string) ($_POST['postcode'] ?? ''))), 0, 20);
     $country = mb_substr(trim((string) ($_POST['country'] ?? '')), 0, 80);
+    // Phase 100: the country the pin is in, from the address lookup (ISO code)
+    $countryCode = strtoupper(trim((string) ($_POST['country_code'] ?? '')));
+    if (!preg_match('/^[A-Z]{2}$/', $countryCode)) {
+        $countryCode = null;
+    }
     $notes = mb_substr(trim((string) ($_POST['notes'] ?? '')), 0, 5000);
     $visibility = (string) ($_POST['visibility'] ?? 'public');
     if (!in_array($visibility, ['private', 'public', 'custom'], true)) {
@@ -270,17 +275,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'name' => $name !== '' ? $name : null, 'address' => $address !== '' ? $address : null,
             'postcode' => $postcode !== '' ? $postcode : null, 'country' => $country !== '' ? $country : null,
             'lat' => $lat, 'lng' => $lng, 'vis' => $visibility, 'notes' => $notes !== '' ? $notes : null,
+            'cc' => $lat !== null ? $countryCode : null,
         ];
         if ($home === null) {
             $pdo->prepare(
-                'INSERT INTO homes (family_group_id, created_by_person_id, created_by_user_id, name, address, postcode, country, lat, lng, visibility, notes)
-                 VALUES (:gid, :cp, :cu, :name, :address, :postcode, :country, :lat, :lng, :vis, :notes)'
+                'INSERT INTO homes (family_group_id, created_by_person_id, created_by_user_id, name, address, postcode, country, country_code, lat, lng, visibility, notes)
+                 VALUES (:gid, :cp, :cu, :name, :address, :postcode, :country, :cc, :lat, :lng, :vis, :notes)'
             )->execute($fields + ['gid' => $myGroup, 'cp' => $myPersonId, 'cu' => $myUserId]);
             $hid = (int) $pdo->lastInsertId();
         } else {
             $hid = (int) $home['id'];
             $pdo->prepare(
-                'UPDATE homes SET name = :name, address = :address, postcode = :postcode, country = :country,
+                'UPDATE homes SET name = :name, address = :address, postcode = :postcode, country = :country, country_code = :cc,
                         lat = :lat, lng = :lng, visibility = :vis, notes = :notes
                  WHERE id = :id'
             )->execute($fields + ['id' => $hid]);
@@ -442,6 +448,7 @@ foreach ($homes as $h) {
         'address'    => (string) ($h['address'] ?? ''),
         'postcode'   => (string) ($h['postcode'] ?? ''),
         'country'    => (string) ($h['country'] ?? ''),
+        'countryCode' => (string) ($h['country_code'] ?? ''),
         'lat'        => $h['lat'] !== null ? (float) $h['lat'] : null,
         'lng'        => $h['lng'] !== null ? (float) $h['lng'] : null,
         'visibility' => $h['visibility'],

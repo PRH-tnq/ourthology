@@ -398,3 +398,67 @@ a.btn-secondary:hover { background: var(--paper-2); }
 .sort-drag-ghost { box-shadow:0 14px 30px -8px rgba(26,23,20,.55); transform:scale(1.06) rotate(-2deg); border-radius:10px; overflow:hidden; opacity:.95; }
 .sort-hint { font-size:12px; color:var(--ink-faint); margin:6px 0 0; }
 .sort-hint[hidden] { display:none; }
+
+/* ---------- Phase 100: maps in English, and the country counter ----------
+   geo.js addBaseLayers(): a label-free Esri background, warmed slightly to
+   sit with the site's paper tones, with our own English country names on
+   top (Natural Earth borders). */
+.og-base-tiles { filter:sepia(.22) saturate(.95) brightness(1.02); }
+.og-country-label { pointer-events:none; }
+.og-country-label span { display:block; text-align:center; white-space:nowrap; font:600 11px/16px Georgia, "Times New Roman", serif; letter-spacing:.06em; text-transform:uppercase;
+  color:#6B5E52; text-shadow:0 0 3px #FBF8F1, 0 0 3px #FBF8F1, 0 0 2px #FBF8F1; }
+.og-country-label.big span { font-size:12.5px; color:#5A4E44; }
+
+/* The country counter, top right of the life maps (timeline.php). Held
+   16px in from the map's edges (Leaflet's own control margin is 10px). */
+.leaflet-top.leaflet-right .lm-counter { margin:16px 16px 0 0; }
+.lm-counter { min-width:196px; max-width:240px; background:rgba(251,248,241,.97); border:2px solid var(--accent, #9A2A2A); border-radius:14px;
+  box-shadow:0 8px 22px -10px rgba(26,23,20,.45); padding:12px 14px 12px; color:var(--ink, #1A1714); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.lmc-title { font:700 11.5px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; letter-spacing:.08em; text-transform:uppercase; color:var(--accent, #9A2A2A);
+  padding-bottom:8px; margin-bottom:6px; border-bottom:1px solid var(--line, #E4DCCF); }
+.lmc-wait, .lmc-none { font-size:12.5px; color:var(--ink-faint, #8A8076); margin:4px 0 0; }
+.lmc-table { width:100%; border-collapse:collapse; }
+.lmc-table th { text-align:left; font-weight:500; font-size:13px; color:var(--ink-soft, #4A443D); padding:5px 10px 5px 0; vertical-align:baseline; }
+.lmc-table td { text-align:right; font-family:Georgia, "Times New Roman", serif; font-weight:700; color:var(--ink, #1A1714); padding:3px 0; vertical-align:baseline; white-space:nowrap; }
+.lmc-table tr + tr th, .lmc-table tr + tr td { border-top:1px dashed var(--line, #E4DCCF); }
+.lmc-n { font-size:28px; line-height:1.05; color:var(--accent, #9A2A2A) !important; }
+.lmc-p { font-size:19px; }
+.lmc-toggle { display:block; width:100%; margin-top:8px; padding:6px 0 0; border:none; border-top:1px solid var(--line, #E4DCCF); background:none; color:var(--accent, #9A2A2A);
+  font:700 12.5px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align:left; cursor:pointer; }
+.lmc-list { list-style:none; margin:6px 0 0; padding:0; max-height:160px; overflow-y:auto; font-size:13px; color:var(--ink-soft, #4A443D); }
+.lmc-list[hidden] { display:none; }
+.lmc-list li { padding:3px 0; border-bottom:1px solid rgba(228,220,207,.6); }
+.lmc-list li:last-child { border-bottom:none; }
+@media (max-width: 700px) {
+  .leaflet-top.leaflet-right .lm-counter { margin:12px 12px 0 0; }
+  .lm-counter { min-width:150px; max-width:176px; padding:9px 11px; }
+  .lmc-n { font-size:22px; }
+  .lmc-p { font-size:16px; }
+  .lmc-table th { font-size:12px; }
+}
+
+/* ---------- Phase 101: the "Where it happened" place box, shared ----------
+   Used by the memory composer (add_entry.php) and, for a tagged person,
+   the memory viewer on timeline.php. Moved here from add_entry.php. */
+.loc-row { display:flex; gap:8px; }
+.loc-row input { flex:1 1 auto; min-width:0; }
+.loc-btn { flex:none; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:#fff; font:inherit; font-size:14px; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+.loc-btn:hover { border-color:var(--accent); color:var(--ink); }
+.loc-btn:disabled { opacity:.6; cursor:default; }
+.loc-homes { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; font-size:12.5px; color:var(--ink-faint); }
+.loc-homes button { font:inherit; font-size:12.5px; padding:4px 10px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--ink-soft); cursor:pointer; }
+.loc-homes button:hover, .loc-homes button.on { border-color:var(--accent); background:#F1DCDC; color:var(--ink); }
+.loc-status { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--ink-soft); }
+.loc-status #locMsg:empty { display:none; }
+.loc-link { font:inherit; font-size:12.5px; background:none; border:none; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; }
+.loc-link[hidden] { display:none; }
+.loc-choices { display:flex; flex-direction:column; gap:4px; margin-top:6px; }
+.loc-choices[hidden] { display:none; }
+.loc-choices span { font-size:12px; color:var(--ink-faint); }
+.loc-choices button { text-align:left; font:inherit; font-size:12.5px; line-height:1.35; padding:6px 9px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink-soft); cursor:pointer; }
+.loc-choices button:hover { border-color:var(--accent); }
+.loc-choices button.on { border-color:var(--accent); background:#F1DCDC; color:var(--ink); }
+#locMap { height:220px; border-radius:10px; border:1px solid var(--line); margin-top:8px; }
+#locMap[hidden] { display:none; }
+.viewer-place-form .loc-row input { font-size:15px; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.viewer-place-form .btn-ghost { margin-top:10px; }

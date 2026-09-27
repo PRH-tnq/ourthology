@@ -144,7 +144,7 @@ $visibility = 'public'; // Phase 33 follow-up: default visibility is now Public
 $tagPersonIds = [];
 $displayMediaIds = [];
 // Phase 93: optional "where it happened".
-$location = ['label' => null, 'lat' => null, 'lng' => null];
+$location = ['label' => null, 'lat' => null, 'lng' => null, 'cc' => null];
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if ($isEditing) {
@@ -163,6 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             'label' => $entry['location_label'],
             'lat'   => $entry['location_lat'] !== null ? (float) $entry['location_lat'] : null,
             'lng'   => $entry['location_lng'] !== null ? (float) $entry['location_lng'] : null,
+            'cc'    => $entry['location_country'] ?? null,
         ];
         $tagPersonIds = $currentTagIds;
         $displayMediaIds = array_keys($existingMediaById);
@@ -331,7 +332,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'UPDATE timeline_entries
                      SET entry_type = :type, title = :title, body = :body,
                          occurred_on = :occurred, visibility = :vis,
-                         location_label = :loc, location_lat = :lat, location_lng = :lng
+                         location_label = :loc, location_lat = :lat, location_lng = :lng, location_country = :lcc
                      WHERE id = :id AND person_id = :pid'
                 )->execute([
                     'type'     => $dbEntryType,
@@ -341,6 +342,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'loc'      => $location['label'],
                     'lat'      => $location['lat'],
                     'lng'      => $location['lng'],
+                    'lcc'      => $location['cc'],
                     'vis'      => $visibility,
                     'id'       => $entryId,
                     'pid'      => $targetPersonId,
@@ -362,8 +364,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 }
             } else {
                 $stmt = $pdo->prepare(
-                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, location_label, location_lat, location_lng, visibility, created_by_user_id)
-                     VALUES (:pid, :type, :title, :body, :occurred, :loc, :lat, :lng, :vis, :uid)'
+                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, location_label, location_lat, location_lng, location_country, visibility, created_by_user_id)
+                     VALUES (:pid, :type, :title, :body, :occurred, :loc, :lat, :lng, :lcc, :vis, :uid)'
                 );
                 $stmt->execute([
                     'pid'      => $targetPersonId,
@@ -374,6 +376,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'loc'      => $location['label'],
                     'lat'      => $location['lat'],
                     'lng'      => $location['lng'],
+                    'lcc'      => $location['cc'],
                     'vis'      => $visibility,
                     'uid'      => $me['user_id'],
                 ]);
@@ -481,7 +484,7 @@ $existingForDisplayJson = json_encode($existingForDisplay, JSON_UNESCAPED_SLASHE
 $locationHomes = [];
 foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $myPersonId, $myGroup) as $h) {
     if ($h['lat'] !== null && $h['lng'] !== null) {
-        $locationHomes[] = ['label' => places_home_label($h), 'lat' => (float) $h['lat'], 'lng' => (float) $h['lng']];
+        $locationHomes[] = ['label' => places_home_label($h), 'lat' => (float) $h['lat'], 'lng' => (float) $h['lng'], 'cc' => (string) ($h['country_code'] ?? '')];
     }
 }
 ?>
@@ -493,7 +496,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=29">
+<link rel="stylesheet" href="/styles.css?v=31">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -758,11 +761,12 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
           </div>
           <input type="hidden" name="location_lat" id="locLat" value="<?= $location['lat'] !== null ? htmlspecialchars(sprintf('%.6F', $location['lat']), ENT_QUOTES) : '' ?>">
           <input type="hidden" name="location_lng" id="locLng" value="<?= $location['lng'] !== null ? htmlspecialchars(sprintf('%.6F', $location['lng']), ENT_QUOTES) : '' ?>">
+          <input type="hidden" name="location_country" id="locCountry" value="<?= htmlspecialchars((string) ($location['cc'] ?? ''), ENT_QUOTES) ?>">
           <?php if ($locationHomes): ?>
             <div class="loc-homes" id="locHomes">
               <span>At home:</span>
               <?php foreach ($locationHomes as $lh): ?>
-                <button type="button" data-label="<?= htmlspecialchars($lh['label'], ENT_QUOTES) ?>" data-lat="<?= sprintf('%.6F', $lh['lat']) ?>" data-lng="<?= sprintf('%.6F', $lh['lng']) ?>"><?= htmlspecialchars($lh['label'], ENT_QUOTES) ?></button>
+                <button type="button" data-label="<?= htmlspecialchars($lh['label'], ENT_QUOTES) ?>" data-lat="<?= sprintf('%.6F', $lh['lat']) ?>" data-lng="<?= sprintf('%.6F', $lh['lng']) ?>" data-cc="<?= htmlspecialchars($lh['cc'], ENT_QUOTES) ?>"><?= htmlspecialchars($lh['label'], ENT_QUOTES) ?></button>
               <?php endforeach; ?>
             </div>
           <?php endif; ?>
@@ -1278,8 +1282,8 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
   })();
   </script>
   <script src="/date_autotab.js?v=1"></script>
-  <script src="/geo.js?v=2"></script>
-  <script src="/memory_location.js?v=1"></script>
+  <script src="/geo.js?v=5"></script>
+  <script src="/memory_location.js?v=6"></script>
   <?php ourthology_render_tour('add_entry', $myPersonId); ?>
 </body>
 </html>

@@ -198,6 +198,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "You don't have an approved tag on that memory.";
             }
         }
+    } elseif ($action === 'save_tag_location') {
+        // Phase 101: someone with an APPROVED tag on a memory may add or
+        // correct where it happened -- the one shared detail of someone
+        // else's memory they can change (title, words and the owner's own
+        // photos stay the owner's alone, as with save_tag_note above). The
+        // tag check is the whole permission check.
+        $entryId = filter_var($_POST['entry_id'] ?? '', FILTER_VALIDATE_INT);
+        $tagCheck = $pdo->prepare(
+            "SELECT 1 FROM memory_tags WHERE timeline_entry_id = :eid AND person_id = :pid AND status = 'approved'"
+        );
+        $tagCheck->execute(['eid' => $entryId === false ? 0 : (int) $entryId, 'pid' => $myPersonId]);
+        if ($entryId === false || !$tagCheck->fetchColumn()) {
+            $errors[] = "You don't have an approved tag on that memory.";
+        } else {
+            $loc = memory_location_from_post($_POST);
+            $pdo->prepare(
+                'UPDATE timeline_entries
+                 SET location_label = :loc, location_lat = :lat, location_lng = :lng, location_country = :cc
+                 WHERE id = :id'
+            )->execute(['loc' => $loc['label'], 'lat' => $loc['lat'], 'lng' => $loc['lng'], 'cc' => $loc['cc'], 'id' => (int) $entryId]);
+            $notice = $loc['label'] !== null ? 'Place saved.' : 'Place removed.';
+        }
     } elseif ($action === 'remove_my_tag') {
         // Phase 83: "when I have approved someone else's memory to go on my
         // timeline, I want the option later to remove it" -- the memory
@@ -525,6 +547,7 @@ foreach ($entries as $entry) {
             'label' => (string) ($entry['location_label'] ?? ''),
             'lat'   => $entry['location_lat'] !== null ? (float) $entry['location_lat'] : null,
             'lng'   => $entry['location_lng'] !== null ? (float) $entry['location_lng'] : null,
+            'cc'    => (string) ($entry['location_country'] ?? ''),
         ] : null,
         // Phase 54: "show it on their timeline as a little mini
         // postcard/envelope symbol" -- set only on the copy a save
@@ -561,6 +584,9 @@ foreach ($entries as $entry) {
 // map (the map toggle beside River/Rings/Spiral), in the order lived in --
 // including homes with no move-in date yet, which can't go on the river.
 $lifeHomes = [];
+// Phase 100: every home's country (typed, or from its pin) for the map's
+// "countries lived in" counter -- including homes with no pin at all.
+$lifeHomeCountries = [];
 foreach (fetch_homes_for_person($pdo, (int) $target['id'], (int) $me['user_id'], $myPersonId, $myGroup) as $h) {
     $label = places_home_label($h, 'a new home');
     $firstPhoto = $h['media']['general'][0] ?? null;
@@ -575,6 +601,12 @@ foreach (fetch_homes_for_person($pdo, (int) $target['id'], (int) $me['user_id'],
     $inL = places_date_label($h['my_in'], $h['my_in_p']);
     $outL = places_date_label($h['my_out'], $h['my_out_p']);
     $homeUrl = '/places.php?person_id=' . (int) $target['id'] . '&home=' . (int) $h['id'] . '#home-' . (int) $h['id'];
+    $lifeHomeCountries[] = [
+        'lat'     => $h['lat'] !== null ? (float) $h['lat'] : null,
+        'lng'     => $h['lng'] !== null ? (float) $h['lng'] : null,
+        'country' => (string) ($h['country'] ?? ''),
+        'cc'      => (string) ($h['country_code'] ?? ''),
+    ];
     if ($h['lat'] !== null && $h['lng'] !== null) {
         $others = [];
         foreach ($h['residents'] as $r) {
@@ -653,7 +685,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=29">
+<link rel="stylesheet" href="/styles.css?v=31">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -664,7 +696,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <script src="/clipboard_paste.js?v=1"></script>
 <script src="/sortable_tiles.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
-<script src="/geo.js?v=2"></script>
+<script src="/geo.js?v=5"></script>
 <style>
   :root {
     --accent-bg: #F1DCDC;
@@ -1839,6 +1871,31 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <button type="submit" class="btn-ghost">Save note</button>
           </form>
 
+          <?php // Phase 101: a tagged person can add or correct where the memory
+                // happened -- the same place box as the memory composer
+                // (memory_location.js), filled in for whichever memory is open. ?>
+          <form method="post" class="viewer-my-note viewer-place-form" id="viewerPlaceForm" hidden>
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="save_tag_location">
+            <input type="hidden" name="entry_id" id="viewerPlaceEntryId" value="">
+            <label for="locLabel">Where it happened <span style="text-transform:none;font-weight:400;">(add or correct the place — anyone tagged can)</span></label>
+            <div class="loc-row">
+              <input type="text" id="locLabel" name="location_label" maxlength="255" autocomplete="off" placeholder="e.g. Brighton Pier, or 5 Rue Cler, Paris">
+              <button type="button" class="loc-btn" id="locFindBtn">Find</button>
+            </div>
+            <input type="hidden" name="location_lat" id="locLat" value="">
+            <input type="hidden" name="location_lng" id="locLng" value="">
+            <input type="hidden" name="location_country" id="locCountry" value="">
+            <div class="loc-status">
+              <span id="locMsg"></span>
+              <button type="button" class="loc-link" id="locMapBtn">Pick on a map</button>
+              <button type="button" class="loc-link" id="locClearBtn" hidden>Remove pin</button>
+            </div>
+            <div class="loc-choices" id="locChoices" hidden></div>
+            <div id="locMap" hidden></div>
+            <button type="submit" class="btn-ghost">Save place</button>
+          </form>
+
           <form method="post" enctype="multipart/form-data" class="viewer-my-note" id="viewerAddMediaForm" hidden>
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="add_tagged_media">
@@ -1999,6 +2056,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script id="entriesData" type="application/json"><?= $entriesJsonSafe ?></script>
   <script id="lifeHomesData" type="application/json"><?= json_encode($lifeHomes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+  <script id="lifeHomeCountriesData" type="application/json"><?= json_encode($lifeHomeCountries, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
   <?php
     // Phase 69: the tag-and-approve picker for a BRAND-NEW trip is bounded
     // to $target the same way add_entry.php bounds a new memory's picker
@@ -3385,7 +3443,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerPlaceMapEl.hidden = false;
         if (!viewerPlaceMap) {
           viewerPlaceMap = L.map(viewerPlaceMapEl, { scrollWheelZoom: false, attributionControl: true });
-          L.tileLayer(window.ourthologyGeo.TILE_URL, { maxZoom: 19, attribution: window.ourthologyGeo.TILE_ATTR }).addTo(viewerPlaceMap);
+          window.ourthologyGeo.addBaseLayers(viewerPlaceMap);
           viewerPlaceMarker = L.marker([pl.lat, pl.lng]).addTo(viewerPlaceMap);
         }
         viewerPlaceMarker.setLatLng([pl.lat, pl.lng]);
@@ -3420,6 +3478,21 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         }).join("");
       viewerTagNotes.innerHTML = notesHtml;
       viewerTagNotes.hidden = notesHtml === "";
+
+      // Phase 101: a tagged person (not the memory's own editor, who uses
+      // Edit) can add or correct the place. The form posts back to this
+      // page with ?entry= so the memory reopens showing the change.
+      var placeForm = document.getElementById("viewerPlaceForm");
+      if (placeForm) {
+        var canPlace = e.iAmTagged && !e.canEdit && window.ourthologyMemoryLocation;
+        placeForm.hidden = !canPlace;
+        if (canPlace) {
+          document.getElementById("viewerPlaceEntryId").value = e.id;
+          var qs = window.location.search.replace(/([?&])entry=[^&]*(&|$)/, "$1").replace(/[?&]$/, "");
+          placeForm.action = window.location.pathname + qs + (qs ? "&" : "?") + "entry=" + encodeURIComponent(e.id);
+          window.ourthologyMemoryLocation.load(e.place);
+        }
+      }
 
       if (e.iAmTagged) {
         viewerMyNoteForm.hidden = false;
@@ -5233,6 +5306,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
-  <script src="/life_map.js?v=3"></script>
+  <script src="/life_map.js?v=5"></script>
+  <script src="/memory_location.js?v=6"></script>
 </body>
 </html>

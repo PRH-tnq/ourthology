@@ -17,6 +17,19 @@
   if (!labelEl || !window.ourthologyGeo) return;
   var G = window.ourthologyGeo;
   var latEl = document.getElementById("locLat"), lngEl = document.getElementById("locLng");
+  var ccEl = document.getElementById("locCountry");
+  // Phase 100: which country the pin is in (the maps' country counter) --
+  // from the search result or the chosen home, or looked up for a pin
+  // dropped/dragged by hand.
+  var ccSeq = 0;
+  function setCountry(cc, lat, lng) {
+    if (!ccEl) return;
+    var mine = ++ccSeq;
+    ccEl.value = cc || "";
+    if (!cc && lat !== undefined) {
+      G.reverseCountry(lat, lng).then(function (found) { if (mine === ccSeq) ccEl.value = found || ""; });
+    }
+  }
   var msg = document.getElementById("locMsg");
   var findBtn = document.getElementById("locFindBtn");
   var mapBtn = document.getElementById("locMapBtn");
@@ -47,18 +60,22 @@
     return G.loadLeaflet().then(function (L) {
       mapEl.hidden = false;
       map = L.map(mapEl).setView([30, 0], 1);
-      L.tileLayer(G.TILE_URL, { maxZoom: 19, attribution: G.TILE_ATTR }).addTo(map);
+      G.addBaseLayers(map);
       map.on("click", function (e) {
         setPin(e.latlng.lat, e.latlng.lng, false);
+        setCountry("", e.latlng.lat, e.latlng.lng);
         if (!labelEl.value.trim()) reverseFill(e.latlng.lat, G.wrapLng(e.latlng.lng));
       });
       return map;
     });
   }
   function showMap() {
+    var wasHidden = mapEl.hidden; // (ensureMap() unhides it on first use)
     return ensureMap().then(function () {
       mapEl.hidden = false;
       map.invalidateSize();
+      // bring it into view (it can open below the fold, e.g. in the memory viewer)
+      if (wasHidden && mapEl.scrollIntoView) { try { mapEl.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (e) { mapEl.scrollIntoView(false); } }
       if (hasPin()) {
         placeMarker(+latEl.value, +lngEl.value);
         if (!map._ourthologyCentred) { map.setView([+latEl.value, +lngEl.value], 14); map._ourthologyCentred = true; }
@@ -70,7 +87,7 @@
     if (!map) return;
     if (!marker) {
       marker = window.L.marker([lat, lng], { draggable: true }).addTo(map);
-      marker.on("dragend", function () { var p = marker.getLatLng(); setPin(p.lat, p.lng, false); });
+      marker.on("dragend", function () { var p = marker.getLatLng(); setPin(p.lat, p.lng, false); setCountry("", p.lat, p.lng); });
     } else {
       marker.setLatLng([lat, lng]);
       if (!map.hasLayer(marker)) marker.addTo(map);
@@ -86,6 +103,7 @@
   }
   function clearPin() {
     latEl.value = ""; lngEl.value = "";
+    setCountry("");
     if (marker && map) map.removeLayer(marker);
     choices.hidden = true; choices.innerHTML = "";
     if (homes) Array.prototype.forEach.call(homes.querySelectorAll("button"), function (b) { b.classList.remove("on"); });
@@ -114,6 +132,7 @@
       if (!hits.length) { say("Couldn't find that — try adding the town or country, or pick it on a map."); return; }
       return showMap().then(function () {
         setPin(hits[0].lat, hits[0].lng, false);
+        setCountry(hits[0].cc, hits[0].lat, hits[0].lng);
         G.placeResult(map, hits[0]);
         say("Found it — drag the pin if it's not quite right.");
         if (hits.length > 1) {
@@ -127,6 +146,7 @@
               b.classList.add("on");
               var h = hits[+b.getAttribute("data-i")];
               setPin(h.lat, h.lng, false);
+              setCountry(h.cc, h.lat, h.lng);
               G.placeResult(map, h);
             });
           });
@@ -159,11 +179,33 @@
         choices.hidden = true; choices.innerHTML = "";
         var lat = +b.getAttribute("data-lat"), lng = +b.getAttribute("data-lng");
         latEl.value = lat.toFixed(6); lngEl.value = lng.toFixed(6);
+        setCountry(b.getAttribute("data-cc") || "", lat, lng);
         refresh();
         if (map && !mapEl.hidden) setPin(lat, lng, true);
       });
     });
   }
+
+  // Phase 101: the memory viewer (timeline.php) reuses this same box for a
+  // tagged person to add or change a memory's place -- load() fills it
+  // with whichever memory has just been opened.
+  window.ourthologyMemoryLocation = {
+    load: function (place) {
+      place = place || {};
+      labelEl.value = place.label || "";
+      latEl.value = place.lat !== null && place.lat !== undefined ? Number(place.lat).toFixed(6) : "";
+      lngEl.value = place.lng !== null && place.lng !== undefined ? Number(place.lng).toFixed(6) : "";
+      ccSeq++;
+      if (ccEl) ccEl.value = place.cc || "";
+      choices.hidden = true; choices.innerHTML = "";
+      if (marker && map) map.removeLayer(marker);
+      if (map) map._ourthologyCentred = false;
+      mapEl.hidden = true;
+      delete msg.dataset.busy;
+      msg.textContent = "";
+      refresh();
+    }
+  };
 
   refresh();
 })();

@@ -29,6 +29,7 @@
     try { return el ? JSON.parse(el.textContent || "null") : null; } catch (e) { return null; }
   }
   var homes = readJson("lifeHomesData") || [];
+  var homeCountries = readJson("lifeHomeCountriesData") || []; // Phase 100: every home, pinned or not
   var visited = (readJson("entriesData") || []).filter(function (e) {
     return e.place && e.place.lat !== null && e.place.lng !== null;
   });
@@ -83,7 +84,7 @@
     G.loadLeaflet().then(function (L) {
       if (!map) {
         map = L.map(mapEl, { scrollWheelZoom: false, worldCopyJump: false }).setView([30, 0], 2);
-        L.tileLayer(G.TILE_URL, { maxZoom: 19, attribution: G.TILE_ATTR }).addTo(map);
+        G.addBaseLayers(map); // Phase 100: English country labels
         map.on("focus", function () { map.scrollWheelZoom.enable(); });
         map.on("blur", function () { map.scrollWheelZoom.disable(); });
       }
@@ -92,6 +93,7 @@
       layer = L.layerGroup().addTo(map);
       lastFit = null;
       if (which === "lived") drawLived(L); else drawVisited(L);
+      updateCounter(L, which);
       lastW = mapEl.clientWidth; lastH = mapEl.clientHeight;
     }).catch(function () {
       emptyEl.innerHTML = "<b>The map couldn't load</b>Check your connection and try again.";
@@ -125,8 +127,75 @@
 
   function fit(points, single) {
     lastFit = points.length ? { points: points, single: single } : null;
+    // keep pins clear of the country counter in the top-right corner
+    var top = counterEl && !counterEl.hidden ? counterEl.offsetHeight + 36 : 40;
     if (points.length === 1) map.setView(points[0], single || 13);
-    else if (points.length > 1) map.fitBounds(points, { padding: [40, 40], maxZoom: 13 });
+    else if (points.length > 1) map.fitBounds(points, { paddingTopLeft: [40, top], paddingBottomRight: [40, 40], maxZoom: 13 });
+  }
+
+  // ------------------------------------------------------------ Phase 100: country counter
+  // Top-right of the map: how many countries this person has lived in /
+  // visited (whichever map is showing), and what share of the world's 195
+  // countries that is, with the list of countries a tap away. Countries
+  // come from each home's typed country, or where its pin sits (and each
+  // memory's pin, or a country named at the end of its place text) --
+  // see geo.js countriesFor().
+  var counterEl = null, counterCtl = null, counterListOpen = false;
+  function counterPlaces(which) {
+    if (which === "lived") return homeCountries;
+    return (readJson("entriesData") || []).filter(function (e) { return e.place; }).map(function (e) {
+      var pl = e.place, parts = String(pl.label || "").split(",");
+      var tail = parts.length > 1 ? parts[parts.length - 1].trim() : "";
+      var hasPin = pl.lat !== null && pl.lng !== null;
+      // a pin decides; text-only places count if they end in a country name
+      return hasPin ? { lat: pl.lat, lng: pl.lng, cc: pl.cc || "" } : { country: tail };
+    });
+  }
+  function pct(n) {
+    var v = n / G.WORLD_COUNTRY_TOTAL * 100;
+    return (v > 0 && v < 10 ? v.toFixed(1) : Math.round(v)) + "%";
+  }
+  function updateCounter(L, which) {
+    if (!counterCtl) {
+      counterCtl = L.control({ position: "topright" });
+      counterCtl.onAdd = function () {
+        var d = L.DomUtil.create("div", "lm-counter");
+        L.DomEvent.disableClickPropagation(d);
+        L.DomEvent.disableScrollPropagation(d);
+        d.addEventListener("click", function (e) {
+          var b = e.target.closest(".lmc-toggle");
+          if (!b) return;
+          counterListOpen = !counterListOpen;
+          var list = d.querySelector(".lmc-list");
+          if (list) list.hidden = !counterListOpen;
+          b.textContent = counterListOpen ? "Hide countries" : "Show countries";
+          b.setAttribute("aria-expanded", counterListOpen ? "true" : "false");
+        });
+        return d;
+      };
+      counterCtl.addTo(map);
+      counterEl = counterCtl.getContainer();
+    }
+    var title = which === "lived" ? "Countries lived in" : "Countries visited";
+    counterEl.setAttribute("data-mode", which);
+    counterEl.innerHTML = '<div class="lmc-title">' + title + '</div><div class="lmc-wait">Counting…</div>';
+    G.world().then(function (w) {
+      if (current !== which) return;
+      var list = G.countriesFor(w, counterPlaces(which));
+      var n = list.length;
+      counterEl.innerHTML =
+        '<div class="lmc-title">' + title + "</div>" +
+        '<table class="lmc-table"><tbody>' +
+        '<tr><th scope="row">Countries</th><td class="lmc-n">' + n + "</td></tr>" +
+        '<tr><th scope="row">Of the world\'s ' + G.WORLD_COUNTRY_TOTAL + '</th><td class="lmc-p">' + pct(n) + "</td></tr>" +
+        "</tbody></table>" +
+        (n ? '<button type="button" class="lmc-toggle" aria-expanded="' + (counterListOpen ? "true" : "false") + '">' + (counterListOpen ? "Hide countries" : "Show countries") + "</button>" +
+             '<ul class="lmc-list"' + (counterListOpen ? "" : " hidden") + ">" + list.map(function (c) { return "<li>" + esc(c.name) + "</li>"; }).join("") + "</ul>"
+           : '<p class="lmc-none">' + (which === "lived" ? "Add a home to start counting." : "Add a place to a memory to start counting.") + "</p>");
+      if (lastFit) fit(lastFit.points, lastFit.single); // now the counter's height is known
+    }).catch(function () {
+      counterEl.innerHTML = '<div class="lmc-title">' + title + '</div><p class="lmc-none">Couldn\'t count countries just now.</p>';
+    });
   }
   // The map can be created before the page has finished laying out (fonts,
   // scrollbars, opening straight onto #map=...), so it would draw for the

@@ -13,8 +13,6 @@
   var family = DATA.family || [];
   var MAP_PERSON = DATA.mapPersonId;
 
-  var TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-  var TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   var UK_CENTRE = [54.5, -3.2];
 
   function esc(s) {
@@ -41,7 +39,7 @@
   var mapNote = document.getElementById("mapNote");
   if (window.L && mapEl) {
     map = L.map(mapEl, { scrollWheelZoom: false }).setView(UK_CENTRE, 5);
-    L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTR }).addTo(map);
+    window.ourthologyGeo.addBaseLayers(map); // Phase 100: English country labels
     map.on("focus", function () { map.scrollWheelZoom.enable(); });
     map.on("blur", function () { map.scrollWheelZoom.disable(); });
   }
@@ -520,7 +518,7 @@
     if (!editMap) return;
     if (!editMarker) {
       editMarker = L.marker([lat, lng], { draggable: true }).addTo(editMap);
-      editMarker.on("dragend", function () { var p = editMarker.getLatLng(); setPin(p.lat, p.lng); });
+      editMarker.on("dragend", function () { var p = editMarker.getLatLng(); setPin(p.lat, p.lng); lookUpCountry(p.lat, p.lng); });
     } else {
       editMarker.setLatLng([lat, lng]);
     }
@@ -539,6 +537,7 @@
     document.getElementById("fCountry").value = h ? h.country : "";
     document.getElementById("fNotes").value = h ? h.notes : "";
     document.getElementById("fLat").value = ""; document.getElementById("fLng").value = "";
+    document.getElementById("fCountryCode").value = h ? (h.countryCode || "") : "";
     document.getElementById("geoChoices").innerHTML = ""; document.getElementById("geoChoices").hidden = true;
     Array.prototype.forEach.call(form.querySelectorAll('input[name="visibility"]'), function (r) { r.checked = r.value === (h ? h.visibility : "public"); });
     renderResidents(h);
@@ -549,8 +548,8 @@
     if (window.L) {
       if (!editMap) {
         editMap = L.map("editMap").setView(UK_CENTRE, 5);
-        L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTR }).addTo(editMap);
-        editMap.on("click", function (e) { setPin(e.latlng.lat, e.latlng.lng); document.getElementById("geoMsg").textContent = "Pin placed — drag it to fine-tune."; });
+        window.ourthologyGeo.addBaseLayers(editMap);
+        editMap.on("click", function (e) { setPin(e.latlng.lat, e.latlng.lng); lookUpCountry(e.latlng.lat, e.latlng.lng); document.getElementById("geoMsg").textContent = "Pin placed — drag it to fine-tune."; });
       }
       if (editMarker) { editMap.removeLayer(editMarker); editMarker = null; }
       setTimeout(function () {
@@ -580,9 +579,21 @@
   // match, the others are offered underneath so the right one can be picked.
   var geoChoices = document.getElementById("geoChoices");
   window.ourthologyGeo.fillCountryList(document.getElementById("countryList"));
+  // Phase 100: remember which country the pin is in (for the maps' country
+  // counter) -- straight from the search result, or looked up for a pin
+  // dropped or dragged by hand.
+  var countrySeq = 0;
+  function lookUpCountry(lat, lng) {
+    var ccEl = document.getElementById("fCountryCode");
+    ccEl.value = "";
+    var mine = ++countrySeq;
+    window.ourthologyGeo.reverseCountry(lat, lng).then(function (cc) { if (mine === countrySeq) ccEl.value = cc || ""; });
+  }
   function showChoice(hit) {
     setPin(hit.lat, hit.lng);
     if (editMap) window.ourthologyGeo.placeResult(editMap, hit);
+    if (hit.cc) { countrySeq++; document.getElementById("fCountryCode").value = hit.cc; }
+    else lookUpCountry(hit.lat, hit.lng);
   }
   document.getElementById("geoBtn").addEventListener("click", function () {
     var msg = document.getElementById("geoMsg");
