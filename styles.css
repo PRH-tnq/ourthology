@@ -267,6 +267,14 @@ a.btn-secondary:hover { background: var(--paper-2); }
   .picker-paste-btn { flex:0 0 auto; display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600; padding:6px 12px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; margin-left:auto; white-space:nowrap; }
   .picker-paste-btn:hover { background:var(--accent-bg); }
   .picker-paste-btn svg { width:14px; height:14px; flex:0 0 auto; }
+  /* Phase 103: the Paste button stays once there are photos -- docked in
+     its own tile after the "+" (clipboard_paste.js dock()) */
+  .pick-tile--paste { border:2px dashed var(--line); background:transparent; display:flex; align-items:center; justify-content:center; cursor:default; }
+  .pick-tile--paste .picker-paste-btn { margin:0; padding:6px 10px; font-size:12px; }
+  /* Phase 103: a memory holding the most files it can (25) */
+  .media-full-note { margin:8px 0 0; font-size:12.5px; color:var(--ink-faint); }
+  .year-only-hint { margin:6px 0 0; font-size:12.5px; color:var(--ink-faint); } /* Phase 105 */
+  .photo-drop.is-full { cursor:default; }
 
 /* ---------- post-tour nudge (Phase 44) ----------
    Shown once, right after the onboarding tour finishes (Done or Skip) --
@@ -307,6 +315,12 @@ a.btn-secondary:hover { background: var(--paper-2); }
    isn't the active/current-page item -- replaces the old .nav a.badge
    treatment (a different pill shape that doesn't fit inside .segmented). */
 .segmented a.has-pending { color:var(--accent); font-weight:800; }
+/* Phase 106: "Mailbox" -- a red count bubble, with a soft pulse, when
+   something is waiting for you to act on it (includes/nav.php). */
+.nav-badge, .segmented span.nav-badge { display:inline-flex; font-weight:800; transform:none; cursor:inherit; transition:none; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; margin-left:6px; border-radius:999px; background:var(--accent); color:#fff; font:800 11px/18px system-ui, sans-serif; vertical-align:1px; box-sizing:border-box; animation:ourthologyMailPulse 2.4s ease-out infinite; }
+.segmented .active span.nav-badge { background:#fff; color:var(--accent); }
+@keyframes ourthologyMailPulse { 0% { box-shadow:0 0 0 0 rgba(154,42,42,.45); } 70% { box-shadow:0 0 0 7px rgba(154,42,42,0); } 100% { box-shadow:0 0 0 0 rgba(154,42,42,0); } }
+.visually-hidden, .segmented span.visually-hidden { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 
 /* ---------- Phase 96: the phone layout ----------
    Only below 700px wide, and only on pages that render the shared nav
@@ -353,6 +367,8 @@ a.btn-secondary:hover { background: var(--paper-2); }
   html.m-ui .m-tab-icon { position:relative; width:24px; height:24px; }
   html.m-ui .m-tab-icon svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   html.m-ui .m-badge { position:absolute; top:-5px; right:-10px; min-width:18px; height:18px; padding:0 5px; border-radius:999px; background:var(--accent); color:#fff; font:800 11px/18px system-ui, sans-serif; text-align:center; border:2px solid #FBF8F1; }
+  html.m-ui .m-tabbar a.has-pending { color:var(--accent); font-weight:800; } /* Phase 106 */
+  html.m-ui .m-badge { animation:ourthologyMailPulse 2.4s ease-out infinite; }
 
   /* Menu sheet */
   html.m-ui .m-sheet-scrim { display:block; position:fixed; inset:0; z-index:44; background:rgba(26,23,20,.4); opacity:0; transition:opacity .2s ease; }
@@ -471,3 +487,6 @@ a.btn-secondary:hover { background: var(--paper-2); }
    itself (its own stacking context at the page's level 0), on every
    screen size -- this used to apply on phones only (Phase 96). */
 .leaflet-container { isolation:isolate; z-index:0; }
+
+/* Phase 106: no pulsing for anyone who has asked for less motion */
+@media (prefers-reduced-motion: reduce) { .nav-badge, .segmented span.nav-badge, html.m-ui .m-badge { animation:none; } }

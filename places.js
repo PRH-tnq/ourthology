@@ -247,6 +247,7 @@
     lbImg.src = gallery[i].url;
     lbCap.textContent = gallery[i].caption + "  ·  " + (i + 1) + " of " + gallery.length;
     lb.classList.add("open");
+    if (window.ourthologyMediaFit) window.ourthologyMediaFit.fit(lbImg, lb); // Phase 104: scale to the window
   }
   function lbStep(d) { if (gallery.length) openLightbox((lbIdx + d + gallery.length) % gallery.length); }
   document.getElementById("lbClose").addEventListener("click", function () { lb.classList.remove("open"); });
@@ -312,7 +313,12 @@
             '<input type="hidden" name="' + el.getAttribute("data-kept-name") + '" value="' + p.id + '"></div>';
         }
         return '<div class="pk-tile"><img src="' + p.url + '" alt=""><button type="button" class="pk-x" data-p="' + st.pending.indexOf(p) + '" aria-label="Remove">×</button></div>';
-      }).join("") + '<button type="button" class="pk-add" aria-label="Add photos">+<small>Add photos</small></button>';
+      }).join("") + (st.order.length < 25 ? '<button type="button" class="pk-add" aria-label="Add photos">+<small>Add photos</small></button>' : "");
+      // Phase 103: full at 25 -- adding is switched off until one is removed
+      var full = st.order.length >= 25;
+      el.classList.toggle("pk-full", full);
+      el.querySelector(".pk-hint").textContent = full ? "25 photos — the most this can hold. Remove one to add another." : "Drag photos here, or";
+      el.querySelector(".pk-paste").style.display = full ? "none" : "";
       el.querySelector(".pk-order").innerHTML = st.order.map(function (p) {
         return '<input type="hidden" name="' + orderName + '" value="' + (isNew(p) ? "n" : "k:" + p.id) + '">';
       }).join("");

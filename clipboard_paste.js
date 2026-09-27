@@ -96,5 +96,25 @@
     });
   }
 
-  window.ourthologyClipboardPaste = { readImages: readImages, wire: wire };
+  // Phase 103: "when I have pasted one image the Paste button disappears
+  // -- I'd like it to persist." The button starts in a picker's empty
+  // state, which is hidden once there's anything in the picker; dock()
+  // moves the SAME button (its click handler comes with it) into a tile
+  // at the end of the thumbnail grid instead -- call it after every
+  // render with show=false once the picker is full (or empty again),
+  // which puts it back where it started.
+  function dock(btn, grid, show) {
+    if (!btn || !grid) return;
+    if (!btn.__ourthologyHome) btn.__ourthologyHome = btn.parentNode;
+    if (show) {
+      var tile = document.createElement("div");
+      tile.className = "pick-tile pick-tile--paste";
+      tile.appendChild(btn);
+      grid.appendChild(tile);
+    } else if (btn.parentNode !== btn.__ourthologyHome) {
+      btn.__ourthologyHome.appendChild(btn);
+    }
+  }
+
+  window.ourthologyClipboardPaste = { readImages: readImages, wire: wire, dock: dock };
 })();

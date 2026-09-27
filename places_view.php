@@ -18,7 +18,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=32">
+<link rel="stylesheet" href="/styles.css?v=35">
 <!-- Leaflet (map library) is served from this site rather than a CDN, so
      the map never depends on a third-party script host. Map tiles come
      from OpenStreetMap. -->
@@ -161,7 +161,8 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   .pl-error { color:var(--accent); font-size:13.5px; margin-right:auto; }
   .pl-progress { font-size:13px; color:var(--ink-soft); margin-right:auto; }
 
-  .pl-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.88); z-index:1600; display:none; align-items:center; justify-content:center; }
+  .pl-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.88); z-index:1600; display:none; align-items:center; justify-content:center; padding:24px 76px 52px; /* Phase 104: photos fill the window (media_fit.js) */ }
+  @media (max-width:700px) { .pl-lightbox { padding:12px 12px 48px; } }
   .pl-lightbox.open { display:flex; }
   .pl-lightbox img { max-width:92vw; max-height:86vh; border-radius:8px; }
   .pl-lightbox button { position:absolute; background:rgba(255,255,255,.15); border:0; color:#fff; font-size:30px; width:48px; height:48px; border-radius:50%; cursor:pointer; }
@@ -307,10 +308,11 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
       'memories' => $jsMemories, 'openMemoryId' => $openMemoryId !== false ? (int) $openMemoryId : null,
   ], $jsonFlags) ?></script>
   <script src="/date_autotab.js?v=1"></script>
-  <script src="/clipboard_paste.js?v=1"></script>
+  <script src="/clipboard_paste.js?v=2"></script>
   <script src="/sortable_tiles.js?v=1"></script>
   <script src="/geo.js?v=5"></script>
-  <script src="/places.js?v=8"></script>
+  <script src="/media_fit.js?v=1"></script>
+  <script src="/places.js?v=10"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>

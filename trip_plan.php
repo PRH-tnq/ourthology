@@ -22,6 +22,9 @@ require_once __DIR__ . '/includes/trips.php';
  *        timeline.php with the pop-up reopened on the saved trip -- a
  *        real multipart form POST, not an AJAX save, matching how the
  *        postcard/letter/card composers already submit.
+ *   POST action=add_event_media (Phase 82) / action=add_event (Phase 103)
+ *        -- AJAX, add-only, for the owner OR anyone with an approved tag
+ *        on the trip: photos onto one event, or a whole new planned event.
  *
  * Deleting a whole trip is NOT handled here -- a trip's only DB footprint
  * beyond its own tables is one companion timeline_entries row
@@ -120,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string) ($_GET['action'] ?? '') ===
         'visibility'      => $trip['visibility'],
         'canEdit'         => $canEdit,
         'canAddMedia'     => $canAddMedia,
+        'canAddEvents'    => $canAddMedia, // Phase 103: same people
         'taggedPersonIds' => array_map(fn ($t) => (int) $t['person_id'], $trip['tags']),
         'taggablePeople'  => $taggablePeople,
         'events'          => $events,
@@ -146,6 +150,20 @@ if ($bodyTooLarge) {
 
 csrf_check();
 $action = (string) ($_POST['action'] ?? '');
+
+/** Same three-slot day/month/year validation add_entry.php uses for occurred_on -- all three or none, checkdate()-verified. Returns ['error' => string] or ['date' => 'Y-m-d'|null]. */
+function trip_parse_date_slots(string $day, string $month, string $year): array
+{
+    $filled = (int) ($day !== '') + (int) ($month !== '') + (int) ($year !== '');
+    if ($filled === 0) {
+        return ['date' => null];
+    }
+    if ($filled < 3 || !ctype_digit($day) || !ctype_digit($month) || !ctype_digit($year)
+        || !checkdate((int) $month, (int) $day, (int) $year)) {
+        return ['error' => true];
+    }
+    return ['date' => sprintf('%04d-%02d-%02d', (int) $year, (int) $month, (int) $day)];
+}
 
 // Phase 82: a small, separate AJAX action -- one event, one role, add-only
 // -- reachable by the trip's owner OR anyone with an APPROVED tag on it,
@@ -242,6 +260,140 @@ if ($action === 'add_event_media') {
     exit;
 }
 
+// Phase 103: anyone with an APPROVED tag on the trip (or its owner) can
+// add a whole new planned event -- title, date, notes and photos -- over
+// this small AJAX action. Add-only, like add_event_media above: changing
+// or removing events, and everything else about the trip, stays with its
+// owner. Photos arrive as chunked-upload tokens (media_upload.php,
+// purpose 'tagged') or, on a browser without that, as ordinary files.
+if ($action === 'add_event') {
+    header('Content-Type: application/json');
+
+    $addTripId = filter_var($_POST['trip_plan_id'] ?? '', FILTER_VALIDATE_INT);
+    $trip = $addTripId !== false ? fetch_trip_plan_detail($pdo, (int) $addTripId) : null;
+    if ($trip === null) {
+        echo json_encode(['ok' => false, 'error' => "That trip couldn't be found."]);
+        exit;
+    }
+    $isOwner = (int) $trip['owner_family_group_id'] === $myGroup
+        && person_is_editable_by(['claimed_by_user_id' => $trip['owner_claimed_by']], $myUserId);
+    if (!$isOwner && !person_has_approved_tag($pdo, (int) $trip['entry_id'], $myPersonId)) {
+        echo json_encode(['ok' => false, 'error' => "You don't have permission to add events to that trip."]);
+        exit;
+    }
+    $entryId = (int) $trip['entry_id'];
+    $ownerPersonId = (int) $trip['owner_person_id'];
+
+    $evTitle = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 255);
+    if ($evTitle === '') {
+        echo json_encode(['ok' => false, 'error' => 'Give the event a title.']);
+        exit;
+    }
+    $evDate = trip_parse_date_slots(
+        trim((string) ($_POST['event_day'] ?? '')),
+        trim((string) ($_POST['event_month'] ?? '')),
+        trim((string) ($_POST['event_year'] ?? ''))
+    );
+    if (isset($evDate['error'])) {
+        echo json_encode(['ok' => false, 'error' => 'Enter a real date for the event, or leave its day/month/year all blank.']);
+        exit;
+    }
+    $planNotes = trim((string) ($_POST['plan_notes'] ?? ''));
+    $memoryNotes = trim((string) ($_POST['memory_notes'] ?? ''));
+
+    // Staged tokens were uploaded by THIS user against THIS trip's memory
+    // ('tagged'), or -- for the owner -- as an ordinary 'entry' upload.
+    $byRole = [];
+    foreach (['plan', 'memory'] as $role) {
+        $tokens = (array) ($_POST['staged_' . $role . '_media'] ?? []);
+        $staged = media_staging_resolve($tokens, $myUserId, $ownerPersonId, 'tagged', $entryId);
+        if ($isOwner) {
+            $asOwner = media_staging_resolve($tokens, $myUserId, $ownerPersonId, 'entry');
+            $staged = ['files' => array_merge($staged['files'], $asOwner['files']), 'tokens' => array_merge($staged['tokens'], $asOwner['tokens'])];
+        }
+        $direct = normalize_multi_file_upload($_FILES[$role . '_media'] ?? []);
+        if (count($staged['files']) + count($direct) > TRIP_MAX_MEDIA_PER_ROLE) {
+            echo json_encode(['ok' => false, 'error' => 'Attach at most ' . TRIP_MAX_MEDIA_PER_ROLE . ' ' . $role . ' photos to one event.']);
+            exit;
+        }
+        $byRole[$role] = ['staged' => $staged, 'directCount' => count($direct)];
+    }
+
+    $writtenThisRequest = [];
+    $consumeTokens = [];
+    try {
+        $pdo->beginTransaction();
+        $sortStmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) FROM trip_events WHERE trip_plan_id = :tpid');
+        $sortStmt->execute(['tpid' => (int) $trip['id']]);
+        $pdo->prepare(
+            'INSERT INTO trip_events (trip_plan_id, sort_order, title, event_date, plan_notes, memory_notes)
+             VALUES (:tpid, :sort, :title, :date, :plan, :memory)'
+        )->execute([
+            'tpid' => (int) $trip['id'], 'sort' => (int) $sortStmt->fetchColumn() + 1,
+            'title' => $evTitle, 'date' => $evDate['date'],
+            'plan' => $planNotes !== '' ? $planNotes : null,
+            'memory' => $memoryNotes !== '' ? $memoryNotes : null,
+        ]);
+        $newEventId = (int) $pdo->lastInsertId();
+
+        $mediaInsert = $pdo->prepare(
+            'INSERT INTO media (timeline_entry_id, file_path, mime_type, byte_size, width, height)
+             VALUES (:eid, :path, :mime, :size, :w, :h)'
+        );
+        $tripMediaInsert = $pdo->prepare(
+            'INSERT INTO trip_event_media (trip_event_id, media_id, role, sort_order) VALUES (:tev, :mid, :role, :sort)'
+        );
+        foreach ($byRole as $role => $r) {
+            $direct = $r['directCount'] > 0 ? store_uploaded_media_files($_FILES[$role . '_media'], $ownerPersonId) : [];
+            foreach ($direct as $d) {
+                $writtenThisRequest[] = $d['file_path'];
+            }
+            $consumeTokens = array_merge($consumeTokens, $r['staged']['tokens']);
+            foreach (array_merge($r['staged']['files'], $direct) as $sortIdx => $f) {
+                $mediaInsert->execute([
+                    'eid' => $entryId, 'path' => $f['file_path'], 'mime' => $f['mime_type'],
+                    'size' => $f['byte_size'], 'w' => $f['width'], 'h' => $f['height'],
+                ]);
+                $tripMediaInsert->execute(['tev' => $newEventId, 'mid' => (int) $pdo->lastInsertId(), 'role' => $role, 'sort' => $sortIdx]);
+            }
+        }
+        $pdo->commit();
+        media_staging_consume($consumeTokens, $myUserId);
+    } catch (RuntimeException $e) {
+        $pdo->rollBack();
+        foreach ($writtenThisRequest as $fp) {
+            delete_media_file($fp);
+        }
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        exit;
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        foreach ($writtenThisRequest as $fp) {
+            delete_media_file($fp);
+        }
+        error_log('ourthology trip_plan add_event error: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'error' => 'Something went wrong saving that. Please try again.']);
+        exit;
+    }
+
+    $saved = null;
+    foreach ((fetch_trip_plan_detail($pdo, (int) $trip['id'])['events'] ?? []) as $ev) {
+        if ((int) $ev['id'] === $newEventId) {
+            $saved = $ev;
+        }
+    }
+    echo json_encode(['ok' => true, 'notice' => 'Event added to the plan.', 'event' => [
+        'id'          => $newEventId,
+        'title'       => $evTitle,
+        'eventDate'   => $evDate['date'],
+        'planNotes'   => $planNotes,
+        'memoryNotes' => $memoryNotes,
+        'planMedia'   => $saved['plan_media'] ?? [],
+        'memoryMedia' => $saved['memory_media'] ?? [],
+    ]]);
+    exit;
+}
+
 if ($action !== 'save') {
     header('Location: /timeline.php');
     exit;
@@ -282,20 +434,6 @@ foreach ($familyGraph['persons'] as $p) {
     $familyPersonsById[(int) $p['id']] = $p;
 }
 $taggablePersonIds = array_map(fn ($p) => (int) $p['id'], graph_people_within_generations($familyGraph, $targetPersonId));
-
-/** Same three-slot day/month/year validation add_entry.php uses for occurred_on -- all three or none, checkdate()-verified. Returns ['error' => string] or ['date' => 'Y-m-d'|null]. */
-function trip_parse_date_slots(string $day, string $month, string $year): array
-{
-    $filled = (int) ($day !== '') + (int) ($month !== '') + (int) ($year !== '');
-    if ($filled === 0) {
-        return ['date' => null];
-    }
-    if ($filled < 3 || !ctype_digit($day) || !ctype_digit($month) || !ctype_digit($year)
-        || !checkdate((int) $month, (int) $day, (int) $year)) {
-        return ['error' => true];
-    }
-    return ['date' => sprintf('%04d-%02d-%02d', (int) $year, (int) $month, (int) $day)];
-}
 
 $errors = [];
 
@@ -345,6 +483,17 @@ if ($existingTrip !== null) {
         $existingEventsById[(int) $ev['id']] = $ev;
     }
 }
+
+// Phase 103: what the pop-up had in front of it when it was opened
+// (absent from an older cached page -- then everything counts as loaded).
+$loadedIdList = function (string $field): ?array {
+    if (!isset($_POST[$field]) || !is_string($_POST[$field])) {
+        return null;
+    }
+    return array_values(array_filter(array_map('intval', explode(',', $_POST[$field])), fn ($v) => $v > 0));
+};
+$loadedEventIds = $loadedIdList('loaded_event_ids');
+$loadedMediaIds = $loadedIdList('loaded_media_ids');
 
 $rawEvents = is_array($_POST['events'] ?? null) ? $_POST['events'] : [];
 $rawEventFiles = is_array($_FILES['events'] ?? null) ? $_FILES['events'] : [];
@@ -477,6 +626,12 @@ try {
         // as any other removed attachment, before the DB rows go.
         $submittedEventIds = array_filter(array_map(fn ($e) => $e['existingId'], $parsedEvents));
         $eventIdsToDelete = array_diff(array_keys($existingEventsById), $submittedEventIds);
+        // Phase 103: only events this pop-up actually loaded can be removed
+        // by leaving them out -- one a tagged person added (add_event) while
+        // it was open is kept, not silently deleted.
+        if ($loadedEventIds !== null) {
+            $eventIdsToDelete = array_intersect($eventIdsToDelete, $loadedEventIds);
+        }
         if ($eventIdsToDelete) {
             $allRemovedMediaIds = [];
             foreach ($eventIdsToDelete as $delId) {
@@ -555,6 +710,10 @@ try {
             foreach (['plan' => 'keptPlanIds', 'memory' => 'keptMemoryIds'] as $role => $keptKey) {
                 $wasIds = array_map(fn ($m) => (int) $m['id'], $existingRow[$role . '_media']);
                 $removedIds = array_diff($wasIds, $pe[$keptKey]);
+                if ($loadedMediaIds !== null) {
+                    // Phase 103: likewise photos added by a tagged person since it opened
+                    $removedIds = array_intersect($removedIds, $loadedMediaIds);
+                }
                 if ($removedIds) {
                     $ph = implode(',', array_fill(0, count($removedIds), '?'));
                     $pathStmt = $pdo->prepare("SELECT file_path FROM media WHERE id IN ($ph)");
@@ -606,6 +765,18 @@ try {
                 ]);
                 $mediaId = (int) $pdo->lastInsertId();
                 $tripMediaInsert->execute(['tev' => $thisEventId, 'mid' => $mediaId, 'role' => $role, 'sort' => $positions['new'][$sortIdx] ?? $sortIdx]);
+            }
+        }
+    }
+
+    // Phase 103: events added by a tagged person while this pop-up was
+    // open weren't in it -- keep them, after the owner's own, in order.
+    if ($isEditing && $loadedEventIds !== null) {
+        $sortLate = $pdo->prepare('UPDATE trip_events SET sort_order = :s WHERE id = :id AND trip_plan_id = :tpid');
+        $late = count($parsedEvents);
+        foreach (array_keys($existingEventsById) as $evId) {
+            if (!in_array($evId, $loadedEventIds, true)) {
+                $sortLate->execute(['s' => $late++, 'id' => $evId, 'tpid' => $tripPlanId]);
             }
         }
     }

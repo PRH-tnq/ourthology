@@ -154,8 +154,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         $body = (string) ($entry['body'] ?? '');
         if (!empty($entry['occurred_on'])) {
             [$oy, $om, $od] = array_map('intval', explode('-', (string) $entry['occurred_on']));
-            $occurredDay = sprintf('%02d', $od);
-            $occurredMonth = sprintf('%02d', $om);
+            // Phase 105: a year-only memory's stand-in June/July day isn't
+            // shown as if it were real -- only its year comes back.
+            $yearOnly = ($entry['date_precision'] ?? 'day') === 'year';
+            $occurredDay = $yearOnly ? '' : sprintf('%02d', $od);
+            $occurredMonth = $yearOnly ? '' : sprintf('%02d', $om);
             $occurredYear = (string) $oy;
         }
         $visibility = $entry['visibility'];
@@ -217,9 +220,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
     // one free-text field, so people can't get the format wrong — but all
     // three are still optional together, as long as none is filled in.
     $occurredOnValue = null;
+    $datePrecision = 'day';
     $dateFilledCount = (int) ($occurredDay !== '') + (int) ($occurredMonth !== '') + (int) ($occurredYear !== '');
-    if ($dateFilledCount > 0 && $dateFilledCount < 3) {
-        $errors[] = 'Fill in the day, month, and year, or leave all three blank.';
+    if ($dateFilledCount === 1 && $occurredYear !== '') {
+        // Phase 105: just the year. The memory goes on the timeline on a
+        // day picked at random in June or July of that year (mid-year, so
+        // it sits in the right place among that year's memories) and is
+        // marked as year-only, so the card says the exact date isn't known.
+        // Re-saving a year-only memory in the same year keeps its day, so
+        // it doesn't hop about every time it's edited.
+        if (!ctype_digit($occurredYear) || strlen($occurredYear) !== 4 || (int) $occurredYear < 1000) {
+            $errors[] = 'Enter the year as four digits, e.g. 1987.';
+        } else {
+            $datePrecision = 'year';
+            $keepOld = $isEditing && ($entry['date_precision'] ?? 'day') === 'year'
+                && !empty($entry['occurred_on']) && substr((string) $entry['occurred_on'], 0, 4) === sprintf('%04d', (int) $occurredYear);
+            if ($keepOld) {
+                $occurredOnValue = (string) $entry['occurred_on'];
+            } else {
+                // 1 June + 0..60 days = any day from 1 June to 31 July
+                $occurredOnValue = (new DateTimeImmutable(sprintf('%04d-06-01', (int) $occurredYear)))
+                    ->modify('+' . random_int(0, 60) . ' days')->format('Y-m-d');
+            }
+        }
+    } elseif ($dateFilledCount > 0 && $dateFilledCount < 3) {
+        $errors[] = $occurredYear === ''
+            ? 'Add the year too — or just the year on its own if that\'s all you remember.'
+            : 'Fill in the whole date, or just the year if that\'s all you remember.';
     } elseif ($dateFilledCount === 3) {
         if (!ctype_digit($occurredDay) || !ctype_digit($occurredMonth) || !ctype_digit($occurredYear)
             || !checkdate((int) $occurredMonth, (int) $occurredDay, (int) $occurredYear)) {
@@ -331,7 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 $pdo->prepare(
                     'UPDATE timeline_entries
                      SET entry_type = :type, title = :title, body = :body,
-                         occurred_on = :occurred, visibility = :vis,
+                         occurred_on = :occurred, date_precision = :prec, visibility = :vis,
                          location_label = :loc, location_lat = :lat, location_lng = :lng, location_country = :lcc
                      WHERE id = :id AND person_id = :pid'
                 )->execute([
@@ -339,6 +366,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'title'    => $title !== '' ? $title : null,
                     'body'     => $body !== '' ? $body : null,
                     'occurred' => $occurredOnValue,
+                    'prec'     => $datePrecision,
                     'loc'      => $location['label'],
                     'lat'      => $location['lat'],
                     'lng'      => $location['lng'],
@@ -364,8 +392,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                 }
             } else {
                 $stmt = $pdo->prepare(
-                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, location_label, location_lat, location_lng, location_country, visibility, created_by_user_id)
-                     VALUES (:pid, :type, :title, :body, :occurred, :loc, :lat, :lng, :lcc, :vis, :uid)'
+                    'INSERT INTO timeline_entries (person_id, entry_type, title, body, occurred_on, date_precision, location_label, location_lat, location_lng, location_country, visibility, created_by_user_id)
+                     VALUES (:pid, :type, :title, :body, :occurred, :prec, :loc, :lat, :lng, :lcc, :vis, :uid)'
                 );
                 $stmt->execute([
                     'pid'      => $targetPersonId,
@@ -373,6 +401,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$bodyTooLarge) {
                     'title'    => $title !== '' ? $title : null,
                     'body'     => $body !== '' ? $body : null,
                     'occurred' => $occurredOnValue,
+                    'prec'     => $datePrecision,
                     'loc'      => $location['label'],
                     'lat'      => $location['lat'],
                     'lng'      => $location['lng'],
@@ -496,7 +525,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $isEditing ? 'Edit entry' : 'Add a memory' ?> — ourthology.com</title>
-<link rel="stylesheet" href="/styles.css?v=32">
+<link rel="stylesheet" href="/styles.css?v=35">
 <!-- Phase 36: client-side HEIC/HEIF (iPhone/Samsung photo format) -> JPEG
      conversion, so a phone photo never has to reach the server still in a
      format most of the web can't display. Pinned to the one version this
@@ -507,7 +536,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
      the photo-drop wiring below calls into this eagerly at parse time
      (wiring the Paste button) rather than only from a later
      user-triggered handler, so it has to already exist by then. -->
-<script src="/clipboard_paste.js?v=1"></script>
+<script src="/clipboard_paste.js?v=2"></script>
 <script src="/sortable_tiles.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
@@ -727,6 +756,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
           </div>
           <span class="media-picker-note">JPEG, PNG, GIF, WEBP, HEIC/HEIF (converted to JPEG automatically), MP4, MOV, WEBM, PDF, DOC, DOCX, or TXT.</span>
           <p class="media-picker-error" id="mediaError"></p>
+          <p class="media-full-note" id="mediaFullNote" hidden>This memory has 25 files — the most one memory can hold. Remove one to add another.</p>
           <p class="sort-hint" id="sortHint" hidden>Drag the thumbnails to change their order — on a phone or iPad, press and hold one first.</p>
         </div>
 
@@ -737,7 +767,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
           <label for="body" style="margin-top:14px;">Words <span style="text-transform:none;font-weight:400;">(required for a diary entry; for a memory, add words and/or attach files)</span></label>
           <textarea id="body" name="body" rows="4"><?= htmlspecialchars($body, ENT_QUOTES) ?></textarea>
 
-          <label style="margin-top:14px;">Date it happened <span style="text-transform:none;font-weight:400;">(optional — fill in all three, or leave all three blank)</span></label>
+          <label style="margin-top:14px;">Date it happened <span style="text-transform:none;font-weight:400;">(optional — the full date, or just the year if that's all you remember)</span></label>
           <div class="row-3">
             <div class="date-slot">
               <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="occurred_day" placeholder="DD" value="<?= htmlspecialchars($occurredDay, ENT_QUOTES) ?>">
@@ -752,6 +782,8 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
               <span>Year</span>
             </div>
           </div>
+
+          <p class="year-only-hint" id="yearOnlyHint" hidden>Just the year is fine — the memory goes in the middle of that year on your timeline, and its card says the exact date isn't known.</p>
 
           <label for="locLabel" style="margin-top:14px;">Where it happened <span style="text-transform:none;font-weight:400;">(optional — anywhere in the world)</span></label>
           <div class="loc-row">
@@ -836,6 +868,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     var dropzone = document.getElementById('photoDrop');
     var emptyState = document.getElementById('photoDropEmpty');
     var grid = document.getElementById('photoGrid');
+    var pasteBtnEl = document.getElementById('photoDropPasteBtn'); // Phase 103: kept, as dock() moves it
     var input = document.getElementById('photoInput');
     var errorEl = document.getElementById('mediaError');
     var keptInputsContainer = document.getElementById('keptMediaInputs');
@@ -919,6 +952,10 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
         emptyState.hidden = false;
         grid.hidden = true;
         grid.innerHTML = '';
+        if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(pasteBtnEl, grid, false);
+        dropzone.classList.remove('is-full');
+        var noteEl = document.getElementById('mediaFullNote');
+        if (noteEl) noteEl.hidden = true;
         return;
       }
       emptyState.hidden = true;
@@ -935,10 +972,17 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
         return '<div class="pick-tile' + pcls + '" data-pending-idx="' + p + '">' + pendingTileHtml(item) +
           '<button type="button" class="pick-remove" data-pending-idx="' + p + '" aria-label="Remove">×</button></div>';
       }).join('');
-      if (totalCount() < MAX_FILES) {
+      var full = totalCount() >= MAX_FILES;
+      if (!full) {
         tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + ADD_ICON + '</div>';
       }
       grid.innerHTML = tiles;
+      // Phase 103: Paste stays once there are files; at 25, adding is
+      // switched off until one is removed.
+      if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(pasteBtnEl, grid, !full);
+      dropzone.classList.toggle('is-full', full);
+      var fullNote = document.getElementById('mediaFullNote');
+      if (fullNote) fullNote.hidden = !full;
     }
     // Phase 36: a .heic/.heif file (iPhone/Samsung/etc.) is recognised by
     // extension primarily -- browsers are inconsistent about what mime
@@ -1024,7 +1068,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     // Phase 99: drag a tile to change the order (sortable_tiles.js)
     if (window.ourthologySortable) {
       window.ourthologySortable.attach(grid, {
-        items: '.pick-tile:not(.pick-tile--add)',
+        items: '.pick-tile:not(.pick-tile--add):not(.pick-tile--paste)',
         onMove: function (from, to) {
           window.ourthologySortable.move(order, from, to);
           syncLists();
@@ -1047,10 +1091,12 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
         return;
       }
       if (e.target.closest('.pick-tile') && !e.target.closest('.pick-tile--add')) return;
+      if (totalCount() >= MAX_FILES) return; // Phase 103: full
       input.click();
     });
     dropzone.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+      if (e.target !== dropzone) return;
+      if ((e.key === 'Enter' || e.key === ' ') && totalCount() < MAX_FILES) { e.preventDefault(); input.click(); }
     });
     input.addEventListener('change', function () {
       addFiles(input.files);
@@ -1116,6 +1162,15 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
       progressEl.hidden = !text;
       progressEl.textContent = text || '';
     }
+    // Phase 105: say what happens when only the year is filled in
+    (function () {
+      var hint = document.getElementById('yearOnlyHint');
+      var slots = ['occurred_day', 'occurred_month', 'occurred_year'].map(function (n) { return form && form.querySelector('input[name="' + n + '"]'); });
+      if (!hint || slots.some(function (el) { return !el; })) return;
+      function sync() { hint.hidden = !(slots[0].value.trim() === '' && slots[1].value.trim() === '' && slots[2].value.trim() !== ''); }
+      slots.forEach(function (el) { el.addEventListener('input', sync); });
+      sync();
+    })();
     function quickValidationError() {
       var kind = (form.querySelector('input[name="entry_type"]:checked') || {}).value;
       var body = (form.querySelector('#body') || {}).value || '';
@@ -1125,7 +1180,10 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
       });
       var filled = dateVals.filter(function (v) { return v !== ''; }).length;
       if (kind === 'diary' && body.trim() === '') return 'Write something for a diary entry.';
-      if (filled > 0 && filled < 3) return 'Fill in the day, month, and year, or leave all three blank.';
+      // Phase 105: the year on its own is fine
+      if (filled > 0 && filled < 3 && !(filled === 1 && dateVals[2] !== '')) {
+        return dateVals[2] === '' ? "Add the year too \u2014 or just the year on its own if that's all you remember." : "Fill in the whole date, or just the year if that's all you remember.";
+      }
       return null;
     }
 

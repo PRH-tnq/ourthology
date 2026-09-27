@@ -500,7 +500,7 @@ foreach ($entries as $entry) {
     $title = trim((string) ($entry['title'] ?? ''));
     if ($title === '') {
         $title = $entry['entry_type'] === 'diary'
-            ? 'Diary — ' . date('j M Y', strtotime($date))
+            ? 'Diary — ' . (($entry['date_precision'] ?? 'day') === 'year' ? substr($date, 0, 4) : date('j M Y', strtotime($date)))
             : 'Untitled memory';
     }
     $media = [];
@@ -533,6 +533,8 @@ foreach ($entries as $entry) {
     $jsEntries[] = [
         'id'         => (string) $entry['id'],
         'date'       => $date,
+        // Phase 105: only the year is known (the date is a stand-in day mid-year)
+        'yearOnly'   => ($entry['date_precision'] ?? 'day') === 'year' && !empty($entry['occurred_on']),
         'title'      => $title,
         'thought'    => (string) ($entry['body'] ?? ''),
         'visibility' => $entry['visibility'],
@@ -685,7 +687,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;0,700;0,800;1,600&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=32">
+<link rel="stylesheet" href="/styles.css?v=35">
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <!-- Phase 72: loaded here (not bottom-of-body like date_autotab.js)
      because, unlike that one, this page's own inline scripts further
@@ -693,7 +695,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      Paste button) rather than only from a later user-triggered handler
      -- it has to already exist by then, not just by the time the user
      clicks something. -->
-<script src="/clipboard_paste.js?v=1"></script>
+<script src="/clipboard_paste.js?v=2"></script>
+<script src="/media_fit.js?v=1"></script>
 <script src="/sortable_tiles.js?v=1"></script>
 <script src="/chunked_upload.js?v=1"></script>
 <script src="/geo.js?v=5"></script>
@@ -873,6 +876,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .card-paste-btn { position:relative; z-index:1; display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:6px 13px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); background:#fff; cursor:pointer; font-family:inherit; }
   .card-paste-btn:hover { background:var(--paper-2); }
   .card-paste-btn svg { width:13px; height:13px; flex:0 0 auto; }
+  /* Phase 103: after a photo is in, Paste sits bottom-left, matching Change photo */
+  .card-paste-btn.is-docked { position:absolute; left:8px; bottom:8px; z-index:2; font-size:11.5px; padding:5px 10px; background:rgba(26,23,20,0.65); color:#fff; border:none; }
+  .card-paste-btn.is-docked:hover { background:rgba(26,23,20,0.8); }
+  .gcard-paste-btn.is-docked { top:8px; bottom:auto; } /* clear of the card's cover message */
   .card-paste-status { position:absolute; left:8px; right:8px; bottom:6px; z-index:1; font-size:11px; color:var(--accent); text-align:center; }
   .card-paste-status[hidden] { display:none; }
   .postcard-face-front.has-image .postcard-drop-zone { display:none; }
@@ -1320,6 +1327,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .card-origin-badge svg { width:14px; height:14px; }
   .card-body { padding:14px 15px 16px; }
   .card-date { font-size:11.5px; color:var(--ink-faint); margin-bottom:4px; font-weight:700; letter-spacing:.02em; }
+  /* Phase 105: a memory dated by its year alone */
+  .card-date-note { font-size:11px; color:var(--ink-faint); font-style:italic; margin:-2px 0 5px; line-height:1.3; }
+  .viewer-date-note { display:block; font-size:12px; color:var(--ink-faint); font-style:italic; font-family:inherit; margin-top:2px; }
   .card-title { font-size:15.5px; font-weight:800; margin-bottom:5px; }
   .card-thought { font-size:13.5px; color:var(--ink-soft); line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .card-foot { display:flex; align-items:center; gap:6px; margin-top:10px; }
@@ -1531,6 +1541,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .trip-picker-add-status { margin:6px 0 0; font-size:12.5px; }
   .trip-picker-add-status--ok { color:var(--ink-faint); }
   .trip-picker-add-status--error { color:var(--accent); }
+  /* Phase 103: a tagged person's new planned event, before it's added */
+  .trip-event--draft { border-color:var(--accent); box-shadow:0 0 0 3px rgba(154,42,42,.10); }
+  .trip-draft-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; }
+  .trip-draft-actions .btn-primary { width:auto; margin-top:0; }
+  .trip-draft-status { margin:0; font-size:13px; color:var(--ink-faint); }
+  .trip-draft-status--error { color:var(--accent); }
   @media (max-width: 760px) {
     .trip-top-fields { grid-template-columns:1fr 1fr; }
     .trip-event-columns { display:block; }
@@ -1551,7 +1567,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   /* The image-zoom lightbox — first of its kind in this app (every other
      "open a photo" path so far has just been a new browser tab), scoped
      to the planner since that's the only place it was asked for. */
-  .trip-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.86); z-index:1600; display:flex; align-items:center; justify-content:center; padding:30px; opacity:0; pointer-events:none; transition:opacity .12s ease; }
+  .trip-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.86); z-index:1600; display:flex; align-items:center; justify-content:center; padding:30px 72px; /* Phase 104: sides clear of the × */ opacity:0; pointer-events:none; transition:opacity .12s ease; }
   .trip-lightbox.open { opacity:1; pointer-events:auto; }
   .trip-lightbox img { max-width:100%; max-height:100%; border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
   .trip-lightbox-close { position:absolute; top:18px; right:24px; border:none; background:rgba(255,255,255,.12); color:#fff; font-size:26px; width:40px; height:40px; border-radius:999px; cursor:pointer; line-height:1; }
@@ -1567,7 +1583,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
      and the same z-index tier so either can sit on top of ordinary page
      content -- they're never open at the same time so no stacking clash
      between the two. */
-  .mem-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.86); z-index:1600; display:flex; align-items:center; justify-content:center; padding:30px; opacity:0; pointer-events:none; transition:opacity .12s ease; }
+  .mem-lightbox { position:fixed; inset:0; background:rgba(10,8,6,.86); z-index:1600; display:flex; align-items:center; justify-content:center; padding:30px 84px; /* Phase 104: photos fill the window (media_fit.js); sides clear of the arrows and × */ opacity:0; pointer-events:none; transition:opacity .12s ease; }
   .mem-lightbox.open { opacity:1; pointer-events:auto; }
   .mem-lightbox-stage { max-width:100%; max-height:100%; display:flex; align-items:center; justify-content:center; }
   .mem-lightbox-stage img, .mem-lightbox-stage video { max-width:100%; max-height:100%; border-radius:6px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
@@ -1586,6 +1602,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     .mem-lightbox-prev { left:6px; }
     .mem-lightbox-next { right:6px; }
     .mem-lightbox { padding:12px; }
+    .trip-lightbox { padding:12px; }
   }
 </style>
 </head>
@@ -1713,8 +1730,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <option value="rings">Rings</option>
             <option value="spiral">Spiral</option>
             <optgroup label="Maps">
-              <option value="map:lived">Where we've lived</option>
-              <option value="map:visited">Where we've visited</option>
+              <option value="map:lived">Where I've lived</option>
+              <option value="map:visited">Where I've visited</option>
             </optgroup>
           </select>
         </label>
@@ -1740,8 +1757,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             // (life_map.js). Choosing River/Rings/Spiral or a zoom again, or
             // the active map button, brings the timeline back. ?>
       <div class="segmented map-toggle" id="mapToggle" role="group" aria-label="Maps">
-        <button type="button" data-map="lived" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 8.2V16h10V8.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Where we've lived</button>
-        <button type="button" data-map="visited" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 18s6-5.6 6-10.2A6 6 0 0 0 4 7.8C4 12.4 10 18 10 18Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="7.8" r="2.1" fill="currentColor"/></svg>Where we've visited</button>
+        <button type="button" data-map="lived" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 8.2V16h10V8.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Where I've lived</button>
+        <button type="button" data-map="visited" aria-pressed="false"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 18s6-5.6 6-10.2A6 6 0 0 0 4 7.8C4 12.4 10 18 10 18Z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="7.8" r="2.1" fill="currentColor"/></svg>Where I've visited</button>
       </div>
       <div class="controls-right">
         <?php // Phase 71: "Take the tour" / "What's new", moved here from
@@ -1918,6 +1935,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             <p class="media-picker-status" id="viewerAddMediaStatus"></p>
             <button type="submit" class="btn-ghost" id="viewerAddMediaSubmitBtn">Add media</button>
           </form>
+          <!-- Phase 103: shown instead of the form above once the memory holds
+               25 files (MEDIA_MAX_FILES_PER_ENTRY); back as soon as it's under. -->
+          <p class="media-full-note" id="viewerAddMediaFull" hidden>This memory already holds 25 files — the most one memory can take — so no more can be added.</p>
         </div>
       </div>
       <div class="viewer-actions">
@@ -1960,11 +1980,16 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
              tagged AND approved on this trip -- everything else about it
              still belongs to its owner, but you can add photos to any of
              its events below (see tripMediaOnlyMode in the script). -->
-        <p class="trip-readonly-note" id="tripMediaOnlyNote" hidden>You're tagged on this trip, so only <span id="tripMediaOnlyOwnerName">its owner</span> can change the plan details — but you can still add photos to any event below.</p>
+        <p class="trip-readonly-note" id="tripMediaOnlyNote" hidden>You're tagged on this trip, so only <span id="tripMediaOnlyOwnerName">its owner</span> can change the plan details — but you can still add photos to any event below, or add a new planned event of your own.</p>
         <form method="post" action="/trip_plan.php" enctype="multipart/form-data" id="tripForm">
           <?= csrf_field() ?>
           <input type="hidden" name="action" value="save">
           <input type="hidden" name="trip_plan_id" id="tripPlanIdField" value="">
+          <!-- Phase 103: the events/photos this pop-up loaded, so Save only
+               removes what the owner actually took out -- never an event or
+               photo a tagged person added while it was open. -->
+          <input type="hidden" name="loaded_event_ids" id="tripLoadedEventIds" value="" disabled>
+          <input type="hidden" name="loaded_media_ids" id="tripLoadedMediaIds" value="" disabled>
           <input type="hidden" name="target_person_id" id="tripTargetPersonField" value="<?= (int) $target['id'] ?>">
 
           <div class="trip-top-fields">
@@ -2360,6 +2385,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     function fmtDate(d) {
       return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
     }
+    // Phase 105: an entry's own date -- just the year when that's all that's known
+    var YEAR_ONLY_NOTE = "The year is right \u2014 the exact date isn\u2019t known or remembered";
+    function fmtEntryDate(e) {
+      return e.yearOnly ? e.date.slice(0, 4) : fmtDate(new Date(e.date + "T00:00:00"));
+    }
     function fmtShort(d, mode) {
       if (mode === "year") return d.toLocaleDateString(undefined, { month: "short" });
       if (mode === "life") {
@@ -2498,7 +2528,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       var relX = nodeRect.left + nodeRect.width / 2 - wrapRect.left;
       var relY = nodeRect.top - wrapRect.top;
       var d = new Date(e.date + "T00:00:00");
-      nodeTooltipDate.textContent = fmtDate(d);
+      nodeTooltipDate.textContent = e.yearOnly ? fmtEntryDate(e) + " (exact date not known)" : fmtDate(d);
       nodeTooltipTitle.textContent = e.title;
       nodeTooltip.style.left = relX.toFixed(1) + "px";
       nodeTooltip.style.top = relY.toFixed(1) + "px";
@@ -2585,7 +2615,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         // but the rail card itself can show the fuller picture.
         var dateLabel = e.trip
           ? fmtDate(d) + " – " + fmtDate(new Date(e.trip.finishDate + "T00:00:00"))
-          : fmtDate(d);
+          : fmtEntryDate(e);
         var thoughtLabel = e.trip
           ? (e.trip.eventCount === 1 ? "1 event planned" : e.trip.eventCount + " events planned")
           : e.thought;
@@ -2594,6 +2624,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           '<div class="card-media" style="--stage-a: var(--fam' + fi + '-bg); --stage-b: var(--fam' + fi2 + '-bg);">' + mediaInner + (ORIGIN_BADGE_HTML[e.origin] || '') + '</div>' +
           '<div class="card-body">' +
             '<div class="card-date mono">' + dateLabel + '</div>' +
+            (e.yearOnly && !e.trip ? '<div class="card-date-note">' + YEAR_ONLY_NOTE + '</div>' : '') +
             '<div class="card-title">' + escapeHtml(e.title) + '</div>' +
             '<div class="card-thought">' + escapeHtml(thoughtLabel) + '</div>' +
             '<div class="card-foot">' +
@@ -3063,6 +3094,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var vamDropzone = document.getElementById("viewerAddMediaDrop");
     var vamEmptyState = document.getElementById("viewerAddMediaDropEmpty");
     var vamGrid = document.getElementById("viewerAddMediaGrid");
+    var vamPasteBtnEl = document.getElementById("viewerAddMediaPasteBtn"); // Phase 103: kept, as dock() moves it
     var vamInput = document.getElementById("viewerAddMediaInput");
     var vamErrorEl = document.getElementById("viewerAddMediaError");
     var vamStatusEl = document.getElementById("viewerAddMediaStatus");
@@ -3105,7 +3137,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // Phase 99: drag to change the order before adding them
     if (window.ourthologySortable && vamGrid) {
       window.ourthologySortable.attach(vamGrid, {
-        items: ".pick-tile:not(.pick-tile--add)",
+        items: ".pick-tile:not(.pick-tile--add):not(.pick-tile--paste)",
         onMove: function (from, to) { window.ourthologySortable.move(vamPending, from, to); vamSyncInput(); vamRender(); },
         onCancel: function () { vamRender(); }
       });
@@ -3120,6 +3152,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         vamEmptyState.hidden = false;
         vamGrid.hidden = true;
         vamGrid.innerHTML = "";
+        if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(vamPasteBtnEl, vamGrid, false);
         return;
       }
       vamEmptyState.hidden = true;
@@ -3133,6 +3166,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + VAM_ADD_ICON + '</div>';
       }
       vamGrid.innerHTML = tiles;
+      // Phase 103: Paste stays available while there's room
+      if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(vamPasteBtnEl, vamGrid, vamPending.length < vamRemainingSlots);
     }
     function vamLooksLikeHeic(file) {
       return VAM_HEIC_RE.test(file.name || "") || file.type === "image/heic" || file.type === "image/heif";
@@ -3191,6 +3226,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       vamSyncInput();
       vamRender();
     }
+    // Phase 103: a memory with 25 files has no "add media" at all -- it
+    // comes back when the count drops (the memory is re-read on opening).
+    function vamApplyFull() {
+      var full = vamRemainingSlots <= 0;
+      viewerAddMediaForm.hidden = full;
+      document.getElementById("viewerAddMediaFull").hidden = !full;
+    }
     function vamReset() {
       vamPending.forEach(function (item) { if (item.url) URL.revokeObjectURL(item.url); });
       vamPending = [];
@@ -3208,9 +3250,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           return;
         }
         if (e.target.closest(".pick-tile") && !e.target.closest(".pick-tile--add")) return;
+        if (vamPending.length >= vamRemainingSlots) return;
         vamInput.click();
       });
       vamDropzone.addEventListener("keydown", function (e) {
+        if (e.target !== vamDropzone) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); vamInput.click(); }
       });
       ["dragenter", "dragover"].forEach(function (evtName) {
@@ -3317,6 +3361,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
             wireViewerMediaGridClicks(e.media);
             vamRemainingSlots = Math.max(0, 25 - e.media.length); // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
+            vamApplyFull();
           }
           vamReset();
           vamShowStatus(data.notice || "Added.");
@@ -3387,7 +3432,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         memLightboxStage.innerHTML = '<img src="' + m.url + '" alt="">';
       } else if (m.kind === "video") {
         memLightboxStage.innerHTML = '<video src="' + m.url + '" controls playsinline autoplay></video>';
-      } else {
+      }
+      // Phase 104: scale the photo/video to the window
+      var shown = memLightboxStage.querySelector("img, video");
+      if (shown && window.ourthologyMediaFit) window.ourthologyMediaFit.fit(shown, memLightbox, { reserveBottom: memLightboxList.length > 1 ? 40 : 0 });
+      if (m.kind !== "image" && m.kind !== "video") {
         // Reached by arrow-navigating from a neighboring photo/video --
         // there's no inline preview for a document, so show an "open
         // file" prompt in its place rather than silently doing nothing.
@@ -3458,7 +3507,13 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       viewerMedia.innerHTML = viewerMediaViewHtml(e.media);
       wireViewerMediaGridClicks(e.media);
       viewerTitleView.textContent = e.title;
-      viewerDateView.textContent = fmtDate(new Date(e.date + "T00:00:00"));
+      viewerDateView.textContent = fmtEntryDate(e);
+      if (e.yearOnly) {
+        var yNote = document.createElement("span");
+        yNote.className = "viewer-date-note";
+        yNote.textContent = YEAR_ONLY_NOTE;
+        viewerDateView.appendChild(yNote);
+      }
       viewerHeaderTitle.textContent = e.type === "diary" ? "Diary entry" : "Memory";
       viewerPillView.innerHTML =
         (e.type === "diary" ? DIARY_PILL_HTML : "") +
@@ -3501,10 +3556,12 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         viewerAddMediaForm.hidden = false;
         viewerAddMediaEntryId.value = e.id;
         vamRemainingSlots = Math.max(0, 25 - (e.media || []).length); // mirrors includes/media.php's MEDIA_MAX_FILES_PER_ENTRY
+        vamApplyFull();
         vamReset();
       } else {
         viewerMyNoteForm.hidden = true;
         viewerAddMediaForm.hidden = true;
+        document.getElementById("viewerAddMediaFull").hidden = true;
       }
 
       // Edit/Delete are per-MEMORY, not per-page: a memory shared onto my
@@ -3624,6 +3681,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     var tripTagPicker = document.getElementById('tripTagPicker');
     var tripEventsContainer = document.getElementById('tripEventsContainer');
     var tripAddEventBtn = document.getElementById('tripAddEventBtn');
+    var tripLoadedEventIds = document.getElementById('tripLoadedEventIds');
+    var tripLoadedMediaIds = document.getElementById('tripLoadedMediaIds');
     var tripSaveBtn = document.getElementById('tripSaveBtn');
     var tripDeleteForm = document.getElementById('tripDeleteForm');
     var tripDeleteEntryId = document.getElementById('tripDeleteEntryId');
@@ -3663,7 +3722,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
     // add_entry.php's #photoDrop and the memory viewer's vam-uploader
     // above each keep their own single copy of, since the planner can have
     // many of these live on the page (up to 10 events x 2 roles) at once.
-    function tripInitPicker(root, existingItems, eventId, role) {
+    function tripInitPicker(root, existingItems, eventId, role, isDraft) {
       var empty = root.querySelector('.media-picker-empty');
       var grid = root.querySelector('.media-picker-grid');
       var input = root.querySelector('.trip-picker-input');
@@ -3676,6 +3735,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       var keptFieldName = input.getAttribute('data-kept-name');
       var uploadBtn = root.parentElement.querySelector('.trip-picker-add-media-btn');
       var uploadStatus = root.parentElement.querySelector('.trip-picker-add-status');
+      var pasteBtnEl = root.querySelector('.trip-picker-paste-btn'); // Phase 103: kept, as it moves (dock())
 
       var kept = (existingItems || []).slice();
       var pending = [];
@@ -3724,7 +3784,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       function syncKeptInputs() {
         keptContainer.innerHTML = kept.map(function (item) {
           return '<input type="hidden" name="' + keptFieldName + '" value="' + item.id + '">';
-        }).join('') + (readOnlyMode ? '' : order.map(function (item) {
+        }).join('') + (readOnlyMode && !isDraft ? '' : order.map(function (item) {
           return '<input type="hidden" name="' + orderFieldName + '" value="' + (isNew(item) ? 'n' : 'k:' + item.id) + '">';
         }).join(''));
       }
@@ -3733,6 +3793,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         syncKeptInputs();
         if (!totalCount()) {
           empty.hidden = false; grid.hidden = true; grid.innerHTML = '';
+          if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(pasteBtnEl, grid, false);
           return;
         }
         empty.hidden = true; grid.hidden = false;
@@ -3752,6 +3813,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           tiles += '<div class="pick-tile pick-tile--add" data-add="1" title="Add more">' + TRIP_ADD_ICON + '</div>';
         }
         grid.innerHTML = tiles;
+        // Phase 103: this picker's Paste stays once it has photos
+        if (window.ourthologyClipboardPaste) window.ourthologyClipboardPaste.dock(pasteBtnEl, grid, !pickerLocked && totalCount() < TRIP_MAX_FILES);
         if (tripMediaOnlyMode && uploadBtn) {
           uploadBtn.hidden = pending.length === 0;
           uploadBtn.textContent = 'Add ' + pending.length + (pending.length === 1 ? ' photo' : ' photos');
@@ -3821,13 +3884,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         }
         if (pickerLocked) return;
         if (e.target.closest('.pick-tile') && !e.target.closest('.pick-tile--add')) return;
+        if (totalCount() >= TRIP_MAX_FILES) return;
         input.click();
       });
       root.addEventListener('focus', function () { activeTripPicker = addFiles; }, true);
       // Phase 99: the trip's owner can drag photos to reorder them
-      if (!readOnlyMode && window.ourthologySortable) {
+      if ((!readOnlyMode || isDraft) && window.ourthologySortable) {
         window.ourthologySortable.attach(grid, {
-          items: '.pick-tile:not(.pick-tile--add)',
+          items: '.pick-tile:not(.pick-tile--add):not(.pick-tile--paste)',
           onMove: function (from, to) { window.ourthologySortable.move(order, from, to); syncLists(); syncInput(); render(); },
           onCancel: render
         });
@@ -3844,7 +3908,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         // can be open at once), a tap on THIS button always targets THIS
         // picker, so it just calls this instance's own addFiles() with
         // no ambiguity about which one the user meant.
-        var pasteBtn = root.querySelector('.trip-picker-paste-btn');
+        var pasteBtn = pasteBtnEl;
         if (pasteBtn && window.ourthologyClipboardPaste) {
           window.ourthologyClipboardPaste.wire(pasteBtn, {
             onFiles: function (files) { addFiles(files); },
@@ -3910,13 +3974,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       render();
     }
 
-    function tripEventRowHtml(index, ev) {
+    function tripEventRowHtml(index, ev, isDraft) {
       ev = ev || {};
       var existingId = ev.id || '';
       var title = ev.title || '';
       var iso = ev.eventDate || null;
       var dparts = iso ? iso.split('-') : ['', '', ''];
-      var dis = readOnlyMode ? ' disabled' : '';
+      // Phase 103: a tagged person's draft event is fully editable until
+      // it's added (then it's shown read-only like the rest).
+      var rowLocked = readOnlyMode && !isDraft;
+      var dis = rowLocked ? ' disabled' : '';
+      var perPickerUpload = tripMediaOnlyMode && !isDraft;
       // Same meaning as tripInitPicker's own pickerLocked -- title/dates/
       // notes/event add-remove stay gated on plain readOnlyMode (owner-
       // only, unchanged), but the picker's OWN paste button (the rest of
@@ -3924,7 +3992,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       // markup exists in the DOM) also needs to appear in media-only mode.
       var pickerLocked = readOnlyMode && !tripMediaOnlyMode;
       return '' +
-        '<div class="trip-event" data-event-index="' + index + '">' +
+        '<div class="trip-event' + (isDraft ? ' trip-event--draft' : '') + '" data-event-index="' + index + '">' +
           '<div class="trip-event-head">' +
             '<input type="hidden" name="events[' + index + '][id]" value="' + escapeHtml(String(existingId)) + '">' +
             '<input type="text" class="trip-event-title-input" name="events[' + index + '][title]" maxlength="255" placeholder="Event title (e.g. Flight out)" value="' + escapeHtml(title) + '"' + dis + '>' +
@@ -3933,7 +4001,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
               '<div class="date-slot"><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" name="events[' + index + '][event_month]" placeholder="MM" value="' + escapeHtml(dparts[1] ? String(parseInt(dparts[1], 10)) : '') + '"' + dis + '><span>Month</span></div>' +
               '<div class="date-slot"><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" name="events[' + index + '][event_year]" placeholder="YYYY" value="' + escapeHtml(dparts[0] || '') + '"' + dis + '><span>Year</span></div>' +
             '</div>' +
-            (readOnlyMode ? '' : '<button type="button" class="trip-event-remove" aria-label="Remove this event">×</button>') +
+            (rowLocked ? '' : '<button type="button" class="trip-event-remove" aria-label="Remove this event">×</button>') +
           '</div>' +
           '<div class="trip-event-columns">' +
             '<div class="trip-event-col trip-event-plan">' +
@@ -3944,7 +4012,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][plan_media][]" data-kept-name="events[' + index + '][existing_plan_media_ids][]" multiple hidden accept="image/*,.heic,.heif,application/pdf,.pdf">' +
               '</div>' +
               '<div class="trip-kept-inputs"></div>' +
-              (tripMediaOnlyMode ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
+              (perPickerUpload ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
               '<textarea name="events[' + index + '][plan_notes]" placeholder="Scribble notes — confirmation numbers, addresses, times…" rows="4"' + dis + '>' + escapeHtml(ev.planNotes || '') + '</textarea>' +
             '</div>' +
             '<div class="trip-event-col trip-event-memory">' +
@@ -3955,21 +4023,114 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
                 '<input type="file" class="trip-picker-input" name="events[' + index + '][memory_media][]" data-kept-name="events[' + index + '][existing_memory_media_ids][]" multiple hidden accept="image/*,.heic,.heif,video/*">' +
               '</div>' +
               '<div class="trip-kept-inputs"></div>' +
-              (tripMediaOnlyMode ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
+              (perPickerUpload ? '<button type="button" class="trip-picker-add-media-btn btn-ghost" hidden>Add photos</button><p class="trip-picker-add-status" hidden></p>' : '') +
               '<textarea name="events[' + index + '][memory_notes]" placeholder="How did it go? Write about it as it happens…" rows="4"' + dis + '>' + escapeHtml(ev.memoryNotes || '') + '</textarea>' +
             '</div>' +
           '</div>' +
+          (isDraft ? '<div class="trip-draft-actions"><button type="button" class="btn-primary btn-small trip-draft-submit">Add this event to the plan</button><p class="trip-draft-status" role="status" hidden></p></div>' : '') +
         '</div>';
     }
 
-    function tripAddEventRow(ev) {
+    function tripAddEventRow(ev, isDraft) {
       var index = tripEventCounter++;
-      tripEventsContainer.insertAdjacentHTML('beforeend', tripEventRowHtml(index, ev));
+      tripEventsContainer.insertAdjacentHTML('beforeend', tripEventRowHtml(index, ev, isDraft));
       var rowEl = tripEventsContainer.querySelector('[data-event-index="' + index + '"]');
       var pickers = rowEl.querySelectorAll('.trip-picker');
       var eventId = ev && ev.id ? ev.id : null;
-      tripInitPicker(pickers[0], (ev && ev.planMedia) || [], eventId, 'plan');
-      tripInitPicker(pickers[1], (ev && ev.memoryMedia) || [], eventId, 'memory');
+      tripInitPicker(pickers[0], (ev && ev.planMedia) || [], eventId, 'plan', isDraft);
+      tripInitPicker(pickers[1], (ev && ev.memoryMedia) || [], eventId, 'memory', isDraft);
+      if (isDraft) tripWireDraft(rowEl, pickers);
+      return rowEl;
+    }
+
+    // Phase 103: a tagged person's new planned event goes straight to the
+    // server on its own (trip_plan.php action=add_event) -- they have no
+    // Save button -- with its photos sent first in resumable chunks, the
+    // same way the rest of the planner uploads them.
+    var tripCurrentEntryId = null;
+    function tripWireDraft(rowEl, pickers) {
+      var btn = rowEl.querySelector('.trip-draft-submit');
+      var status = rowEl.querySelector('.trip-draft-status');
+      var titleEl = rowEl.querySelector('.trip-event-title-input');
+      function field(suffix) { var el = rowEl.querySelector('[name$="[' + suffix + ']"]'); return el ? el.value.trim() : ''; }
+      function say(text, isError) {
+        status.hidden = !text;
+        status.textContent = text || '';
+        status.className = 'trip-draft-status' + (isError ? ' trip-draft-status--error' : '');
+      }
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        var title = titleEl.value.trim();
+        var d = field('event_day'), m = field('event_month'), y = field('event_year');
+        if (!title) { say('Give the event a title.', true); titleEl.focus(); return; }
+        if ((d || m || y) && !(d && m && y && realDate(parseInt(y, 10), parseInt(m, 10), parseInt(d, 10)))) {
+          say('Enter a real date, or leave the day, month and year all blank.', true); return;
+        }
+        var roles = ['plan', 'memory'];
+        var states = [pickers[0].__tripPickerState, pickers[1].__tripPickerState];
+        var csrfInput = tripForm.querySelector('input[name="csrf_token"]');
+        var csrf = csrfInput ? csrfInput.value : '';
+        var uploader = window.ourthologyChunkedUpload;
+        var chunked = !!(uploader && uploader.supported);
+        var label = btn.textContent;
+        btn.disabled = true;
+        say('');
+        function busy() { return states.some(function (st) { return st().pending.some(function (it) { return it.kind === 'converting'; }); }); }
+        new Promise(function (resolve) {
+          (function check() { if (!busy()) { resolve(); return; } btn.textContent = 'Converting photos…'; setTimeout(check, 300); })();
+        }).then(function () {
+          var jobs = [];
+          states.forEach(function (st, r) { st().pending.forEach(function (it) { if (it.file) jobs.push({ item: it, role: roles[r] }); }); });
+          var chain = Promise.resolve();
+          if (chunked) {
+            var todo = jobs.filter(function (j) { return !j.item.token; });
+            todo.forEach(function (job, i) {
+              chain = chain.then(function () {
+                return uploader.upload(job.item.file, {
+                  csrf: csrf,
+                  fields: { purpose: 'tagged', entry_id: tripCurrentEntryId },
+                  onProgress: function (sent, total) { btn.textContent = 'Uploading ' + (i + 1) + ' of ' + todo.length + ' — ' + Math.round((sent / total) * 100) + '%'; }
+                }).then(function (token) { job.item.token = token; });
+              });
+            });
+          }
+          return chain.then(function () {
+            btn.textContent = 'Adding…';
+            var fd = new FormData();
+            fd.append('action', 'add_event');
+            fd.append('csrf_token', csrf);
+            fd.append('trip_plan_id', tripPlanIdField.value);
+            fd.append('title', title);
+            fd.append('event_day', d); fd.append('event_month', m); fd.append('event_year', y);
+            fd.append('plan_notes', field('plan_notes'));
+            fd.append('memory_notes', field('memory_notes'));
+            jobs.forEach(function (job) {
+              if (chunked) fd.append('staged_' + job.role + '_media[]', job.item.token);
+              else fd.append(job.role + '_media[]', job.item.file);
+            });
+            return fetch('/trip_plan.php', { method: 'POST', body: fd, credentials: 'same-origin' }).then(function (r) { return r.json(); });
+          });
+        }).then(function (data) {
+          if (!data || !data.ok) {
+            btn.disabled = false; btn.textContent = label;
+            say((data && data.error) || 'Something went wrong saving that. Please try again.', true);
+            return;
+          }
+          // swap the draft for the saved event, shown like the others
+          var savedRow = tripAddEventRow(data.event, false);
+          rowEl.parentNode.replaceChild(savedRow, rowEl);
+          var note = document.createElement('p');
+          note.className = 'trip-draft-status';
+          note.setAttribute('role', 'status');
+          note.textContent = data.notice || 'Event added to the plan.';
+          savedRow.appendChild(note);
+          tripSyncEmptyState();
+        }).catch(function (err) {
+          btn.disabled = false; btn.textContent = label;
+          say(((err && err.message) || 'The upload stopped.') +
+            ((err && err.fatal) ? '' : ' Press the button again and it will carry on from where it stopped.'), true);
+        });
+      });
     }
 
     tripEventsContainer.addEventListener('click', function (e) {
@@ -3987,14 +4148,27 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       }
     }
 
-    tripAddEventBtn.addEventListener('click', function () { tripAddEventRow(null); });
+    tripAddEventBtn.addEventListener('click', function () {
+      // Phase 103: a tagged person gets a draft event they add on its own
+      var draft = readOnlyMode && tripMediaOnlyMode;
+      var row = tripAddEventRow(null, draft);
+      tripSyncEmptyState();
+      if (draft) {
+        var t = row.querySelector('.trip-event-title-input');
+        if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+        if (t) t.focus();
+      }
+    });
 
     function setReadOnly(ro, ownerName) {
       readOnlyMode = ro;
       [tripTitleInput, tripStartDay, tripStartMonth, tripStartYear, tripFinishDay, tripFinishMonth, tripFinishYear].forEach(function (el) { el.disabled = ro; });
       tripVisibilityBlock.querySelectorAll('input').forEach(function (el) { el.disabled = ro; });
       tripTagField.style.display = ro ? 'none' : '';
-      tripAddEventBtn.style.display = ro ? 'none' : '';
+      // Phase 103: someone tagged on the trip can add planned events too
+      var canAddEvents = !ro || tripMediaOnlyMode;
+      tripAddEventBtn.style.display = canAddEvents ? '' : 'none';
+      tripAddEventBtn.textContent = ro ? '+ Add a planned event' : '+ Add an event';
       tripSaveBtn.style.display = ro ? 'none' : '';
       // Phase 82: two different notes for the two flavors of "locked" --
       // tripMediaOnlyMode still shows one (so it's clear photos CAN still
@@ -4012,6 +4186,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       tripEventsContainer.innerHTML = '';
       tripEventCounter = 0;
       tripPlanIdField.value = '';
+      tripCurrentEntryId = null;
+      tripLoadedEventIds.value = ''; tripLoadedEventIds.disabled = true;
+      tripLoadedMediaIds.value = ''; tripLoadedMediaIds.disabled = true;
       tripDeleteForm.hidden = true;
       tripTitleInput.value = '';
       tripMediaOnlyMode = false;
@@ -4049,7 +4226,14 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           // both tripEventRowHtml() and tripInitPicker() read this global
           // while building each event row, so it has to be current before
           // that happens, not just before the note text is decided.
-          tripMediaOnlyMode = !data.canEdit && !!data.canAddMedia;
+          tripMediaOnlyMode = !data.canEdit && !!(data.canAddMedia || data.canAddEvents);
+          tripCurrentEntryId = data.entryId;
+          // Phase 103: what this pop-up loaded (see the hidden fields)
+          tripLoadedEventIds.value = data.events.map(function (ev) { return ev.id; }).join(',');
+          tripLoadedMediaIds.value = data.events.reduce(function (all, ev) {
+            return all.concat((ev.planMedia || []).map(function (x) { return x.id; }), (ev.memoryMedia || []).map(function (x) { return x.id; }));
+          }, []).join(',');
+          tripLoadedEventIds.disabled = tripLoadedMediaIds.disabled = !data.canEdit;
           setReadOnly(!data.canEdit, data.ownerName);
           if (data.canEdit) renderTagPicker(data.taggablePeople, data.taggedPersonIds);
           tripDeleteForm.hidden = !data.canEdit;
@@ -4072,7 +4256,10 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       if (e.key === 'Escape' && tripScrim.classList.contains('open')) closeTripPlanner();
     });
 
-    function openTripLightbox(url) { tripLightboxImg.src = url; tripLightbox.classList.add('open'); }
+    function openTripLightbox(url) {
+      tripLightboxImg.src = url; tripLightbox.classList.add('open');
+      if (window.ourthologyMediaFit) window.ourthologyMediaFit.fit(tripLightboxImg, tripLightbox); // Phase 104
+    }
     function closeTripLightbox() { tripLightbox.classList.remove('open'); tripLightboxImg.src = ''; }
     tripLightboxClose.addEventListener('click', closeTripLightbox);
     tripLightbox.addEventListener('click', function (e) { if (e.target === tripLightbox) closeTripLightbox(); });
@@ -4402,6 +4589,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             reader.onload = function (e) {
               previewImg.src = e.target.result;
               frontFace.classList.add("has-image");
+              // Phase 103: keep Paste on hand (to swap the photo) beside Change photo
+              if (pasteBtn && changeBtn && pasteBtn.parentNode !== changeBtn.parentNode) { pasteBtn.classList.add("is-docked"); changeBtn.parentNode.insertBefore(pasteBtn, changeBtn); }
             };
             reader.readAsDataURL(files[0]);
           }
@@ -4968,6 +5157,8 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           reader.onload = function (e) {
             previewImg.src = e.target.result;
             frontFace.classList.add("has-image");
+            // Phase 103: keep Paste on hand (to swap the photo) beside Change photo
+            if (pasteBtn && changeBtn && pasteBtn.parentNode !== changeBtn.parentNode) { pasteBtn.classList.add("is-docked"); changeBtn.parentNode.insertBefore(pasteBtn, changeBtn); }
           };
           reader.readAsDataURL(files[0]);
         }
@@ -5306,7 +5497,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 
   <script src="/date_autotab.js?v=1"></script>
   <?php ourthology_render_tour('timeline', (int) $me['person_id'], $autostartTour); ?>
-  <script src="/life_map.js?v=6"></script>
+  <script src="/life_map.js?v=7"></script>
   <script src="/memory_location.js?v=6"></script>
 </body>
 </html>

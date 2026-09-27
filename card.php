@@ -195,17 +195,17 @@ if ($action === 'send') {
     // nothing to spoil: no "open it" link, no occasion given away early,
     // just "a card's coming, it'll be there on <date>, don't peek before
     // then" (ourthology_notify_card_scheduled()). The card itself still
-    // only becomes visible in the recipient's Pending queue once
+    // only becomes visible in the recipient's Mailbox once
     // deliver_on actually arrives -- this only changes whether they're
     // told it's coming, not when they can open it.
     $senderName = person_display_name(['first_name' => $me['first_name'], 'surname' => $me['surname']]);
     if ($isAnytime) {
         ourthology_notify_card_received($pdo, (int) $recipientId, $senderName);
-        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue right away.';
+        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Mailbox right away.';
     } else {
         $occasionLabel = $eventRow !== null ? $occasion : 'their birthday';
         ourthology_notify_card_scheduled($pdo, (int) $recipientId, $senderName, $occasionLabel, $deliverOn);
-        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Pending queue the day before ' . $occasionLabel . '.';
+        $_SESSION['flash_card_sent'] = 'Card sent — it\'ll land in ' . person_display_name($recipient) . '\'s Mailbox the day before ' . $occasionLabel . '.';
     }
     header('Location: /timeline.php');
     exit;

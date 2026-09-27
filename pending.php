@@ -318,11 +318,11 @@ function ourthology_pending_memory_preview_html(array $row): string
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" href="/favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pending requests — ourthology.com</title>
+<title>Mailbox — ourthology.com</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css?v=28">
+<link rel="stylesheet" href="/styles.css?v=35">
 <style>
   /* Phase 85: this page had no .nav/.nav-links of its own before -- it
      only ever linked back to tree.php via the plain .foot-link at the
@@ -843,7 +843,7 @@ function ourthology_pending_memory_preview_html(array $row): string
                    field the incoming-card row above already shows. */ ?>
           <?= htmlspecialchars((string) $gc['occasion'], ENT_QUOTES) ?> card sent to <strong><?= htmlspecialchars(person_display_name(['first_name' => $gc['recipient_first'], 'surname' => $gc['recipient_surname']]), ENT_QUOTES) ?></strong>
           <?php if ($gc['deliver_on'] > date('Y-m-d')): ?>
-            <span style="color:var(--ink-faint);font-size:12px;">(will land in their Pending queue on <?= htmlspecialchars(date('d M Y', strtotime($gc['deliver_on'])), ENT_QUOTES) ?>)</span>
+            <span style="color:var(--ink-faint);font-size:12px;">(will land in their Mailbox on <?= htmlspecialchars(date('d M Y', strtotime($gc['deliver_on'])), ENT_QUOTES) ?>)</span>
           <?php else: ?>
             <span style="color:var(--ink-faint);font-size:12px;">(not yet opened)</span>
           <?php endif; ?>

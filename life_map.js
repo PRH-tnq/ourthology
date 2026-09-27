@@ -53,6 +53,8 @@
     var p = String(iso || "").split("-");
     return p.length === 3 ? (+p[2]) + " " + MONTHS[+p[1] - 1] + " " + p[0] : "";
   }
+  // Phase 105: a memory dated by its year alone
+  function fmtEntry(e) { return e.yearOnly ? String(e.date).slice(0, 4) + " · exact date not known" : fmt(e.date); }
   function firstImage(e) {
     for (var i = 0; i < (e.media || []).length; i++) {
       if (e.media[i].kind === "image") return e.media[i].url + (e.media[i].url.indexOf("?") >= 0 ? "&" : "?") + "thumb=1";
@@ -281,14 +283,14 @@
       if (!many) {
         var img = firstImage(e0);
         html = '<div class="lm-pop">' + (img ? '<img src="' + esc(img) + '" alt="">' : "") + "<div>" +
-          "<b>" + esc(e0.title) + "</b><small>" + esc(fmt(e0.date)) + (e0.place.label ? "<br>" + esc(e0.place.label) : "") + "</small>" +
+          "<b>" + esc(e0.title) + "</b><small>" + esc(fmtEntry(e0)) + (e0.place.label ? "<br>" + esc(e0.place.label) : "") + "</small>" +
           '<a href="#" data-open="' + esc(e0.id) + '">Open this memory</a></div></div>';
       } else {
         html = '<div class="lm-list"><h4>' + esc(e0.place.label || "This spot") + " · " + list.length + " memories</h4>" +
           list.map(function (e) {
             var img = firstImage(e);
             return '<button type="button" data-open="' + esc(e.id) + '">' + (img ? '<img src="' + esc(img) + '" alt="">' : "") +
-              "<span>" + esc(e.title) + "<small>" + esc(fmt(e.date)) + "</small></span></button>";
+              "<span>" + esc(e.title) + "<small>" + esc(fmtEntry(e)) + "</small></span></button>";
           }).join("") + "</div>";
       }
       m.bindPopup(html, { maxWidth: 290 });
