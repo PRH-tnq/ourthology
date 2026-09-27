@@ -37,26 +37,67 @@ declare(strict_types=1);
  * items (the tour never points at the page you're already on), and
  * every other page just omits it.
  */
+/**
+ * Phase 106: how many things are waiting for THIS person to do something --
+ * exactly pending.php's "Waiting on you" total: relationship and partner
+ * requests, memory tags to approve, and postcards, letters and cards that
+ * have arrived but haven't been opened. (The nav used to count only the
+ * first two, so a tag or a postcard waiting for you showed nothing.)
+ */
+function ourthology_mailbox_count(PDO $pdo, int $userId, int $personId): int
+{
+    require_once __DIR__ . '/graph.php';
+    require_once __DIR__ . '/memory_tags.php';
+    require_once __DIR__ . '/postcards.php';
+    require_once __DIR__ . '/letters.php';
+    require_once __DIR__ . '/cards.php';
+    try {
+        $rel = fetch_pending_for_user($pdo, $userId);
+        return count($rel['relationships']) + count($rel['partnerships'])
+            + count(fetch_pending_memory_tags_for_user($pdo, $userId))
+            + count(fetch_pending_postcards_for_person($pdo, $personId))
+            + count(fetch_pending_letters_for_person($pdo, $personId))
+            + count(fetch_pending_cards_for_person($pdo, $personId));
+    } catch (Throwable $e) {
+        error_log('ourthology: mailbox count failed: ' . $e->getMessage());
+        return 0;
+    }
+}
+
 function ourthology_render_primary_nav(string $current, int $pendingCount, array $ids = []): string
 {
+    // Phase 106: "Pending" is now "Mailbox", and its badge counts everything
+    // waiting on you (see ourthology_mailbox_count()), not just relationship
+    // requests -- the $pendingCount callers pass is only the fallback.
+    $me = function_exists('current_user_with_person') ? current_user_with_person() : null;
+    if ($me !== null) {
+        $pendingCount = ourthology_mailbox_count(ourthology_pdo(), (int) $me['user_id'], (int) $me['person_id']);
+    }
+    $waiting = $pendingCount > 0
+        ? '<span class="nav-badge" aria-hidden="true">' . $pendingCount . '</span>'
+            . '<span class="visually-hidden"> — ' . $pendingCount . ($pendingCount === 1 ? ' thing needs' : ' things need') . ' you</span>'
+        : '';
     $items = [
         'tree'     => ['href' => '/tree.php',     'label' => 'My tree'],
         'timeline' => ['href' => '/timeline.php', 'label' => 'My timeline'],
         'calendar' => ['href' => '/calendar.php', 'label' => 'Family calendar'],
-        'pending'  => ['href' => '/pending.php',  'label' => 'Pending' . ($pendingCount > 0 ? ' (' . $pendingCount . ')' : '')],
+        'pending'  => ['href' => '/pending.php',  'label' => 'Mailbox'],
     ];
 
     $html = '<div class="segmented nav-primary">';
     foreach ($items as $key => $item) {
         $label = htmlspecialchars($item['label'], ENT_QUOTES);
+        $extra = $key === 'pending' ? $waiting : '';
+        $title = ($key === 'pending' && $pendingCount > 0)
+            ? ' title="' . $pendingCount . ($pendingCount === 1 ? ' thing is' : ' things are') . ' waiting for you"' : '';
         if ($key === $current) {
-            $html .= '<span class="active" aria-current="page">' . $label . '</span>';
+            $html .= '<span class="active' . ($extra !== '' ? ' has-pending' : '') . '" aria-current="page"' . $title . '>' . $label . $extra . '</span>';
         } else {
             $pendingClass = ($key === 'pending' && $pendingCount > 0) ? ' has-pending' : '';
             $idAttr = isset($ids[$key]) ? ' id="' . htmlspecialchars($ids[$key], ENT_QUOTES) . '"' : '';
             $html .= '<a href="' . htmlspecialchars($item['href'], ENT_QUOTES) . '"' . $idAttr
-                . ($pendingClass !== '' ? ' class="' . ltrim($pendingClass) . '"' : '')
-                . '>' . $label . '</a>';
+                . ($pendingClass !== '' ? ' class="' . ltrim($pendingClass) . '"' : '') . $title
+                . '>' . $label . $extra . '</a>';
         }
     }
     $html .= '</div>';
@@ -90,7 +131,7 @@ function ourthology_render_mobile_chrome(string $current, int $pendingCount): st
         'tree'     => ['/tree.php', 'Tree', '#tourMyTree'],
         'timeline' => ['/timeline.php', 'Timeline', ''],
         'calendar' => ['/calendar.php', 'Calendar', '#tourCalendarLink'],
-        'pending'  => ['/pending.php', 'Pending', '#tourPendingLink'],
+        'pending'  => ['/pending.php', 'Mailbox', '#tourPendingLink'],
     ];
     $html = '<script>document.documentElement.classList.add("m-ui");</script>';
     $html .= '<button type="button" class="m-menu-btn" id="mMenuBtn" aria-haspopup="dialog" aria-controls="mSheet" data-tour-fallback>'
@@ -99,7 +140,8 @@ function ourthology_render_mobile_chrome(string $current, int $pendingCount): st
     foreach ($tabs as $key => [$href, $label, $tourFor]) {
         $active = $key === $current;
         $badge = ($key === 'pending' && $pendingCount > 0) ? '<span class="m-badge">' . $pendingCount . '</span>' : '';
-        $html .= '<a href="' . $href . '"' . ($active ? ' class="active" aria-current="page"' : '')
+        $cls = trim(($active ? 'active' : '') . (($key === 'pending' && $pendingCount > 0) ? ' has-pending' : ''));
+        $html .= '<a href="' . $href . '"' . ($cls !== '' ? ' class="' . $cls . '"' : '') . ($active ? ' aria-current="page"' : '')
             . ($tourFor !== '' ? ' data-tour-for="' . $tourFor . '"' : '') . '>'
             . '<span class="m-tab-icon">' . $icons[$key] . $badge . '</span><span class="m-tab-label">' . $label . '</span></a>';
     }

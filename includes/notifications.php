@@ -48,7 +48,7 @@ function ourthology_notify_pending_memory_tag(PDO $pdo, int $timelineEntryId, ar
         }
 
         $entryStmt = $pdo->prepare(
-            'SELECT te.title, te.body, te.occurred_on, te.person_id AS owner_person_id,
+            'SELECT te.title, te.body, te.occurred_on, te.date_precision, te.person_id AS owner_person_id,
                     op.first_name AS owner_first, op.surname AS owner_surname
              FROM timeline_entries te JOIN persons op ON op.id = te.person_id
              WHERE te.id = :eid'
@@ -77,7 +77,8 @@ function ourthology_notify_pending_memory_tag(PDO $pdo, int $timelineEntryId, ar
             $creatorIsOwner,
             (string) ($entry['title'] ?? ''),
             (string) ($entry['body'] ?? ''),
-            $entry['occurred_on'] ?: null
+            $entry['occurred_on'] ?: null,
+            ($entry['date_precision'] ?? 'day') === 'year'
         );
 
         ourthology_send_email($toEmail, trim($taggedFirstName), $subject, $html, $text);
@@ -102,7 +103,8 @@ function ourthology_render_pending_tag_email(
     bool $creatorIsOwner,
     string $entryTitle,
     string $entryBody,
-    ?string $occurredOn
+    ?string $occurredOn,
+    bool $yearOnly = false
 ): array {
     $pendingUrl = ourthology_absolute_url('/pending.php?goto=waiting-on-you');
 
@@ -111,7 +113,8 @@ function ourthology_render_pending_tag_email(
     if (mb_strlen($snippet) > 160) {
         $snippet = mb_substr($snippet, 0, 160) . '…';
     }
-    $dateLabel = $occurredOn ? date('j M Y', strtotime($occurredOn)) : null;
+    // Phase 105: a year-only memory shows just its year
+    $dateLabel = $occurredOn ? ($yearOnly ? substr($occurredOn, 0, 4) . ' (exact date not known)' : date('j M Y', strtotime($occurredOn))) : null;
 
     $subject = 'A memory is waiting for your OK — ourthology.com';
 
@@ -698,7 +701,7 @@ function ourthology_render_card_scheduled_email(string $recipientFirstName, stri
                 <strong><?= htmlspecialchars($senderName, ENT_QUOTES) ?></strong> has sent you a card on ourthology.com for <?= htmlspecialchars($occasionLabel, ENT_QUOTES) ?>.
               </p>
               <p style="margin:0 0 20px; font-size:15px; line-height:1.6; color:#1a1714;">
-                It's tucked away for now — it'll land in your Pending queue on <strong><?= htmlspecialchars($dateLabel, ENT_QUOTES) ?></strong>. No peeking before then!
+                It's tucked away for now — it'll land in your Mailbox on <strong><?= htmlspecialchars($dateLabel, ENT_QUOTES) ?></strong>. No peeking before then!
               </p>
             </td>
           </tr>
@@ -723,7 +726,7 @@ function ourthology_render_card_scheduled_email(string $recipientFirstName, stri
         '',
         "{$senderName} has sent you a card on ourthology.com for {$occasionLabel}.",
         '',
-        "It's tucked away for now -- it'll land in your Pending queue on {$dateLabel}. No peeking before then!",
+        "It's tucked away for now -- it'll land in your Mailbox on {$dateLabel}. No peeking before then!",
         '',
         "You're getting this because postcard, letter, and card emails are turned on in your ourthology.com Account Settings. You can turn them off any time from My tree -> Edit -> Account Settings.",
     ]);

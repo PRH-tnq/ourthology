@@ -299,7 +299,7 @@ function ourthology_tour_steps(): array
             'page' => 'timeline',
             'target' => '#gcardInsideFooter',
             'title' => 'Sign off, then send',
-            'body' => "The closing line above fills in from your own name, editable the same as everything else. Happy with it? Send — the card arrives in their Pending queue on the day, with its own little opening animation when they get to read it.",
+            'body' => "The closing line above fills in from your own name, editable the same as everything else. Happy with it? Send — the card arrives in their Mailbox on the day, with its own little opening animation when they get to read it.",
             'group' => 'greeting_cards',
         ],
 
@@ -353,7 +353,7 @@ function ourthology_tour_steps(): array
             'action' => 'close_trip_planner',
             'target' => '#mapToggle',
             'title' => 'Your life on a map',
-            'body' => "Swap the timeline for a map. “Where we've lived” shows every home you've lived in, joined up in the order you lived in them — click one for the dates, photos and how it changed over the years. “Where we've visited” puts every memory that has a place on it (“Where it happened”) on the map. Pick River, Rings or Spiral to get the timeline back.",
+            'body' => "Swap the timeline for a map. “Where I've lived” shows every home you've lived in, joined up in the order you lived in them — click one for the dates, photos and how it changed over the years. “Where I've visited” puts every memory that has a place on it (“Where it happened”) on the map. Pick River, Rings or Spiral to get the timeline back.",
             'group' => 'places',
         ],
         [
@@ -449,7 +449,7 @@ function ourthology_tour_steps(): array
         [
             'page' => 'tree',
             'target' => '#tourPendingLink',
-            'title' => 'Keep an eye on Pending',
+            'title' => 'Keep an eye on your Mailbox',
             'body' => "When someone tags you in a memory, or wants to connect a relative to your tree, it shows up here. Accept a tag and it joins your own timeline too — or decline if it isn't you. Prefer email? Turn on notifications from your profile and we'll let you know automatically.",
             'group' => 'family_tree',
         ],
@@ -537,7 +537,7 @@ function ourthology_tour_steps(): array
             'tab' => 'account',
             'target' => '#notificationsBlock',
             'title' => 'Get notified',
-            'body' => "Add your email and tick the box, and we'll let you know the moment someone tags you in a memory that needs your OK — no need to keep checking Pending yourself.",
+            'body' => "Add your email and tick the box, and we'll let you know the moment someone tags you in a memory that needs your OK — no need to keep checking your Mailbox yourself.",
             'group' => 'profile_settings',
         ],
         [

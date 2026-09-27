@@ -879,3 +879,9 @@ ALTER TABLE homes
   ADD COLUMN country_code CHAR(2) NULL AFTER country;
 ALTER TABLE timeline_entries
   ADD COLUMN location_country CHAR(2) NULL AFTER location_lng;
+
+-- ---------------------------------------------------------------------
+-- Phase 105: year-only memory dates (db/migrations/2026_phase105_year_only_dates.sql)
+-- ---------------------------------------------------------------------
+ALTER TABLE timeline_entries
+  ADD COLUMN date_precision ENUM('day','year') NOT NULL DEFAULT 'day' AFTER occurred_on;

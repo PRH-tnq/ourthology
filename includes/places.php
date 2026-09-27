@@ -310,7 +310,10 @@ function places_memory_pins(PDO $pdo, int $personId, bool $canManage, int $viewe
             'id'    => (int) $e['id'],
             'title' => $title !== '' ? $title : ($e['entry_type'] === 'diary' ? 'Diary entry' : 'A memory'),
             'date'  => $date,
-            'dateLabel' => date('j M Y', strtotime($date)),
+            // Phase 105: just the year when that's all that's known
+            'dateLabel' => ($e['date_precision'] ?? 'day') === 'year' && !empty($e['occurred_on'])
+                ? substr($date, 0, 4) . ' · exact date not known'
+                : date('j M Y', strtotime($date)),
             'place' => (string) ($e['location_label'] ?? ''),
             'lat'   => (float) $e['location_lat'],
             'lng'   => (float) $e['location_lng'],

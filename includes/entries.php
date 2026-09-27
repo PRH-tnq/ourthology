@@ -44,7 +44,7 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
         )))";
         $params = ['pid1' => $targetPersonId, 'pid2' => $targetPersonId, 'viewer1' => $viewerPersonId, 'viewer2' => $viewerPersonId];
     }
-    $sql = "SELECT te.id, te.entry_type, te.origin, te.title, te.body, te.occurred_on, te.visibility, te.created_at,
+    $sql = "SELECT te.id, te.entry_type, te.origin, te.title, te.body, te.occurred_on, te.date_precision, te.visibility, te.created_at,
                    te.location_label, te.location_lat, te.location_lng, te.location_country,
                    te.person_id AS owner_person_id, op.claimed_by_user_id AS owner_claimed_by,
                    op.family_group_id AS owner_family_group
@@ -52,7 +52,7 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
             JOIN persons op ON op.id = te.person_id
             WHERE te.person_id = :pid1 $visClause1
             UNION
-            SELECT te.id, te.entry_type, te.origin, te.title, te.body, te.occurred_on, te.visibility, te.created_at,
+            SELECT te.id, te.entry_type, te.origin, te.title, te.body, te.occurred_on, te.date_precision, te.visibility, te.created_at,
                    te.location_label, te.location_lat, te.location_lng, te.location_country,
                    te.person_id AS owner_person_id, op.claimed_by_user_id AS owner_claimed_by,
                    op.family_group_id AS owner_family_group
@@ -120,7 +120,7 @@ function fetch_entries_for_person(PDO $pdo, int $targetPersonId, bool $viewerIsO
 function fetch_owned_entry(PDO $pdo, int $entryId, int $myUserId, int $myFamilyGroup): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT te.id, te.person_id, te.entry_type, te.title, te.body, te.occurred_on, te.visibility,
+        'SELECT te.id, te.person_id, te.entry_type, te.title, te.body, te.occurred_on, te.date_precision, te.visibility,
                 te.location_label, te.location_lat, te.location_lng, te.location_country,
                 p.claimed_by_user_id, p.family_group_id
          FROM timeline_entries te
