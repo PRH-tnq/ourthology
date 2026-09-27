@@ -1157,6 +1157,45 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
   .gcard-envelope-stamp { position:absolute; top:10px; right:12px; width:52px; z-index:2; }
   .gcard-envelope-stamp svg { display:block; width:100%; height:auto; overflow:visible; }
 
+  /* Phase 107: "allow the image to be bigger, using a double column if
+     necessary ... remove the vertical scroll bar." The card is now sized
+     from the space the window actually has, so the whole pop-up always
+     fits without scrolling:
+       - landscape screens (laptops, iPad sideways): two columns -- the
+         card as large as the window's height allows on the left, the
+         message type / title / who it's for / buttons on the right;
+       - portrait screens (phones, iPad upright): one column, the card as
+         wide as fits once the controls above and below it are counted.
+     The <form> is display:contents so its picker, card and footers can sit
+     in the pop-up's grid directly. */
+  .gcard-box { width:min(94vw, 600px); overflow:hidden; overflow:clip; }
+  .gcard-scene { width:min(100%, calc((94vh - 325px) * 5 / 7)); margin:4px auto 0; }
+  @supports (height: 1dvh) { .gcard-scene { width:min(100%, calc((94dvh - 325px) * 5 / 7)); } }
+  .gcard-back-link { white-space:nowrap; }
+  @media (min-width: 760px) and (min-aspect-ratio: 1/1) {
+    .gcard-box { width:auto; max-width:96vw; display:grid; grid-template-columns:auto 280px; grid-template-rows:auto auto auto auto 1fr; column-gap:26px; padding:24px 26px; }
+    .gcard-box #gcardForm { display:contents; }
+    .gcard-box > *, .gcard-box #gcardForm > * { grid-column:2; }
+    .gcard-box #gcardScene { grid-column:1; grid-row:1 / -1; margin:0; width:auto;
+      height:min(820px, calc(94vh - 52px), calc((96vw - 390px) * 7 / 5)); }
+    .gcard-box .message-mode-toggle { grid-row:1; margin:34px 0 14px; justify-self:start; }
+    .gcard-box .message-mode-toggle[hidden] { display:none; }
+    .gcard-box .gcard-title { grid-row:2; margin:6px 40px 16px 0; }
+    .gcard-box .message-mode-toggle:not([hidden]) ~ .gcard-title { margin-top:0; }
+    .gcard-box .gcard-recipient-picker { grid-row:3; }
+    .gcard-box .gcard-front-footer, .gcard-box .gcard-inside-footer { grid-row:4; align-self:start; }
+    .gcard-box .gcard-front-footer { justify-content:stretch; margin:6px 0 0; }
+    .gcard-box .gcard-open-btn { width:100%; }
+    .gcard-box .gcard-inside-footer { flex-direction:column-reverse; align-items:stretch; border-top:none; margin-top:6px; padding-top:0; gap:14px; }
+    .gcard-box .gcard-send-btn { width:100%; }
+    .gcard-box .gcard-back-link { align-self:center; }
+    .gcard-box .gcard-cover-message-text { font-size:30px; }
+    .gcard-box .gcard-envelope-wrap { right:332px; } /* centre the envelope on the card, not the whole pop-up */
+  }
+  @media (min-width: 760px) and (min-aspect-ratio: 1/1) {
+    @supports (height: 1dvh) { .gcard-box #gcardScene { height:min(820px, calc(94dvh - 52px), calc((96vw - 390px) * 7 / 5)); } }
+  }
+
   .whoami { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-faint); margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
   .whoami strong { color:var(--ink-soft); font-weight:600; }
   .whoami form { display:inline; }
