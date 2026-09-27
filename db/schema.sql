@@ -871,3 +871,11 @@ ALTER TABLE timeline_entries
 ALTER TABLE media
   ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER height;
 CREATE INDEX idx_media_entry_sort ON media (timeline_entry_id, sort_order, id);
+
+-- ---------------------------------------------------------------------
+-- Phase 100: country codes for pins (db/migrations/2026_phase100_country_codes.sql)
+-- ---------------------------------------------------------------------
+ALTER TABLE homes
+  ADD COLUMN country_code CHAR(2) NULL AFTER country;
+ALTER TABLE timeline_entries
+  ADD COLUMN location_country CHAR(2) NULL AFTER location_lng;

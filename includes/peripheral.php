@@ -503,7 +503,7 @@ function ourthology_copy_pending_entries(PDO $pdo, int $fromPersonId, int $toPer
 {
     $stmt = $pdo->prepare(
         "SELECT src.id, src.entry_type, src.origin, src.title, src.body, src.occurred_on, src.visibility,
-                src.location_label, src.location_lat, src.location_lng
+                src.location_label, src.location_lat, src.location_lng, src.location_country
          FROM timeline_entries src
          WHERE src.person_id = :from AND src.copied_from_entry_id IS NULL
            AND (src.origin IS NULL OR src.origin <> 'trip')
@@ -516,8 +516,8 @@ function ourthology_copy_pending_entries(PDO $pdo, int $fromPersonId, int $toPer
     $pending = $stmt->fetchAll();
 
     $insert = $pdo->prepare(
-        'INSERT INTO timeline_entries (person_id, entry_type, origin, title, body, occurred_on, location_label, location_lat, location_lng, visibility, copied_from_entry_id, created_by_user_id)
-         VALUES (:pid, :etype, :origin, :title, :body, :occurred, :loc, :lat, :lng, :vis, :copied_from, :uid)'
+        'INSERT INTO timeline_entries (person_id, entry_type, origin, title, body, occurred_on, location_label, location_lat, location_lng, location_country, visibility, copied_from_entry_id, created_by_user_id)
+         VALUES (:pid, :etype, :origin, :title, :body, :occurred, :loc, :lat, :lng, :lcc, :vis, :copied_from, :uid)'
     );
     foreach ($pending as $src) {
         $insert->execute([
@@ -530,6 +530,7 @@ function ourthology_copy_pending_entries(PDO $pdo, int $fromPersonId, int $toPer
             'loc'         => $src['location_label'],
             'lat'         => $src['location_lat'],
             'lng'         => $src['location_lng'],
+            'lcc'         => $src['location_country'],
             'vis'         => $src['visibility'],
             'copied_from' => $src['id'],
             'uid'         => $actingUserId,
