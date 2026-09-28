@@ -598,6 +598,60 @@ function ourthology_pending_memory_preview_html(array $row): string
   .gcard-peek-toggle#cardCloseBtn { display:none; }
   .gcard-scene.is-card-open .gcard-peek-toggle#cardCloseBtn { display:block; }
   .gcard-read-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:16px; }
+
+  /* Phase 109: a received card -- bigger, and every button in one row
+     under it (the red "Open card" button used to sit over the cover's
+     own message). The card is sized from the window so the whole pop-up
+     fits without scrolling: most of a phone screen, and much larger on a
+     computer or iPad (was a fixed 328 x 459). */
+  .gcard-read-box { width:auto; max-width:96vw; padding:20px 24px 22px; }
+  .gcard-read-box .gcard-title { margin:0 44px 12px 0; }
+  #cardScene { width:min(calc(92vw - 52px), calc((94vh - 150px) * 5 / 7), 600px); margin:0 auto; container-type:inline-size; }
+  @supports (height: 1dvh) { #cardScene { width:min(calc(92vw - 52px), calc((94dvh - 150px) * 5 / 7), 600px); } }
+  #cardScene .gcard-cover-message-text { font-size:clamp(22px, 8cqw, 44px); }
+  #cardScene .gcard-cover-message { padding:40px 16px 20px; }
+  #cardScene .gcard-inside { padding:6cqw 6cqw 5cqw; }
+  #cardScene .gcard-field-label { font-size:clamp(15px, 4.6cqw, 24px); }
+  #cardScene .gcard-field-value { font-size:clamp(19px, 5.8cqw, 30px); }
+  #cardScene .gcard-message-value { font-size:clamp(18px, 5.4cqw, 28px); }
+  #cardScene .gcard-closing-value { font-size:clamp(20px, 6cqw, 32px); }
+  .gcard-read-footer { flex-wrap:nowrap; justify-content:flex-start; margin-top:14px; }
+  .gcard-read-footer form { margin:0; display:flex; }
+  .gcard-read-footer .btn-small { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; height:38px; margin:0; padding:0 18px; line-height:1; white-space:nowrap; font-size:14px; border-width:1px; border-style:solid; }
+  .gcard-read-footer-gap { flex:1 1 auto; }
+  .gcard-read-footer .gcard-open-cta, .gcard-read-footer .gcard-peek-toggle { position:static; transform:none; box-shadow:none; }
+  #cardReadOverlay .gcard-peek-toggle#cardCloseBtn { display:none; }
+  #cardReadOverlay.is-card-open .gcard-peek-toggle#cardCloseBtn { display:inline-flex; }
+  #cardReadOverlay.is-card-open .gcard-open-cta { display:none; }
+  .gcard-cta-short { display:none; }
+
+  /* Phase 110: the inside, like a traditional card -- the handwriting
+     occupies the middle half of the page each way (a quarter margin on
+     every side), centred vertically; name left, greeting and message
+     centred, sign-off right. fitCardHand() sizes the writing to fill it. */
+  #cardScene .gcard-inside--hand { display:flex; align-items:center; justify-content:center; padding:0; overflow:hidden; background:#fffdf8; }
+  .gcard-hand { width:50%; height:50%; display:flex; flex-direction:column; justify-content:center; overflow:visible; }
+  .gcard-hand-inner { font-family:'Caveat', 'Segoe Print', 'Bradley Hand', cursive; font-weight:500; color:#2b2620; line-height:1.18; font-size:28px; padding:0 .12em; } /* a little room for the handwriting's slant */
+  .gcard-hand-inner p { margin:0; overflow-wrap:anywhere; }
+  .gcard-hand-to { text-align:left; margin-bottom:.45em !important; }
+  .gcard-hand-greeting { text-align:center; font-weight:700; font-size:1.18em; margin-bottom:.35em !important; }
+  .gcard-hand-message { text-align:center; }
+  .gcard-hand-from { text-align:right; margin-top:.6em !important; }
+  .gcard-hand.is-roomy { width:80%; height:84%; }
+  .gcard-hand.is-overflowing { overflow:auto; justify-content:flex-start; }
+  .gcard-cta-arrow { margin-left:7px; }
+  #cardReadOverlay .gcard-read-footer .ghost { background:transparent; color:var(--accent); border-color:var(--accent); }
+  #cardReadOverlay .gcard-read-footer .ghost:hover, #cardReadOverlay .gcard-read-footer .ghost:focus-visible { background:var(--accent-bg, #F1DCDC); }
+  @media (max-width: 560px) {
+    #cardReadOverlay { padding:8px; }
+    .gcard-read-box { padding:14px 12px 14px; }
+    #cardScene { width:min(calc(100vw - 44px), calc((94vh - 130px) * 5 / 7)); }
+    @supports (height: 1dvh) { #cardScene { width:min(calc(100vw - 44px), calc((94dvh - 130px) * 5 / 7)); } }
+    .gcard-read-footer { gap:6px; }
+    .gcard-read-footer .btn-small { padding:0 11px; font-size:13px; height:36px; }
+    .gcard-cta-long { display:none; }
+    .gcard-cta-short { display:inline; }
+  }
 </style>
 </head>
 <body>
@@ -1067,8 +1121,6 @@ function ourthology_pending_memory_preview_html(array $row): string
       <div class="letter-reveal">
         <h3 class="gcard-title"><?= htmlspecialchars((string) $openCard['occasion'], ENT_QUOTES) ?> card from <?= htmlspecialchars(person_display_name(['first_name' => $openCard['sender_first'], 'surname' => $openCard['sender_surname']]), ENT_QUOTES) ?></h3>
         <div class="gcard-scene" id="cardScene">
-          <button type="button" class="gcard-open-cta" id="cardOpenBtn">Open card &amp; read message &rarr;</button>
-          <button type="button" class="postcard-flip-btn gcard-peek-toggle" id="cardCloseBtn" aria-label="Close card, back to the cover">&larr; Close card</button>
           <div class="gcard-cover" id="cardReadCover">
             <div class="gcard-cover-face gcard-cover-front">
               <img class="gcard-read-photo" src="/card_media.php?id=<?= (int) $openCard['card_id'] ?>" alt="">
@@ -1076,32 +1128,38 @@ function ourthology_pending_memory_preview_html(array $row): string
             </div>
             <div class="gcard-cover-face gcard-cover-back" aria-hidden="true"></div>
           </div>
-          <div class="gcard-inside">
+          <div class="gcard-inside gcard-inside--hand">
             <?php
               $cardToName = ($openCard['to_line'] ?? '') !== '' ? $openCard['to_line'] : (string) $me['first_name'];
               $cardGreeting = ($openCard['greeting_line'] ?? '') !== '' ? $openCard['greeting_line'] : (string) $openCard['occasion'];
+              $cardToLabel = rtrim(trim((string) $cardToName), ',') . ',';
             ?>
-            <div class="gcard-field">
-              <span class="gcard-field-label">To</span>
-              <span class="gcard-field-value"><?= htmlspecialchars((string) $cardToName, ENT_QUOTES) ?></span>
+            <!-- Phase 110: laid out like a real card -- handwriting in the
+                 middle half of the page (very large margins all round),
+                 centred top-to-bottom: the name on the left, the greeting and
+                 message centred, the sign-off on the right. The writing is
+                 sized to fill that space (fitCardHand() below). -->
+            <div class="gcard-hand" id="cardHand">
+              <div class="gcard-hand-inner">
+                <p class="gcard-hand-to"><?= htmlspecialchars($cardToLabel, ENT_QUOTES) ?></p>
+                <p class="gcard-hand-greeting"><?= htmlspecialchars((string) $cardGreeting, ENT_QUOTES) ?></p>
+                <?php if ($openCard['message'] !== ''): ?>
+                <p class="gcard-hand-message"><?= nl2br(htmlspecialchars((string) $openCard['message'], ENT_QUOTES)) ?></p>
+                <?php endif; ?>
+                <?php if (($openCard['from_line'] ?? '') !== ''): ?>
+                <p class="gcard-hand-from"><?= htmlspecialchars((string) $openCard['from_line'], ENT_QUOTES) ?></p>
+                <?php endif; ?>
+              </div>
             </div>
-            <div class="gcard-field">
-              <span class="gcard-field-label">Greeting</span>
-              <span class="gcard-field-value"><?= htmlspecialchars((string) $cardGreeting, ENT_QUOTES) ?></span>
-            </div>
-            <div class="gcard-field gcard-field-message">
-              <span class="gcard-field-label">Message</span>
-              <div class="gcard-field-value gcard-message-value"><?= $openCard['message'] !== '' ? nl2br(htmlspecialchars((string) $openCard['message'], ENT_QUOTES)) : '<span style="color:var(--ink-faint);">(no message)</span>' ?></div>
-            </div>
-            <?php if (($openCard['from_line'] ?? '') !== ''): ?>
-            <div class="gcard-field">
-              <span class="gcard-field-value gcard-closing-value"><?= htmlspecialchars((string) $openCard['from_line'], ENT_QUOTES) ?></span>
-            </div>
-            <?php endif; ?>
           </div>
         </div>
-        <?php if (in_array($openCard['status'], ['pending', 'read'], true)): ?>
+        <!-- Phase 109: every button in one row under the card, so none of
+             them sits over the cover message any more. -->
         <div class="gcard-read-footer">
+          <button type="button" class="btn-primary btn-small gcard-open-cta" id="cardOpenBtn"><span class="gcard-cta-long">Open card &amp; read message</span><span class="gcard-cta-short">Open card</span><span class="gcard-cta-arrow" aria-hidden="true">&rarr;</span></button>
+          <button type="button" class="btn-primary btn-small ghost gcard-peek-toggle" id="cardCloseBtn" aria-label="Close card, back to the cover">&larr; Close card</button>
+          <?php if (in_array($openCard['status'], ['pending', 'read'], true)): ?>
+          <span class="gcard-read-footer-gap" aria-hidden="true"></span>
           <form method="post" action="/card.php" style="display:inline;">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="discard">
@@ -1114,8 +1172,8 @@ function ourthology_pending_memory_preview_html(array $row): string
             <input type="hidden" name="card_id" value="<?= (int) $openCard['card_id'] ?>">
             <button type="submit" class="btn-primary btn-small">Save to my timeline</button>
           </form>
+          <?php endif; ?>
         </div>
-        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -1151,10 +1209,42 @@ function ourthology_pending_memory_preview_html(array $row): string
         var setCardOpen = function (open) {
           cover.classList.toggle("is-open", open);
           cardScene.classList.toggle("is-card-open", open);
+          overlay.classList.toggle("is-card-open", open); // Phase 109: the footer's open/close buttons
+          (open ? closeBtn : openBtn).focus();
         };
         openBtn.addEventListener("click", function () { setCardOpen(true); });
         closeBtn.addEventListener("click", function () { setCardOpen(false); });
       }
+
+      // Phase 110: size the handwriting so it fills the middle half of the
+      // page -- the biggest size at which it all still fits, found by
+      // halving the range; re-done when the fonts arrive or the window
+      // changes. A very long message that won't fit even small scrolls.
+      var hand = document.getElementById("cardHand");
+      var handInner = hand && hand.querySelector(".gcard-hand-inner");
+      function fitCardHand() {
+        if (!hand || !handInner || !hand.clientHeight) return;
+        hand.classList.remove("is-overflowing", "is-roomy");
+        function fits(px) { handInner.style.fontSize = px + "px"; return handInner.scrollHeight <= hand.clientHeight && handInner.scrollWidth <= hand.clientWidth + 1; }
+        function best() {
+          var lo = 12, hi = Math.max(16, Math.round(hand.clientWidth / 5));
+          if (!fits(lo)) return 0;
+          while (hi - lo > 0.5) { var mid = (lo + hi) / 2; if (fits(mid)) lo = mid; else hi = mid; }
+          return Math.floor(lo * 10) / 10;
+        }
+        var px = best();
+        // a long message that would only fit in tiny writing gets more of
+        // the page (smaller margins) before it ever has to scroll
+        if (px < 17) { hand.classList.add("is-roomy"); px = best(); }
+        if (!px) { hand.classList.add("is-overflowing"); px = 12; }
+        handInner.style.fontSize = px + "px";
+      }
+      fitCardHand();
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitCardHand);
+      if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", fitCardHand);
+      var fitTimer = null;
+      window.addEventListener("resize", function () { clearTimeout(fitTimer); fitTimer = setTimeout(fitCardHand, 80); });
+      if (window.ResizeObserver && hand) new ResizeObserver(function () { fitCardHand(); }).observe(hand);
 
       // Same "run the envelope-open animation" treatment letters get
       // above -- .js-anim switches the scene from its default (card
