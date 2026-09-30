@@ -147,7 +147,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       </div>
     <?php endif; ?>
 
-    <form method="post" novalidate>
+    <!-- Phase 112: shown by the script below when a log-in was just sent but
+         this page came back with nothing from the server (see .htaccess). -->
+    <div class="error" id="loginRetryNote" role="alert" hidden>That didn't go through — the connection was interrupted on the way. Your email is filled in; please enter your password and tap <b>Log in</b> once more.</div>
+
+    <form method="post" novalidate id="loginForm">
       <?= csrf_field() ?>
       <?php if ($next !== null): ?>
         <input type="hidden" name="next" value="<?= htmlspecialchars($next, ENT_QUOTES) ?>">
@@ -158,8 +162,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <label for="password">Password</label>
       <input type="password" id="password" name="password" required>
 
-      <button type="submit" class="btn-primary">Log in</button>
+      <button type="submit" class="btn-primary" id="loginBtn">Log in</button>
     </form>
+    <script>
+      // Phase 112: an iPad sometimes got the login page straight back,
+      // empty, after tapping Log in (the host's "Verifying…" bot check
+      // swallowing the sent form -- fixed in .htaccess). As a safety net:
+      // remember the email for a moment when Log in is tapped, and if this
+      // page then reappears without any answer from the server, say what
+      // happened and fill the email back in rather than silently starting
+      // over. Also stops a second tap sending the form twice. The password
+      // is never stored.
+      (function () {
+        var form = document.getElementById("loginForm");
+        var btn = document.getElementById("loginBtn");
+        var note = document.getElementById("loginRetryNote");
+        var emailEl = document.getElementById("email");
+        var pwEl = document.getElementById("password");
+        var KEY = "ourthologyLoginAttempt";
+        var serverAnswered = <?= ($_SERVER['REQUEST_METHOD'] === 'POST' || $cookieDropped) ? 'true' : 'false' ?>;
+        function read() { try { return JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch (e) { return null; } }
+        function clear() { try { sessionStorage.removeItem(KEY); } catch (e) {} }
+        var last = read();
+        clear();
+        var tokEl = form.querySelector('input[name="csrf_token"]');
+        var tok = tokEl ? tokEl.value : "";
+        // Same session (same form token) as when Log in was tapped means the
+        // server never saw that attempt -- after a real log-in or log-out the
+        // session, and so the token, is a new one.
+        if (!serverAnswered && last && last.email && last.tok === tok && Date.now() - last.t < 120000) {
+          if (!emailEl.value) emailEl.value = last.email;
+          note.hidden = false;
+          pwEl.focus();
+        }
+        var sending = false;
+        form.addEventListener("submit", function (e) {
+          if (sending) { e.preventDefault(); return; }
+          sending = true;
+          btn.disabled = true;
+          btn.textContent = "Logging in\u2026";
+          try { sessionStorage.setItem(KEY, JSON.stringify({ email: emailEl.value.trim(), t: Date.now(), tok: tok })); } catch (err) {}
+        });
+        // coming back to this page with the Back button: ready to use again
+        window.addEventListener("pageshow", function (e) {
+          if (e.persisted) { sending = false; btn.disabled = false; btn.textContent = "Log in"; }
+        });
+      })();
+    </script>
 
     <!-- Phase 45: this used to read "New here? Create an account" -- the
          exact words someone who was actually invited would click, sending
