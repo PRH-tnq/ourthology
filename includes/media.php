@@ -504,6 +504,14 @@ function media_thumb_dir(): string
 const MEDIA_THUMB_MAX_DIMENSION = 480;  // timeline memory-card previews
 const AVATAR_THUMB_MAX_DIMENSION = 240; // profile photos (shown at up to 120px CSS, so 2x for sharp screens)
 const MEDIA_THUMB_JPEG_QUALITY = 78;
+// Phase 111: a screen-sized copy for the memory viewer and the full-screen
+// photo view (?display=1). Phone cameras save 12-50 megapixel originals;
+// decoding one of those at full size is what made a zoomed-in photo
+// flicker for several seconds on a phone (the browser keeps dropping and
+// re-drawing it while it runs short of memory). 2048px is still sharper
+// than any phone or tablet screen shows it.
+const MEDIA_DISPLAY_MAX_DIMENSION = 2048;
+const MEDIA_DISPLAY_JPEG_QUALITY = 86;
 
 /**
  * Returns an absolute filesystem path to a cached, resized JPEG preview of
@@ -514,7 +522,7 @@ const MEDIA_THUMB_JPEG_QUALITY = 78;
  * all, or if generation fails for any reason: a slightly slower but
  * correct full image always beats a broken thumbnail.
  */
-function ensure_media_thumbnail(string $relativePath, int $maxDim): ?string
+function ensure_media_thumbnail(string $relativePath, int $maxDim, int $quality = MEDIA_THUMB_JPEG_QUALITY): ?string
 {
     if (!function_exists('imagecreatetruecolor')) {
         return null; // GD not available on this host — fall back everywhere
@@ -587,7 +595,7 @@ function ensure_media_thumbnail(string $relativePath, int $maxDim): ?string
         imagedestroy($dst);
         return null;
     }
-    $ok = @imagejpeg($dst, $thumbPath, MEDIA_THUMB_JPEG_QUALITY);
+    $ok = @imagejpeg($dst, $thumbPath, $quality);
     imagedestroy($dst);
     if ($ok) {
         @chmod($thumbPath, 0640);
