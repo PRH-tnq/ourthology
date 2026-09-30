@@ -685,7 +685,7 @@
         });
       });
       formProgress.textContent = "Saving…";
-      form.submit();
+      (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(form) : form.submit()); // Phase 113
     }).catch(function (err) {
       uploading = false; saveBtn.disabled = false; formProgress.textContent = "";
       formError.textContent = ((err && err.message) || "The upload stopped.") +

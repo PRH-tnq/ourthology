@@ -538,7 +538,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
      user-triggered handler, so it has to already exist by then. -->
 <script src="/clipboard_paste.js?v=2"></script>
 <script src="/sortable_tiles.js?v=1"></script>
-<script src="/chunked_upload.js?v=1"></script>
+<script src="/chunked_upload.js?v=2"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <style>
   :root { --accent-bg: #F1DCDC; }
@@ -1190,7 +1190,16 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
     if (form && uploader && uploader.supported) {
       form.addEventListener('submit', function (evt) {
         if (uploading) { evt.preventDefault(); return; }
-        if (!pending.length) return; // nothing to upload -- a normal (small) submit
+        if (!pending.length) {
+          // Phase 113: nothing to upload, but still make sure the host's
+          // "Verifying…" check isn't about to swallow the save
+          if (!window.ourthologySecurityCheck || quickValidationError()) return; // (the server explains any mistake)
+          evt.preventDefault();
+          uploading = true;
+          setProgress('Saving…');
+          window.ourthologySecurityCheck.submit(form, function (st) { if (st === 'verifying') setProgress('Waiting for the website\'s security check…'); });
+          return;
+        }
         evt.preventDefault();
         var early = quickValidationError();
         if (early) {
@@ -1219,6 +1228,7 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
             chain = chain.then(function () {
               return uploader.upload(item.file, {
                 csrf: csrf,
+                onStatus: function (st) { if (st === 'verifying') setProgress('Waiting for the website\'s security check…'); },
                 fields: { purpose: 'entry', target_person_id: String(TARGET_PERSON_ID) },
                 onProgress: function (sent) {
                   var pct = Math.min(100, Math.round(((doneBytes + sent) / grand) * 100));
@@ -1238,7 +1248,9 @@ foreach (fetch_homes_for_person($pdo, $targetPersonId, (int) $me['user_id'], $my
           input.disabled = true; // the files have already been sent -- don't send them twice
           setProgress('Saving…');
           releaseWake();
-          form.submit(); // plain submit: no second 'submit' event, so no loop
+          // plain submit: no second 'submit' event, so no loop (Phase 113:
+          // once the site is answering directly -- see chunked_upload.js)
+          (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(form) : form.submit());
         }).catch(function (err) {
           uploading = false;
           form.removeAttribute('data-uploading');

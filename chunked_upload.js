@@ -44,6 +44,67 @@
 
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+  // Phase 113: the host's own bot check. On iPads (mobile networks and
+  // iCloud Private Relay share addresses, so they get flagged) the web
+  // server sometimes answers a request with its "Verifying…" / "waiting to
+  // verify" page instead of passing it on to us. A background request like
+  // this upload can't complete that check itself -- only a real page visit
+  // can -- so it used to just fail over and over. Now: a reply that isn't
+  // ours means "let the check run": load a tiny page (/ping.php) in a
+  // hidden frame, which the browser treats as an ordinary visit, wait for
+  // our own reply to show up in it, then carry on.
+  var PING = "/ping.php";
+  function isOurs(text) { return typeof text === "string" && text.indexOf('"ourthology":"ping"') !== -1; }
+  function pingDirect() {
+    return new Promise(function (resolve) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", PING + "?t=" + Date.now(), true);
+      xhr.timeout = 20000;
+      xhr.withCredentials = true;
+      xhr.onload = function () { resolve(isOurs(xhr.responseText)); };
+      xhr.onerror = xhr.ontimeout = xhr.onabort = function () { resolve(false); };
+      xhr.send("");
+    });
+  }
+  var clearing = null;
+  function clearSecurityCheck(onStatus) {
+    if (clearing) return clearing;
+    if (onStatus) onStatus("verifying");
+    clearing = new Promise(function (resolve) {
+      var frame = document.createElement("iframe");
+      frame.setAttribute("aria-hidden", "true");
+      frame.tabIndex = -1;
+      frame.style.cssText = "position:absolute;width:1px;height:1px;left:-9999px;top:0;border:0;opacity:0;";
+      var started = Date.now(), done = false;
+      function finish(ok) {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        setTimeout(function () { if (frame.parentNode) frame.parentNode.removeChild(frame); }, 0);
+        resolve(ok);
+      }
+      function inFrameIsOurs() {
+        try { var d = frame.contentDocument; return !!(d && d.body && isOurs(d.body.textContent)); } catch (e) { return false; }
+      }
+      var timer = setInterval(function () {
+        if (inFrameIsOurs()) { pingDirect().then(function (ok) { if (ok) finish(true); }); }
+        if (Date.now() - started > 45000) finish(false);
+      }, 700);
+      frame.src = PING + "?frame=1&t=" + Date.now();
+      document.body.appendChild(frame);
+    }).then(function (ok) {
+      clearing = null;
+      if (onStatus) onStatus(ok ? "verified" : "blocked");
+      return ok;
+    });
+    return clearing;
+  }
+  // For a plain form about to be sent (not an upload): make sure the site
+  // is answering directly first, so the check can't swallow the form.
+  function ensureClear(onStatus) {
+    return pingDirect().then(function (ok) { return ok ? true : clearSecurityCheck(onStatus); });
+  }
+
   // Don't burn retries while the device is offline or the tab is in the
   // background (iPadOS pauses background tabs) -- wait until both are back.
   function whenReady() {
@@ -77,7 +138,9 @@
       xhr.onload = function () {
         var body = null;
         try { body = JSON.parse(xhr.responseText); } catch (e) { body = null; }
-        resolve({ status: xhr.status, body: body });
+        // an answer that isn't our JSON at all (and not a plain dropped
+        // connection) is someone else's page in the way -- the bot check
+        resolve({ status: xhr.status, body: body, notOurs: body === null && xhr.status !== 0 });
       };
       xhr.onerror = xhr.ontimeout = xhr.onabort = function () { resolve({ status: 0, body: null }); };
       xhr.send(fd);
@@ -90,6 +153,7 @@
     var uploadId = newUploadId();
     var offset = 0;
     var attempts = 0;
+    var securityChecks = 0;
     var report = typeof opts.onProgress === "function" ? opts.onProgress : function () {};
 
     function fail(message, fatal) {
@@ -127,6 +191,13 @@
         if (b && b.fatal) {
           return fail(b.error || "That file couldn't be uploaded.", true);
         }
+        if (res.notOurs) {
+          securityChecks += 1;
+          if (securityChecks > 3) {
+            return fail("The website's security check (\u201cVerifying\u201d) is holding up \"" + file.name + "\" \u2014 wait a minute, then try again.", false);
+          }
+          return clearSecurityCheck(opts.onStatus).then(function () { return step(); });
+        }
         attempts += 1;
         if (attempts >= MAX_ATTEMPTS) {
           return fail("The connection kept dropping while uploading \"" + file.name + "\".", false);
@@ -138,4 +209,10 @@
   }
 
   window.ourthologyChunkedUpload = { supported: supported, upload: upload };
+  // Send a form once the site is answering directly (always sends it in
+  // the end, even if the check couldn't be confirmed).
+  function submitWhenClear(form, onStatus) {
+    return ensureClear(onStatus).then(function () { form.submit(); }, function () { form.submit(); });
+  }
+  window.ourthologySecurityCheck = { ensure: ensureClear, clear: clearSecurityCheck, submit: submitWhenClear };
 })();

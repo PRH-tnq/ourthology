@@ -698,7 +698,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
 <script src="/clipboard_paste.js?v=2"></script>
 <script src="/media_fit.js?v=1"></script>
 <script src="/sortable_tiles.js?v=1"></script>
-<script src="/chunked_upload.js?v=1"></script>
+<script src="/chunked_upload.js?v=2"></script>
 <script src="/geo.js?v=5"></script>
 <style>
   :root {
@@ -3406,7 +3406,9 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           vamPending.forEach(function (it) { if (it.token) fd.append("staged_media[]", it.token); });
         }
         vamSubmitBtn.textContent = "Adding\u2026";
-        return fetch(window.location.href, { method: "POST", body: fd, credentials: "same-origin" });
+        // Phase 113: past the host's "Verifying…" check first, if it's up
+        var clear = window.ourthologySecurityCheck ? window.ourthologySecurityCheck.ensure() : Promise.resolve(true);
+        return clear.then(function () { return fetch(window.location.href, { method: "POST", body: fd, credentials: "same-origin" }); });
       })
         .then(function (res) { return res.json(); })
         .then(function (data) {
@@ -4383,7 +4385,17 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
         return out;
       }
       var jobs = collectJobs();
-      if (!jobs.length) return;
+      if (!jobs.length) {
+        // Phase 113: no photos to send first, but still get past the host's
+        // "Verifying…" check before the plan itself is sent
+        if (!window.ourthologySecurityCheck) return;
+        e.preventDefault();
+        if (tripSaveBtn.disabled) return;
+        tripSaveBtn.disabled = true;
+        tripSaveBtn.textContent = 'Saving\u2026';
+        window.ourthologySecurityCheck.submit(tripForm, function (st) { if (st === 'verifying') tripSaveBtn.textContent = 'Waiting for the security check\u2026'; });
+        return;
+      }
       e.preventDefault();
       if (tripSaveBtn.disabled) return;
       var saveLabel = tripSaveBtn.textContent;
@@ -4423,7 +4435,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           job.input.disabled = true; // already sent -- don't send the files twice
         });
         tripSaveBtn.textContent = 'Saving\u2026';
-        tripForm.submit();
+        (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(tripForm) : tripForm.submit()); // Phase 113
       }).catch(function (err) {
         tripSaveBtn.disabled = false;
         tripSaveBtn.textContent = saveLabel;
@@ -4772,7 +4784,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
             var flyTarget = root.querySelector(".postcard-flip-scene") || postcardForm;
             flyTarget.classList.add("is-flying");
-            window.setTimeout(function () { postcardForm.submit(); }, 620);
+            window.setTimeout(function () { (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(postcardForm) : postcardForm.submit()); }, 620); // Phase 113
           });
         }
 
@@ -4971,7 +4983,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
             if (env) env.classList.add("is-popping");
             window.setTimeout(function () {
               if (env) env.classList.add("is-flying");
-              window.setTimeout(function () { form.submit(); }, 620);
+              window.setTimeout(function () { (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(form) : form.submit()); }, 620); // Phase 113
             }, 180);
           }, 400);
         });
@@ -5385,7 +5397,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
           var sendBtn = form.querySelector(".gcard-send-btn");
           if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
 
-          gcardSendAnimation(root, function () { form.submit(); });
+          gcardSendAnimation(root, function () { (window.ourthologySecurityCheck ? window.ourthologySecurityCheck.submit(form) : form.submit()); }); // Phase 113
         });
       }
 

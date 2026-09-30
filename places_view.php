@@ -24,7 +24,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
      from OpenStreetMap. -->
 <link rel="stylesheet" href="/assets/leaflet/leaflet.css?v=1.9.4">
 <script src="/assets/leaflet/leaflet.js?v=1.9.4"></script>
-<script src="/chunked_upload.js?v=1"></script>
+<script src="/chunked_upload.js?v=2"></script>
 <style>
   body { align-items:flex-start; }
   .wide { max-width:min(95vw,1700px); }
@@ -312,7 +312,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   <script src="/sortable_tiles.js?v=1"></script>
   <script src="/geo.js?v=5"></script>
   <script src="/media_fit.js?v=1"></script>
-  <script src="/places.js?v=11"></script>
+  <script src="/places.js?v=12"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>
