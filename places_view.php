@@ -312,7 +312,7 @@ if (!isset($jsHomes, $family, $mapPersonId)) {
   <script src="/sortable_tiles.js?v=1"></script>
   <script src="/geo.js?v=5"></script>
   <script src="/media_fit.js?v=1"></script>
-  <script src="/places.js?v=10"></script>
+  <script src="/places.js?v=11"></script>
   <?php ourthology_render_tour('places', $myPersonId); ?>
 </body>
 </html>

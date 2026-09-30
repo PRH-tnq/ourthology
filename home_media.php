@@ -47,5 +47,15 @@ if (isset($_GET['thumb'])) {
         $servePath = $thumb;
         $mimeType = 'image/jpeg';
     }
+} elseif (isset($_GET['display']) && str_starts_with($mimeType, 'image/') && $mimeType !== 'image/gif') {
+    // Phase 111: screen-sized copy for the photo viewer (see media.php)
+    $dims = @getimagesize($path);
+    if ($dims && max((int) $dims[0], (int) $dims[1]) > MEDIA_DISPLAY_MAX_DIMENSION) {
+        $display = ensure_media_thumbnail((string) $media['file_path'], MEDIA_DISPLAY_MAX_DIMENSION, MEDIA_DISPLAY_JPEG_QUALITY);
+        if ($display !== null) {
+            $servePath = $display;
+            $mimeType = 'image/jpeg';
+        }
+    }
 }
 send_cacheable_file($servePath, $mimeType);

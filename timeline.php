@@ -2628,8 +2628,11 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       if (m.kind === "video") return '<div class="media-tile">' + VIDEO_ICON + '<span class="media-tile-badge">Video</span></div>';
       return '<div class="media-tile">' + DOC_ICON + '<span class="media-tile-badge">File</span></div>';
     }
+    // Phase 111: photos are shown from a screen-sized copy (&display=1), not
+    // the camera original -- see media.php.
+    function displayUrl(m) { return m.url + (m.url.indexOf("?") === -1 ? "?" : "&") + "display=1"; }
     function viewerLargeMediaHtml(m) {
-      if (m.kind === "image") return '<img src="' + m.url + '" alt="">';
+      if (m.kind === "image") return '<img src="' + displayUrl(m) + '" alt="" decoding="async">';
       if (m.kind === "video") return '<video src="' + m.url + '" controls playsinline></video>';
       // A document (PDF, DOC, TXT, …) has no inline preview, so it needs an
       // actual link to be reachable at all — the multi-file grid already
@@ -3488,7 +3491,18 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       var m = memLightboxList[memLightboxIndex];
       if (!m) return;
       if (m.kind === "image") {
-        memLightboxStage.innerHTML = '<img src="' + m.url + '" alt="">';
+        // Phase 111: no flicker on a phone -- the small preview (already
+        // loaded for the grid) shows straight away at full size, and the
+        // screen-sized photo only replaces it once it's completely
+        // downloaded AND decoded, in one step, rather than being drawn in
+        // as it arrives.
+        memLightboxStage.innerHTML = '<img src="' + m.url + '&thumb=1" alt="" class="mem-lightbox-img">';
+        var shownImg = memLightboxStage.querySelector("img");
+        var full = new Image();
+        full.decoding = "async";
+        full.src = displayUrl(m);
+        var swapIn = function () { if (shownImg.isConnected) shownImg.src = full.src; };
+        if (full.decode) full.decode().then(swapIn, swapIn); else full.onload = swapIn;
       } else if (m.kind === "video") {
         memLightboxStage.innerHTML = '<video src="' + m.url + '" controls playsinline autoplay></video>';
       }
@@ -3826,7 +3840,7 @@ $entriesJsonSafe = str_replace('</', '<\/', (string) $entriesJson);
       function extLabel(name) { var m = /\.([a-z0-9]+)$/i.exec(name || ''); return m ? m[1].toUpperCase() : 'FILE'; }
       function kindOfFile(file) { return file.type.indexOf('image/') === 0 ? 'image' : (file.type.indexOf('video/') === 0 ? 'video' : 'document'); }
       function existingTileHtml(item) {
-        if (item.kind === 'image') return '<img src="' + item.url + '&thumb=1" alt="" loading="lazy" decoding="async" class="trip-zoomable" data-full="' + item.url + '">';
+        if (item.kind === 'image') return '<img src="' + item.url + '&thumb=1" alt="" loading="lazy" decoding="async" class="trip-zoomable" data-full="' + item.url + '&display=1">';
         if (item.kind === 'video') return TRIP_VIDEO_ICON + '<span class="media-tile-badge">Video</span>';
         return TRIP_DOC_ICON + '<span class="media-tile-badge">File</span>';
       }

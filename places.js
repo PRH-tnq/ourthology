@@ -244,7 +244,7 @@
   var lbIdx = 0;
   function openLightbox(i) {
     lbIdx = i;
-    lbImg.src = gallery[i].url;
+    lbImg.src = gallery[i].url + (gallery[i].url.indexOf("?") === -1 ? "?" : "&") + "display=1"; // Phase 111: screen-sized copy
     lbCap.textContent = gallery[i].caption + "  ·  " + (i + 1) + " of " + gallery.length;
     lb.classList.add("open");
     if (window.ourthologyMediaFit) window.ourthologyMediaFit.fit(lbImg, lb); // Phase 104: scale to the window
